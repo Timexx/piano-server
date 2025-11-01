@@ -102,6 +102,46 @@
         border-radius: 18px;
         box-shadow: 0 24px 48px -32px rgba(0, 0, 0, 0.65);
       }
+      /* Music Card Collection */
+      .music-card {
+        position: relative;
+        border-radius: 20px;
+        overflow: hidden;
+        background: linear-gradient(160deg, var(--card-accent, var(--accent-color)) 0%, color-mix(in srgb, var(--card-accent, var(--accent-color)) 20%, #000) 100%);
+        box-shadow: 0 12px 24px -12px rgba(0, 0, 0, 0.6);
+        transition: transform 0.3s ease, box-shadow 0.3s ease, filter 0.3s ease;
+        cursor: pointer;
+      }
+      .music-card:hover { transform: translateY(-4px); box-shadow: 0 18px 36px -12px rgba(0, 0, 0, 0.7); }
+      .music-card .card-bg {
+        width: 100%;
+        height: 220px;
+        object-fit: cover;
+        filter: brightness(0.9);
+        display: block;
+      }
+      @media (min-width: 640px) { .music-card .card-bg { height: 240px; } }
+      .music-card:hover .card-bg { filter: brightness(1.03); }
+      .music-card .card-overlay {
+        position: absolute; inset: auto 0 0 0;
+        padding: 1rem;
+        background: linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.6) 100%);
+        text-align: center;
+      }
+      .music-card .card-title { font-weight: 600; font-size: 1rem; color: #fff; }
+      .music-card .card-subtitle { font-size: 0.875rem; color: rgba(255,255,255,0.82); }
+      .music-card .icon-btn {
+        height: 36px; width: 36px;
+        display: grid; place-items: center;
+        border-radius: 9999px;
+        background: rgba(255,255,255,0.08);
+        border: 1px solid rgba(255,255,255,0.14);
+        color: #e5e7eb;
+        transition: background 0.2s ease, border-color 0.2s ease, transform 0.1s ease;
+      }
+      .music-card .icon-btn:hover { background: rgba(255,255,255,0.16); border-color: rgba(255,255,255,0.26); }
+      .music-card .icon-btn:active { transform: translateY(1px); }
+      .music-card .card-actions { margin-top: 0.5rem; display: flex; align-items: center; justify-content: center; gap: 0.5rem; }
       .modal-backdrop {
         position: fixed;
         inset: 0;
@@ -1077,7 +1117,7 @@
           </section>
 
           <section id="categoryBar" class="mb-4"></section>
-          <section id="virtualWrap" class="relative overflow-auto border border-neutral-800 rounded-xl bg-neutral-900 h-[70vh]"></section>
+          <section id="virtualWrap" class="relative overflow-auto h-[70vh]"></section>
           <section class="mt-3 flex items-center justify-between">
             <button id="prevPage" class="px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-800 ${L.page<=1?"invisible pointer-events-none select-none opacity-0":""}" ${L.page<=1?"aria-disabled=\"true\" tabindex=\"-1\"":""}>« Zurück</button>
             <div class="text-sm text-neutral-400">Seite <span id="pNow">${L.page}</span> / ${totalPages}</div>
@@ -1508,15 +1548,16 @@
           : null;
         if (fuse) items = fuse.search(L.q).map(r => r.item);
 
-        const isGrid = L.view === "grid";
-  const cardW = isGrid ? 220 : wrap.clientWidth;
-  const cardH = isGrid ? 360 : 72;
-        const gap = isGrid ? 12 : 0;
-        let cols = isGrid ? Math.max(1, Math.floor((wrap.clientWidth - 16) / (cardW + gap))) : 1;
+  const isGrid = L.view === "grid";
+  const cardW = isGrid ? 220 : wrap.clientWidth; // list rows span full width
+  const cardH = isGrid ? 360 : 88; // list rows a bit taller for nicer padding
+  const gap = isGrid ? 12 : 10;    // add vertical spacing between list items
+  let cols = isGrid ? Math.max(1, Math.floor((wrap.clientWidth) / (cardW + gap))) : 1;
 
         const total = items.length;
-        const rows = Math.ceil(total / cols);
-        const totalHeight = rows * (cardH + (isGrid ? gap : 0));
+  const rows = Math.ceil(total / cols);
+  const rowStride = cardH + gap;
+  const totalHeight = rows * rowStride - gap; // avoid extra gap at end
 
         const scroller = document.createElement("div");
         scroller.className = "relative w-full h-full overflow-auto no-scrollbar";
@@ -1533,8 +1574,8 @@
           const viewH = scroller.clientHeight;
           const bufferRows = 3;
 
-          const firstRow = Math.max(0, Math.floor(scrollTop / (cardH + (isGrid ? gap : 0))) - bufferRows);
-          const lastRow  = Math.min(rows - 1, Math.floor((scrollTop + viewH) / (cardH + (isGrid ? gap : 0))) + bufferRows);
+          const firstRow = Math.max(0, Math.floor(scrollTop / rowStride) - bufferRows);
+          const lastRow  = Math.min(rows - 1, Math.floor((scrollTop + viewH) / rowStride) + bufferRows);
 
           const firstIndex = firstRow * cols;
           const lastIndex  = Math.min(total - 1, (lastRow + 1) * cols - 1);
@@ -1556,14 +1597,15 @@
             const item = items[i];
             const col = i % cols;
             const row = Math.floor(i / cols);
-            const x = isGrid ? col * (cardW + gap) : 0;
-            const y = row * (cardH + (isGrid ? gap : 0));
+            const startX = 0; // align with filters/categories grid (no centering)
+            const x = isGrid ? startX + col * (cardW + gap) : startX;
+            const y = row * rowStride;
 
             const el = isGrid ? renderCard(item) : renderRow(item);
             el.style.position = "absolute";
             el.style.left = `${x}px`;
             el.style.top = `${y}px`;
-            el.style.width = `${isGrid ? cardW : wrap.clientWidth}px`;
+            el.style.width = `${isGrid ? cardW : cardW}px`;
             el.style.height = `${cardH}px`;
 
             spacer.appendChild(el);
@@ -1604,93 +1646,98 @@
       function setFavVisual(btn, active) {
         if (!btn) return;
         btn.textContent = active ? "★" : "☆";
-        btn.classList.toggle('text-amber-400', !!active);
+        // Yellow star when selected
+        btn.classList.toggle('text-yellow-400', !!active);
         btn.classList.toggle('text-neutral-300', !active);
       }
 
       function renderCard(item) {
         const a = document.createElement("a");
         a.href = `/?file=${item.id}`;
-        a.className = "card block overflow-hidden border border-neutral-800/80 bg-neutral-900/90 hover:border-neutral-700 hover:bg-neutral-900 rounded-2xl transition will-change-transform";
         const displayName = item.displayName || item.name;
-        const subtitleParts = [formatSize(item.size), new Date(item.mtime).toLocaleDateString()];
-        if (item.folder) subtitleParts.push(item.folder);
-        const favActive = state.library.favorites.has(item.name);
-        a.innerHTML = `
-          <div class="relative w-full h-[200px] sm:h-[240px] bg-neutral-950/95 grid place-items-center overflow-hidden">
-            <img src="${item.thumbnail}" alt="${item.name}" 
-                 class="thumb max-h-full max-w-full object-contain"
-                 loading="lazy"
-                 onerror="this.style.display='none'; this.nextElementSibling.style.display='flex'">
-            <div class="text-neutral-500 text-sm hidden items-center justify-center">📄 PDF</div>
-            <button type="button" aria-pressed="${favActive}" class="fav absolute top-3 right-3 h-10 w-10 rounded-full border border-white/12 bg-neutral-950/80 backdrop-blur shadow-lg text-lg leading-none text-neutral-300 hover:border-white/30 hover:bg-neutral-900/80">${favActive ? "★" : "☆"}</button>
-          </div>
-          <div class="p-4 flex flex-col gap-3">
-            <div class="flex flex-col gap-1">
-              <div class="font-semibold text-sm truncate" title="${displayName}">${displayName}</div>
-              <div class="text-xs text-neutral-400 truncate">${subtitleParts.join(" • ")}</div>
-            </div>
-            <div class="flex items-center gap-2">
-              <div class="badge-stack flex flex-wrap gap-1 min-h-[32px] flex-1">${renderCategoryBadges(item)}</div>
-              <button type="button" aria-label="Zur Playlist hinzufügen" title="Zur Playlist hinzufügen" data-name="${item.name}" class="add-playlist h-9 w-9 grid place-items-center rounded-full border border-neutral-700 text-neutral-200 bg-neutral-800/70 hover:bg-neutral-700" style="padding:0;">
-                ${SVG_PLAYLIST_ADD}
-              </button>
-              <button type="button" aria-label="Kategorien hinzufügen" title="Kategorien hinzufügen" class="assign-cat h-9 w-9 grid place-items-center rounded-full border border-neutral-700 text-neutral-200 bg-neutral-800/70 hover:bg-neutral-700" style="padding:0;">
-                ${SVG_CATEGORY_ADD}
-              </button>
-            </div>
+        const subtitle = item.folder ? item.folder : (Array.isArray(item.categories) && item.categories[0]?.name ? item.categories[0].name : new Date(item.mtime).toLocaleDateString());
+        // Determine accent from first category color or global accent
+        const accent = Array.isArray(item.categories) && item.categories[0]?.color ? item.categories[0].color : null;
+        a.className = "music-card block will-change-transform";
+        if (accent) a.style.setProperty('--card-accent', accent);
+
+        // Build inner
+        const bg = document.createElement('img');
+        bg.src = item.thumbnail;
+        bg.alt = item.name;
+        bg.loading = 'lazy';
+        bg.className = 'card-bg';
+        bg.setAttribute('onerror', "this.style.display='none'; this.nextElementSibling.style.display='grid'");
+        a.appendChild(bg);
+
+        const fallback = document.createElement('div');
+        fallback.style.display = 'none';
+        fallback.className = 'w-full h-[220px] sm:h-[240px] grid place-items-center text-neutral-200 bg-neutral-900/60';
+        fallback.textContent = 'PDF';
+        a.appendChild(fallback);
+
+  // (Favoriten-Button nach unten in die Aktionsleiste verlegt)
+
+        const overlay = document.createElement('div');
+        overlay.className = 'card-overlay';
+        overlay.innerHTML = `
+          <div class="card-title truncate" title="${displayName}">${displayName}</div>
+          <div class="card-subtitle truncate">${subtitle}</div>
+          <div class="card-actions">
+            <button type="button" aria-label="Als Favorit markieren" title="Favorit" class="fav icon-btn"></button>
+            <button type="button" aria-label="Zur Playlist hinzufügen" title="Zur Playlist hinzufügen" data-name="${item.name}" class="add-playlist icon-btn">${SVG_PLAYLIST_ADD}</button>
+            <button type="button" aria-label="Kategorien" title="Kategorien" class="assign-cat icon-btn">${SVG_CATEGORY_ADD}</button>
           </div>
         `;
-        const favBtnCard = a.querySelector(".fav");
-        setFavVisual(favBtnCard, favActive);
-        favBtnCard.addEventListener("click", async (ev) => {
-          ev.preventDefault();
-          ev.stopPropagation();
-          const btn = favBtnCard;
-          const makeFav = !state.library.favorites.has(item.name);
-          try {
-            await setFavoriteOnBackend(item.name, makeFav);
-            if (makeFav) state.library.favorites.add(item.name);
-            else state.library.favorites.delete(item.name);
-            setFavVisual(btn, makeFav);
-          } catch {
-            setFavVisual(btn, state.library.favorites.has(item.name));
-          }
-        });
-        const assignBtn = a.querySelector('.assign-cat');
-        if (assignBtn) assignBtn.addEventListener('click', (ev) => {
-          ev.preventDefault();
-          ev.stopPropagation();
+        a.appendChild(overlay);
+
+        // Wire interactions
+        const favBtn = overlay.querySelector('.fav');
+        const favActive = state.library.favorites.has(item.name);
+        if (favBtn) {
+          favBtn.setAttribute('aria-pressed', String(favActive));
+          setFavVisual(favBtn, favActive);
+          favBtn.addEventListener('click', async (ev) => {
+            ev.preventDefault(); ev.stopPropagation();
+            const makeFav = !state.library.favorites.has(item.name);
+            try {
+              await setFavoriteOnBackend(item.name, makeFav);
+              if (makeFav) state.library.favorites.add(item.name); else state.library.favorites.delete(item.name);
+              setFavVisual(favBtn, makeFav);
+            } catch {
+              setFavVisual(favBtn, state.library.favorites.has(item.name));
+            }
+          });
+        }
+        const assignBtn = overlay.querySelector('.assign-cat');
+        assignBtn?.addEventListener('click', (ev) => {
+          ev.preventDefault(); ev.stopPropagation();
           openCategoryAssignDialog(item);
         });
-        const addBtn = a.querySelector('.add-playlist');
-        if (addBtn) addBtn.addEventListener('click', async (ev) => {
-          ev.preventDefault();
-          ev.stopPropagation();
+        const addBtn = overlay.querySelector('.add-playlist');
+        addBtn?.addEventListener('click', async (ev) => {
+          ev.preventDefault(); ev.stopPropagation();
           const name = item.name;
           const inList = playlist.items.includes(name);
-          if (inList) {
-            await removeFromPlaylist(name);
-          } else {
-            await addToPlaylist(name);
-          }
+          if (inList) { await removeFromPlaylist(name); } else { await addToPlaylist(name); }
           updateLibraryPlaylistButtons();
         });
-        queueMicrotask(() => {
-          const badgeWrap = a.querySelector('.badge-stack');
-          if (!badgeWrap) return;
-          requestAnimationFrame(() => {
-            const overflow = badgeWrap.scrollHeight - badgeWrap.clientHeight;
-            if (overflow > 4) badgeWrap.classList.add('is-overflowing');
-            else badgeWrap.classList.remove('is-overflowing');
-          });
-        });
+        // Ensure playlist icons reflect current state
+        queueMicrotask(() => updateLibraryPlaylistButtons());
         return a;
       }
       function renderRow(item) {
         const a = document.createElement("a");
         a.href = `/?file=${item.id}`;
-        a.className = "flex items-center gap-3 px-3 border-b border-neutral-800 hover:bg-neutral-900";
+        // Align list design to new card style: rounded, padded, subtly tinted background
+        const accent = Array.isArray(item.categories) && item.categories[0]?.color ? item.categories[0].color : null;
+        a.className = "h-full flex items-center gap-3 px-3 py-2 rounded-xl border border-neutral-800/40 bg-neutral-900/80 hover:bg-neutral-800/80 transition-colors";
+        if (accent) {
+          a.style.setProperty('--row-accent', accent);
+          // Darker, more elegant gradient for rows
+          a.style.background = 'linear-gradient(160deg, color-mix(in srgb, var(--row-accent) 14%, #0b0b0c) 0%, rgba(12,12,18,0.94) 100%)';
+          a.style.borderColor = 'rgba(255,255,255,0.10)';
+        }
         const displayName = item.displayName || item.name;
         const subtitleParts = [formatSize(item.size), new Date(item.mtime).toLocaleDateString()];
         if (item.folder) subtitleParts.push(item.folder);
