@@ -1077,6 +1077,8 @@ app.get("/api/sheets", async (req, res) => {
     const order = (req.query.order || "asc").toString();
     const categoryParam = req.query.category ?? req.query.categories;
 
+    // Support special filter "none" to select uncategorized files
+    let wantUncategorized = false;
     const categoryFilters = (() => {
       if (!categoryParam) return [];
       const raw = Array.isArray(categoryParam) ? categoryParam : [categoryParam];
@@ -1084,7 +1086,15 @@ app.get("/api/sheets", async (req, res) => {
         .flatMap((value) => value.toString().split(/[,;\s]+/))
         .map((value) => value.trim())
         .filter(Boolean);
-      return sanitizeCategoryIds(parts);
+      // Detect special token(s)
+      for (const p of parts) {
+        if (p.toLowerCase() === "none") {
+          wantUncategorized = true;
+        }
+      }
+      // Remove special tokens and sanitize valid IDs
+      const idsOnly = parts.filter((p) => p.toLowerCase() !== "none");
+      return sanitizeCategoryIds(idsOnly);
     })();
     const categoryFilterSet = new Set(categoryFilters);
 
@@ -1114,7 +1124,13 @@ app.get("/api/sheets", async (req, res) => {
     if (q) {
       filtered = filtered.filter(x => x.name.toLowerCase().includes(q));
     }
-    if (categoryFilterSet.size) {
+    if (wantUncategorized && categoryFilterSet.size === 0) {
+      // Only uncategorized requested
+      filtered = filtered.filter((item) => {
+        return !(item && Array.isArray(item.categoryIds) && item.categoryIds.length);
+      });
+    } else if (categoryFilterSet.size) {
+      // Filter by provided categories
       filtered = filtered.filter((item) => {
         if (!item || !Array.isArray(item.categoryIds)) return false;
         return item.categoryIds.some((id) => categoryFilterSet.has(id));
@@ -1132,8 +1148,9 @@ app.get("/api/sheets", async (req, res) => {
       total, 
       page, 
       pageSize: psRaw === "all" ? "all" : pageSize,
-      categories: CONFIG.categories.map((cat) => ({ ...cat })),
-      activeCategories: Array.from(categoryFilterSet),
+  categories: CONFIG.categories.map((cat) => ({ ...cat })),
+  activeCategories: Array.from(categoryFilterSet),
+  activeUncategorized: wantUncategorized && categoryFilterSet.size === 0,
       serverMemory: {
         heapUsed: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
         cacheSize: indexCache.items.length

@@ -513,7 +513,8 @@
           const data = await res.json();
           if (Array.isArray(data.categories)) {
             state.categories = data.categories;
-            if (state.library.categoryFilter && !state.categories.some(cat => cat.id === state.library.categoryFilter)) {
+            // Preserve special filter 'none' (uncategorized)
+            if (state.library.categoryFilter && state.library.categoryFilter !== 'none' && !state.categories.some(cat => cat.id === state.library.categoryFilter)) {
               state.library.categoryFilter = null;
               localStorage.removeItem("libCategory");
             }
@@ -893,7 +894,8 @@
         L.total = data.total || 0;
         if (Array.isArray(data.categories)) {
           state.categories = data.categories;
-          if (L.categoryFilter && !state.categories.some(cat => cat.id === L.categoryFilter)) {
+          // Preserve special filter 'none' (uncategorized)
+          if (L.categoryFilter && L.categoryFilter !== 'none' && !state.categories.some(cat => cat.id === L.categoryFilter)) {
             L.categoryFilter = null;
             localStorage.removeItem("libCategory");
           }
@@ -902,7 +904,8 @@
 
       async function applyCategoryFilter(catId) {
         state.library.categoryFilter = catId || null;
-        applyAccentTheme(state.library.categoryFilter);
+        // Do not accent the synthetic 'none' filter
+        applyAccentTheme(state.library.categoryFilter === 'none' ? null : state.library.categoryFilter);
         if (state.library.categoryFilter) localStorage.setItem("libCategory", state.library.categoryFilter);
         else localStorage.removeItem("libCategory");
         state.library.page = 1;
@@ -1105,11 +1108,18 @@
                 <span>${cat.name}</span>
               </button>`;
           }).join("");
+          // Special pill for uncategorized
+          const noneActive = activeId === 'none';
+          const noneBtn = `<button class="category-pill px-3 py-1.5 rounded-full border flex items-center gap-2 text-sm ${noneActive ? 'font-semibold' : 'font-medium'}" data-cat="none" style="background:${noneActive ? 'rgba(148,163,184,0.28)' : 'rgba(148,163,184,0.12)'};border-color:${noneActive ? '#94a3b8' : 'rgba(148,163,184,0.35)'};color:${noneActive ? '#e5e7eb' : '#94a3b8'};">
+                <span class="text-base leading-none">◌</span>
+                <span>Ohne Kategorie</span>
+              </button>`;
 
           const clearBtn = activeId ? `<button id="btnClearCategory" class="px-3 py-1.5 rounded-full border border-neutral-700 text-sm text-neutral-300 hover:bg-neutral-800">Filter zurücksetzen</button>` : '';
 
           host.innerHTML = `
             <div class="flex flex-wrap items-center gap-2">
+              ${noneBtn}
               ${pills}
               ${clearBtn}
               <button id="btnManageCategories" class="ml-auto px-3 py-1.5 rounded-full border border-neutral-700 text-sm text-neutral-200 hover:bg-neutral-800">Kategorien verwalten</button>
@@ -1129,7 +1139,8 @@
           const manage = document.querySelector('#btnManageCategories');
           if (manage) manage.addEventListener('click', () => openCategoryManager());
 
-          applyAccentTheme(activeId);
+          // Don't accent for the synthetic 'none' filter
+          applyAccentTheme(activeId === 'none' ? null : activeId);
         }
 
         requestAnimationFrame(() => {
