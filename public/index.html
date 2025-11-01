@@ -1660,6 +1660,19 @@
         };
   document.querySelector('#btnFullscreen').onclick = toggleFullscreen;
 
+        // Ensure NoSleep library is loaded before user clicks Play (so we can enable within the same gesture)
+        if (!window.NoSleep) {
+          try {
+            await new Promise((resolve, reject) => {
+              const s = document.createElement('script');
+              s.src = '/vendor/nosleep.min.js';
+              s.onload = resolve; s.onerror = reject; document.head.appendChild(s);
+            });
+          } catch (e) {
+            console.warn('Preload NoSleep failed', e);
+          }
+        }
+
         const btnPlayPause = document.querySelector('#btnPlayPause');
         btnPlayPause.onclick = togglePlayAndWake;
 
@@ -2086,12 +2099,18 @@
           refreshPlayPauseUI();
         } else {
           // Start: ensure screen stays on (synchronously for iOS), then start scrolling
+          state.viewer.wakeDesired = true;
+          // Re-arm gesture listeners just in case this is the first interaction
+          armWakeLockFromGestures(document);
           try { acquireWakeLockSync(); } catch {}
           startAutoScroll()
             .finally(() => {
               btn.disabled = false;
               refreshPlayPauseUI();
             });
+          // Extra safety: try async acquisition shortly after to catch API availability
+          setTimeout(() => { acquireWakeLockAuto(); }, 300);
+          startWakeWatch();
         }
       }
       function stopAutoScroll() {
