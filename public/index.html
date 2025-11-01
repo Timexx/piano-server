@@ -1551,11 +1551,22 @@
           : null;
         if (fuse) items = fuse.search(L.q).map(r => r.item);
 
-  const isGrid = L.view === "grid";
-  const cardW = isGrid ? 220 : wrap.clientWidth; // list rows span full width
-  const cardH = isGrid ? 360 : 88; // list rows a bit taller for nicer padding
-  const gap = isGrid ? 12 : 10;    // add vertical spacing between list items
-  let cols = isGrid ? Math.max(1, Math.floor((wrap.clientWidth) / (cardW + gap))) : 1;
+        const isGrid = L.view === "grid";
+        const wrapW = wrap.clientWidth;
+        const minCardW = 220;      // minimal card width
+        const maxCardW = 320;      // cap card width for medium screens to avoid huge tiles
+        const minGap = 16;         // minimal horizontal gap between cards
+        let cols = isGrid ? Math.max(1, Math.floor((wrapW + minGap) / (minCardW + minGap))) : 1;
+        const cardH = isGrid ? 360 : 88; // list rows a bit taller for nicer padding
+        const listGap = 10;              // add vertical spacing between list items
+        // Base computation with min width
+        let gridCardW = isGrid ? Math.floor((wrapW - (cols - 1) * minGap) / cols) : wrapW;
+        // If cards get too wide, increase columns to keep a modern responsive look
+        if (isGrid && gridCardW > maxCardW) {
+          cols = Math.max(1, Math.floor((wrapW + minGap) / (maxCardW + minGap)));
+          gridCardW = Math.floor((wrapW - (cols - 1) * minGap) / cols);
+        }
+        const gap = isGrid ? minGap : listGap; // keep gap consistent; consume space by growing card width
 
         const total = items.length;
   const rows = Math.ceil(total / cols);
@@ -1601,14 +1612,14 @@
             const col = i % cols;
             const row = Math.floor(i / cols);
             const startX = 0; // align with filters/categories grid (no centering)
-            const x = isGrid ? startX + col * (cardW + gap) : startX;
+            const x = isGrid ? startX + col * (gridCardW + gap) : startX;
             const y = row * rowStride;
 
             const el = isGrid ? renderCard(item) : renderRow(item);
             el.style.position = "absolute";
             el.style.left = `${x}px`;
             el.style.top = `${y}px`;
-            el.style.width = `${isGrid ? cardW : cardW}px`;
+            el.style.width = `${isGrid ? gridCardW : wrapW}px`;
             el.style.height = `${cardH}px`;
 
             spacer.appendChild(el);
