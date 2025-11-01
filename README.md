@@ -197,34 +197,39 @@ High memory usage
 Wake lock / auto-scroll on iOS
 - Ensure you start auto-scroll via the Play button (single gesture). The app uses a gesture-safe wake strategy and keeps trying to reacquire if the tab becomes visible again.
 
-# License — MIT-NC (Non-Commercial)
+## License Notice
+
+This project is licensed under the **MIT-NC License (Non-Commercial Use Only)**:
 
 Copyright (c) 2025 Tim Klement
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the “Software”), to deal
-in the Software **for non-commercial purposes only**, including without limitation
-the rights to use, copy, modify, merge, publish, and distribute copies of the Software,
+Permission is hereby granted, free of charge, to any person obtaining a copy  
+of this software and associated documentation files (the “Software”), to deal  
+in the Software **for non-commercial purposes only**, including without limitation  
+the rights to use, copy, modify, merge, publish, and distribute copies of the Software,  
 subject to the following conditions:
 
-1. The above copyright notice and this permission notice shall be included in
+1. The above copyright notice and this permission notice shall be included in  
    all copies or substantial portions of the Software.
 
-2. **Commercial use of this software is strictly prohibited.**
-   This includes, but is not limited to, selling, sublicensing, or including
-   this software in any paid or closed-source product or service.
+2. **Commercial use of this Software is strictly prohibited.**  
+   This includes, but is not limited to, selling, sublicensing, or including  
+   this Software in any paid product or service.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
-OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
-IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
-DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
-ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-DEALINGS IN THE SOFTWARE.
+THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,  
+INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR  
+PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE  
+FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,  
+ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+---
+
+**Note on Third-Party Libraries:**  
+This project uses third-party libraries (e.g., `express`, `pdfjs-dist`, `canvas`, `sharp`) that are licensed under permissive licenses such as MIT or Apache 2.0. These licenses allow commercial use of the libraries themselves. However, **this project as a whole is subject to the above non-commercial restriction**, and your use of the Software must comply with this license.
 
 ---
 
 **Summary:**  
-- ✅ Free for private, educational, or research use  
-- 🚫 Commercial use or resale is forbidden  
-- 📛 Credit required: “© 2025 Tim Klement”
+- ✅ Free for private, educational, or research purposes only  
+- 🚫 Commercial use, sale, or redistribution for profit is forbidden  
+- 📛 Attribution required: “© 2025 Tim Klement”
