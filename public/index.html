@@ -1202,23 +1202,23 @@
           <div class="library-shell flex flex-col gap-4 flex-1 min-h-0 overflow-hidden">
             <div id="filterBlock" class="flex flex-col gap-3" style="position: relative; z-index: 100;">
               <section id="filterPanel" class="rounded-2xl border border-neutral-800/60 bg-gradient-to-br from-neutral-900/90 to-neutral-900/70 backdrop-blur-sm shadow-lg transition-all duration-300" style="position: relative; z-index: 100;">
-                <!-- Filter Header with Toggle -->
-                <div class="flex items-center justify-between px-4 py-3 border-b border-neutral-800/40">
+                <!-- Filter Header with Toggle (entire row is clickable) -->
+                <button id="filterToggle" 
+                        aria-expanded="${!filterCollapsed}" 
+                        aria-controls="filterContent" 
+                        class="w-full flex items-center justify-between px-4 py-3 border-b border-neutral-800/40 transition-all duration-200 hover:bg-neutral-800/30 cursor-pointer group" 
+                        type="button"
+                        title="${filterCollapsed ? 'Filter anzeigen' : 'Filter ausblenden'}">
                   <div class="flex items-center gap-2">
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" class="text-neutral-400">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" class="text-neutral-400 group-hover:text-neutral-300 transition-colors">
                       <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
                     </svg>
-                    <span class="text-sm font-semibold text-neutral-200">Finde deine Musik</span>
+                    <span class="text-sm font-semibold text-neutral-200 group-hover:text-neutral-100 transition-colors">Finde deine Musik</span>
                   </div>
-                  <button id="filterToggle" 
-                          aria-expanded="${!filterCollapsed}" 
-                          aria-controls="filterContent" 
-                          class="h-8 w-8 rounded-lg flex items-center justify-center transition-all duration-200 hover:bg-neutral-800/60 text-neutral-400 hover:text-neutral-200" 
-                          type="button"
-                          title="${filterCollapsed ? 'Filter anzeigen' : 'Filter ausblenden'}">
+                  <div class="h-8 w-8 rounded-lg flex items-center justify-center transition-all duration-200 group-hover:bg-neutral-800/60 text-neutral-400 group-hover:text-neutral-200">
                     ${filterCollapsed ? SVG_CHEVRON_DOWN : SVG_CHEVRON_UP}
-                  </button>
-                </div>
+                  </div>
+                </button>
                 
                 <!-- Filter Content (collapsible) -->
                 <div id="filterContent" class="transition-all duration-300 overflow-hidden ${filterCollapsed ? 'max-h-0 opacity-0' : 'max-h-[500px] opacity-100'}">
