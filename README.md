@@ -1,126 +1,202 @@
-# Piano Sheets - Performance Optimiert für iPad
+# Piano Sheets
 
-Eine speicheroptimierte Piano-Notenblatt-Bibliothek mit verbesserter iPad-Unterstützung.
+Lightweight sheet-music library and viewer, optimized for iPad and mobile Safari/Chrome. It serves PDFs from a local folder, generates/caches thumbnails on the server, and provides a smooth, single-button auto-scroll experience in the browser.
 
-## 🚀 Performance-Verbesserungen
+## Highlights
 
-### Client-seitige Optimierungen:
-- **Speicher-Überwachung**: Automatische Erkennung von kritischen Speicherzuständen
-- **Aggressive Speicherbereinigung**: Automatisches Löschen von Canvas-Objekten außerhalb des Sichtbereichs
-- **Limitierte Thumbnail-Cache**: Begrenzt auf 50 Einträge mit LRU-Cleanup
-- **Optimierte PDF-Rendering**: Bessere Canvas-Verwaltung und Memory-Leaks-Vermeidung
-- **Reduzierte Concurrency**: Weniger gleichzeitige Operationen bei niedrigem Speicher
+- Fast library (grid/list) with search, favorites, categories, and pagination
+- Server-side thumbnail generation and caching for instant browsing
+- Mobile-first viewer with single Play/Pause button (includes Screen-On behavior)
+- Auto-scroll per page with per-file “seconds per page” setting
+- iPad-optimized wake lock and scrolling behavior, resilient under low memory
 
-### Server-seitige Optimierungen:
-- **Batch-basiertes Dateisystem-Scanning**: Reduziert Speicher-Spitzen
-- **Limitierte Range-Requests**: Verhindert übermäßige Speichernutzung bei großen PDFs
-- **Speicher-Monitoring**: APIs zur Überwachung und manuellen Garbage Collection
-- **Optimierte Kompression**: Intelligente Gzip-Kompression basierend auf Dateityp
-- **Cache-Management**: Regelmäßige Bereinigung des Datei-Index-Cache
+## Target devices
 
-## 📱 iPad-spezifische Verbesserungen
+- iPad / iPadOS Safari and Chrome (primary target)
+- Desktop Safari/Chrome/Edge
 
-- Wake Lock automatisch aktiviert im Viewer
-- Verbesserte Touch-Gesten-Erkennung
-- Optimierte Canvas-Größen für mobile Geräte
-- Reduzierte Memory-Footprint für bessere Stabilität
-- Automatische Neuladen-Vermeidung durch Speicher-Management
+The app is designed to be used on stage or during rehearsals: simple controls, robust performance, low memory usage.
 
-## 🛠 Installation & Start
+---
 
-### Standard-Start:
+## Project structure
+
+```
+.
+├── server.js                # Express server, APIs, thumbnail generation
+├── public/                  # Client app (index.html + UI/logic)
+├── sheets/                  # Your PDF files (subfolders supported)
+├── data/
+│   ├── config.json          # Persisted favorites, per-file settings, categories
+│   ├── thumbnails/          # Generated thumbnail cache (mirrors sheets/ layout)
+│   └── vendor/              # Locally cached vendor scripts (pdf.js, fuse.js, nosleep)
+├── package.json             # Scripts and dependencies
+└── start-optimized.sh       # Optional optimized start script (macOS)
+```
+
+## Data model and persistence
+
+All user data is stored locally on disk:
+
+- data/config.json
+  - favorites: string[] of PDF relative paths
+  - files: { [relPath: string]: { secsPerPage?: number, categories?: string[] } }
+  - categories: { id: string, name: string, color: string, icon: string }[]
+- data/thumbnails/
+  - Server-side JPEG thumbnails, refreshed when the source PDF changes (mtime) and aged out after 7 days.
+- sheets/
+  - Your actual PDFs. You can organize them in subfolders.
+
+The server watches the sheets/ directory and refreshes its index automatically.
+
+## Installation
+
+Requirements:
+- Node.js >= 16
+- macOS, Linux, or Windows (thumbnail generation benefits from having native deps)
+
+Install dependencies:
+
+```bash
+npm install
+```
+
+If canvas/sharp fail to build on your platform, you can try:
+
+```bash
+npm run install:deps
+```
+
+Notes for macOS users (if canvas fails):
+- Ensure Xcode command-line tools are installed
+- Optionally: `brew install pkg-config cairo pango libpng jpeg giflib` (for canvas)
+
+## Running
+
+Standard start:
+
 ```bash
 npm start
 ```
 
-### Optimierter Start (empfohlen für iPad-Nutzung):
+Optimized start (recommended for iPad usage — includes extra Node flags and a tuned process):
+
 ```bash
 npm run start:optimized
 ```
 
-### Mit expliziter Speicher-Kontrolle:
+Explicit memory sizing:
+
 ```bash
 npm run start:memory
 ```
 
-## 📊 Speicher-Monitoring
+The server starts on http://localhost:3000 by default. Place your PDFs under `sheets/` and open the app in your browser.
 
-### Client-seitig:
-- Speicher-Status in der Library-Ansicht
-- Automatische Bereinigung bei > 80% Speichernutzung
-- Konsolen-Warnungen bei kritischen Zuständen
+## Client features
 
-### Server-seitig:
-- `GET /api/system/memory` - Aktuelle Speichernutzung
-- `POST /api/system/gc` - Manuelle Garbage Collection
-- `POST /api/system/cache/clear` - Cache leeren
-- Automatische Speicher-Logs alle 60 Sekunden
+- Library (grid/list) with:
+  - Search by name
+  - Sort by name, last modified, size
+  - Pagination (page size capped for memory efficiency) or “all”
+  - Favorites toggle
+  - Category filter bar
+  - Upload dialog (PDF only, supports initial secs/page, favorite, and categories)
+- Cards include thumbnail, details, category chips, a favorite star, and a small “+” button to assign categories.
+- Viewer:
+  - Single Play/Pause button: starts auto-scroll and locks the screen (iOS-safe gesture handling)
+  - Fullscreen button
+  - Seconds per page input (persisted per file)
+  - Smooth mobile scrolling; auto-scroll recalibrates as pages render
 
-## 🎯 Typische Speicher-Profile
+## APIs
 
-### Vor Optimierung:
-- Library: ~150-300MB RAM
-- Viewer: ~400-800MB RAM
-- **Problem**: Automatische Neustarts auf iPad
+Public static:
+- `GET /` -> `public/index.html`
+- `GET /sheets/<path>.pdf` -> Serves PDFs (range requests supported, size capped per range)
+- `GET /thumbnails/<path>.jpg` -> Serves/generated thumbnails (JPEG)
+- `GET /vendor/...` -> Locally cached vendor scripts (pdf.js, fuse.js, nosleep)
 
-### Nach Optimierung:
-- Library: ~50-100MB RAM
-- Viewer: ~100-200MB RAM
-- **Resultat**: Stabile Ausführung auf iPad
+System/monitoring:
+- `GET /api/system/memory` -> Server memory snapshot
+- `POST /api/system/gc` -> Trigger GC (requires `--expose-gc`)
+- `POST /api/system/cache/clear` -> Clear in-memory index
 
-## ⚙️ Konfiguration
+Library:
+- `GET /api/sheets?q=&sort=&order=&page=&pageSize=&fav=&category=`
+  - Returns `{ items, total, page, pageSize, categories, activeCategories, serverMemory }`
 
-Die Speicher-Einstellungen können in `server.js` angepasst werden:
+Upload:
+- `POST /api/upload`
+  - Headers:
+    - `Content-Type: application/pdf`
+    - `X-Upload-Name: <original filename>` (optional)
+    - `X-Upload-Meta: { "secsPerPage": number, "favorite": boolean, "categories": [id] }` (JSON)
+  - Body: raw PDF bytes
+  - Response: `{ ok, item, favorites, maxUploadBytes }`
 
-```javascript
+Preferences (favorites + per-file settings):
+- `GET /api/prefs` -> Full config
+- `POST /api/prefs/favorites` -> `{ name, favorite }`
+- `GET /api/prefs/file?name=<rel>` -> `{ name, secsPerPage, categories, categoryIds }`
+- `POST /api/prefs/file` -> `{ name, secsPerPage?, categories? }`
+
+Categories:
+- `GET /api/categories` -> `{ categories }`
+- `POST /api/categories` -> create `{ name, color, icon }`
+- `PUT /api/categories/:id` -> update `{ name?, color?, icon? }`
+- `DELETE /api/categories/:id`
+
+## How it works
+
+Server
+- Scans `sheets/` recursively and caches an index (with file size/mtime, folder info).
+- Generates thumbnails on demand using pdf.js + canvas and optionally optimizes them with sharp; stores them under `data/thumbnails/` mirroring the structure of `sheets/`.
+- Caches vendor scripts locally inside `data/vendor/` to support offline/poor-network scenarios.
+- Persists favorites, per-file seconds-per-page, and categories in `data/config.json` with queued, atomic writes.
+
+Client
+- Renders the library, category bar, and the viewer in `public/index.html` (single-page app).
+- Uses pdf.js (worker served locally) to render pages and virtualizes page rendering with IntersectionObserver to keep memory low.
+- On iPad, the Play button synchronously activates a screen-on strategy and starts auto-scroll. The scroll logic is resilient to late-rendering pages (keeps ticking and recalibrates speed).
+
+## Configuration
+
+Server (in `server.js`):
+
+```js
 const MEMORY_SETTINGS = {
-  maxIndexCacheAge: 5000,    // Cache-Alter für Datei-Index
-  maxVendorRetries: 3,       // Vendor-Download-Versuche
-  maxStatConcurrency: 32,    // Gleichzeitige Datei-Stats
-  enableGzipCompression: true
+  maxIndexCacheAge: 300000,
+  maxVendorRetries: 3,
+  maxStatConcurrency: 32,
+  enableGzipCompression: true,
+  thumbnailSize: 200,
+  thumbnailQuality: 80,
+  maxThumbnailAge: 7 * 24 * 60 * 60 * 1000
 };
 ```
 
-Client-seitige Limits in `index.html`:
+Client (in `public/index.html`): internal limits for thumbnail cache and memory management are tuned for iPad usage.
 
-```javascript
-thumbs: { 
-  maxCacheSize: 50,          // Max. Thumbnails im Cache
-  maxConcurrent: 1           // Gleichzeitige PDF-Operationen
-}
-```
+## Security and deployment
 
-## 🔧 Troubleshooting
+- No authentication/authorization is included — intended for local/network use you control.
+- Run behind a reverse proxy if exposing on a network.
+- PDFs and config live on disk; ensure filesystem permissions are appropriate.
 
-### Bei weiterhin hoher Speichernutzung:
-1. Reduziere `maxCacheSize` auf 25
-2. Setze `maxConcurrent` auf 1
-3. Starte mit `--max-old-space-size=256` für noch kleineren Heap
+## Troubleshooting
 
-### Bei langsamen Ladezeiten:
-1. Erhöhe `maxStatConcurrency` auf 64
-2. Setze `maxCacheSize` auf 100
-3. Aktiviere Vendor-Vorladen
+Thumbnails not generated
+- Check logs for `pdf.js` and `canvas` availability. If missing, install via `npm run install:deps`.
+- As a fallback, a tiny JPEG is stored to keep the UI working.
 
-### Debug-Modi:
-```bash
-# Mit Garbage Collection Tracing
-NODE_OPTIONS="--trace-gc --expose-gc" node server.js
+High memory usage
+- Reduce `MEMORY_SETTINGS.maxStatConcurrency`.
+- Keep pageSize small in the UI (avoid `all` on very large libraries on low-memory devices).
 
-# Mit Inspektor
-npm run dev
-```
+Wake lock / auto-scroll on iOS
+- Ensure you start auto-scroll via the Play button (single gesture). The app uses a gesture-safe wake strategy and keeps trying to reacquire if the tab becomes visible again.
 
-## 📈 Performance-Metriken
+## License
 
-- **Startup-Zeit**: ~2-5 Sekunden (abhängig von PDF-Anzahl)
-- **Memory-Baseline**: ~30-50MB (Server + Client)
-- **Thumbnail-Generation**: ~1-3 Sekunden pro PDF
-- **Page-Rendering**: ~500ms-2s pro Seite (abhängig von Komplexität)
-
-## 🎵 Ideal für:
-
-- iPad/Tablet-Nutzung während des Spielens
-- Große PDF-Sammlungen (>1000 Dateien)
-- Umgebungen mit begrenztem Arbeitsspeicher
-- Offline-Nutzung (alle Vendor-Libraries werden lokal gecacht)
+MIT — see LICENSE (or adapt as needed for your deployment).

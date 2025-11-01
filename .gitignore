@@ -1,0 +1,20 @@
+# Node modules
+node_modules/
+
+# Local data
+data/
+sheets/
+
+# Config files (private)
+config.json
+prefs.json
+
+# Logs and temp files
+*.log
+*.tmp
+*.swp
+
+# System files
+.DS_Store
+Thumbs.db
+.smbdelete*
