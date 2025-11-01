@@ -917,6 +917,10 @@
       // ===== Library UI =====
       function renderLibrary() {
         document.body.classList.remove('in-viewer');
+        // Ensure fullscreen is exited when returning to library
+        if (document.fullscreenElement) {
+          try { document.exitFullscreen(); } catch {}
+        }
         releaseWakeLock();
         stopWakeWatch();
         stopAutoScroll();
@@ -1641,6 +1645,18 @@
 
         controlsEl.classList.remove("hidden");
         headerActionsEl.innerHTML = `<a href="/" class="px-3 py-2 rounded-lg bg-neutral-800 hover:bg-neutral-700 border border-neutral-700">← Library</a>`;
+        // Intercept header back to cleanly exit fullscreen first
+        const headerBack = headerActionsEl.querySelector('a[href="/"]');
+        if (headerBack) headerBack.addEventListener('click', (ev) => {
+          ev.preventDefault();
+          const leave = () => { location.href = "/"; };
+          aggressiveCleanup();
+          if (document.fullscreenElement) {
+            document.exitFullscreen().then(leave).catch(leave);
+          } else {
+            leave();
+          }
+        });
 
         appEl.innerHTML = `
           <section>
@@ -1654,9 +1670,14 @@
   state.viewer.url = `/sheets/${encodePathSegments(fileName)}`;
 
         document.querySelector('#btnBack').onclick = () => {
-          // Cleanup before leaving viewer
+          // Cleanup before leaving viewer; exit fullscreen if active
+          const leave = () => { location.href = "/"; };
           aggressiveCleanup();
-          location.href = "/";
+          if (document.fullscreenElement) {
+            document.exitFullscreen().then(leave).catch(leave);
+          } else {
+            leave();
+          }
         };
   document.querySelector('#btnFullscreen').onclick = toggleFullscreen;
 
