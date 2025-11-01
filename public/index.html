@@ -146,14 +146,33 @@
       @media (max-width: 768px) {
         .glass-panel { width: 92vw; }
       }
+
+      /* Mobile tweaks */
+      @media (max-width: 640px) {
+        /* Controls bar wraps nicely on phones */
+        #controls #status { flex-basis: 100%; text-align: right; margin-left: 0; }
+      }
+
+      /* Ultra-small phones (e.g., 320–380px) */
+      @media (max-width: 380px) {
+        .site-title-text { display: none; }
+        #header-actions { gap: 0.25rem; }
+        #headerModeSwitch button { padding: 0.25rem 0.5rem; font-size: 0.85rem; }
+        #headerUploadBtn { padding: 0.4rem; }
+        #headerUploadBtn span { display: none; }
+        #headerUploadBtn svg { width: 18px; height: 18px; }
+      }
     </style>
   </head>
   <body class="min-h-screen bg-neutral-950 text-neutral-100 antialiased tap-highlight-none">
     <!-- Header -->
     <header class="sticky top-0 z-30 bg-neutral-950/80 backdrop-blur border-b border-neutral-800">
-      <div class="mx-auto max-w-7xl px-4 h-14 flex items-center justify-between gap-3">
-        <a href="/" class="text-lg font-semibold tracking-tight">🎼 Piano Sheets</a>
-        <div id="header-actions" class="flex items-center gap-2"></div>
+      <div class="mx-auto max-w-7xl px-4 min-h-14 h-auto py-2 flex flex-wrap items-center justify-between gap-2 sm:gap-3">
+        <a href="/" aria-label="Piano Sheets" class="text-base sm:text-lg font-semibold tracking-tight truncate max-w-[58vw] shrink-0 flex items-center gap-2">
+          <span class="text-lg">🎼</span>
+          <span class="site-title-text">Piano Sheets</span>
+        </a>
+        <div id="header-actions" class="flex flex-wrap items-center justify-end gap-2 shrink-0"></div>
       </div>
     </header>
 
@@ -162,14 +181,14 @@
 
     <!-- Viewer Controls (single Play/Pause with integrated Screen-On) -->
     <div id="controls" class="fixed bottom-0 inset-x-0 z-40 hidden bg-neutral-900/85 backdrop-blur border-t border-neutral-800">
-      <div class="mx-auto max-w-7xl px-4 py-3 flex items-center gap-3">
+      <div class="mx-auto max-w-7xl px-4 py-3 flex flex-wrap items-center gap-3">
         <button id="btnBack" class="px-3 py-2 rounded-lg bg-neutral-800 hover:bg-neutral-700 border border-neutral-700">← Library</button>
         <button id="btnFullscreen" class="px-3 py-2 rounded-lg bg-neutral-800 hover:bg-neutral-700 border border-neutral-700">⤢ Fullscreen</button>
 
         <div class="flex items-center gap-2 ml-2">
           <label for="secsPerPage" class="text-sm text-neutral-300">Sek./Seite</label>
           <input id="secsPerPage" type="number" min="5" max="600" step="1"
-                 class="w-24 px-2 py-1 rounded bg-neutral-800 border border-neutral-700" />
+                 class="w-20 sm:w-24 px-2 py-1 rounded bg-neutral-800 border border-neutral-700" />
         </div>
 
         <!-- ONE Play/Pause button -->
@@ -979,7 +998,7 @@
         appEl.innerHTML = `
           <section class="mb-4 flex flex-wrap items-center gap-2">
             <input id="search" placeholder="Suche nach Titel…"
-                  class="w-72 max-w-full px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-800" />
+                  class="w-full sm:w-72 px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-800" />
             <select id="sort" class="px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-800">
               <option value="name">Name</option>
               <option value="mtime">Zuletzt geändert</option>
@@ -993,7 +1012,7 @@
               Ansicht: ${L.view === "grid" ? "Grid" : "Liste"}
             </button>
             <button id="filterFav" class="px-3 py-2 rounded-lg ${favCls}" aria-pressed="${L.onlyFavorites}">★ Favoriten</button>
-            <span class="ml-auto text-sm text-neutral-400">Seite ${L.page} / ${totalPages} • ${L.total} Dateien</span>
+            <span class="hidden sm:inline sm:ml-auto text-sm text-neutral-400">Seite ${L.page} / ${totalPages} • ${L.total} Dateien</span>
           </section>
           <section id="categoryBar" class="mb-4 flex flex-wrap items-center gap-2"></section>
           <section id="virtualWrap" class="relative overflow-auto border border-neutral-800 rounded-xl bg-neutral-900 h-[70vh]"></section>
@@ -1453,13 +1472,13 @@
         if (item.folder) subtitleParts.push(item.folder);
         const favActive = state.library.favorites.has(item.name);
         a.innerHTML = `
-          <div class="relative w-full h-[240px] bg-neutral-950/95 grid place-items-center overflow-hidden">
+          <div class="relative w-full h-[200px] sm:h-[240px] bg-neutral-950/95 grid place-items-center overflow-hidden">
             <img src="${item.thumbnail}" alt="${item.name}" 
                  class="thumb max-h-full max-w-full object-contain"
                  loading="lazy"
                  onerror="this.style.display='none'; this.nextElementSibling.style.display='flex'">
             <div class="text-neutral-500 text-sm hidden items-center justify-center">📄 PDF</div>
-            <button type="button" class="fav absolute top-3 right-3 h-10 w-10 rounded-full border border-white/12 bg-neutral-950/80 backdrop-blur shadow-lg text-lg leading-none text-neutral-300 hover:border-white/30 hover:bg-neutral-900/80">${favActive ? "★" : "☆"}</button>
+            <button type="button" aria-pressed="${favActive}" class="fav absolute top-3 right-3 h-10 w-10 rounded-full border border-white/12 bg-neutral-950/80 backdrop-blur shadow-lg text-lg leading-none text-neutral-300 hover:border-white/30 hover:bg-neutral-900/80">${favActive ? "★" : "☆"}</button>
           </div>
           <div class="p-4 flex flex-col gap-3">
             <div class="flex flex-col gap-1">
@@ -1638,7 +1657,7 @@
           card.className = 'card overflow-hidden border border-neutral-800/80 bg-neutral-900/90 rounded-2xl hover:border-neutral-700 hover:bg-neutral-900 transition';
           card.innerHTML = `
             <a href="/?file=${item.id}" class="block">
-              <div class="relative w-full h-[220px] bg-neutral-950/95 grid place-items-center overflow-hidden">
+              <div class="relative w-full h-[180px] sm:h-[220px] bg-neutral-950/95 grid place-items-center overflow-hidden">
                 <img src="${item.thumbnail}" alt="${item.name}" class="thumb max-h-full max-w-full object-contain" loading="lazy" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex'">
                 <div class="text-neutral-500 text-sm hidden items-center justify-center">📄 PDF</div>
                 <div class="absolute top-2 left-2 px-2 py-0.5 rounded bg-black/50 text-xs text-neutral-300 border border-white/10">${idx + 1}</div>
