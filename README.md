@@ -197,6 +197,34 @@ High memory usage
 Wake lock / auto-scroll on iOS
 - Ensure you start auto-scroll via the Play button (single gesture). The app uses a gesture-safe wake strategy and keeps trying to reacquire if the tab becomes visible again.
 
-## License
+# License — MIT-NC (Non-Commercial)
 
-MIT — see LICENSE (or adapt as needed for your deployment).
+Copyright (c) 2025 Tim Klement
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the “Software”), to deal
+in the Software **for non-commercial purposes only**, including without limitation
+the rights to use, copy, modify, merge, publish, and distribute copies of the Software,
+subject to the following conditions:
+
+1. The above copyright notice and this permission notice shall be included in
+   all copies or substantial portions of the Software.
+
+2. **Commercial use of this software is strictly prohibited.**
+   This includes, but is not limited to, selling, sublicensing, or including
+   this software in any paid or closed-source product or service.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
+OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+---
+
+**Summary:**  
+- ✅ Free for private, educational, or research use  
+- 🚫 Commercial use or resale is forbidden  
+- 📛 Credit required: “© 2025 Tim Klement”
