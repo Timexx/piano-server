@@ -959,9 +959,9 @@
           <section id="categoryBar" class="mb-4 flex flex-wrap items-center gap-2"></section>
           <section id="virtualWrap" class="relative overflow-auto border border-neutral-800 rounded-xl bg-neutral-900 h-[70vh]"></section>
           <section class="mt-3 flex items-center justify-between">
-            <button id="prevPage" class="px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-800" ${L.page<=1?"disabled":""}>« Zurück</button>
+            <button id="prevPage" class="px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-800 ${L.page<=1?"invisible pointer-events-none select-none opacity-0":""}" ${L.page<=1?"aria-disabled=\"true\" tabindex=\"-1\"":""}>« Zurück</button>
             <div class="text-sm text-neutral-400">Seite <span id="pNow">${L.page}</span> / ${totalPages}</div>
-            <button id="nextPage" class="px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-800" ${L.page>=totalPages?"disabled":""}>Weiter »</button>
+            <button id="nextPage" class="px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-800 ${L.page>=totalPages?"invisible pointer-events-none select-none opacity-0":""}" ${L.page>=totalPages?"aria-disabled=\"true\" tabindex=\"-1\"":""}>Weiter »</button>
           </section>`;
 
         // Update memory status
