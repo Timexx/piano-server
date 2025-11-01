@@ -202,6 +202,10 @@
         <svg xmlns="http://www.w3.org/2000/svg" height="24" viewBox="0 -960 960 960" width="24" fill="currentColor" aria-hidden="true" focusable="false">
           <path d="m576-80-56-56 104-104-104-104 56-56 104 104 104-104 56 56-104 104 104 104-56 56-104-104L576-80ZM120-320v-80h280v80H120Zm0-160v-80h440v80H120Zm0-160v-80h440v80H120Z"/>
         </svg>`;
+      const SVG_CATEGORY_ADD = `
+        <svg xmlns="http://www.w3.org/2000/svg" height="24" viewBox="0 -960 960 960" width="24" fill="currentColor" aria-hidden="true" focusable="false">
+          <path d="M480-160v-80h120l180-240-180-240H160v200H80v-200q0-33 23.5-56.5T160-800h440q19 0 36 8.5t28 23.5l216 288-216 288q-11 15-28 23.5t-36 8.5H480Zm-10-320ZM200-120v-120H80v-80h120v-120h80v120h120v80H280v120h-80Z"/>
+        </svg>`;
 
       // Playlist client state
       const playlist = {
@@ -1433,6 +1437,13 @@
         }).join('');
       }
 
+      function setFavVisual(btn, active) {
+        if (!btn) return;
+        btn.textContent = active ? "★" : "☆";
+        btn.classList.toggle('text-amber-400', !!active);
+        btn.classList.toggle('text-neutral-300', !active);
+      }
+
       function renderCard(item) {
         const a = document.createElement("a");
         a.href = `/?file=${item.id}`;
@@ -1448,7 +1459,7 @@
                  loading="lazy"
                  onerror="this.style.display='none'; this.nextElementSibling.style.display='flex'">
             <div class="text-neutral-500 text-sm hidden items-center justify-center">📄 PDF</div>
-            <button type="button" class="fav absolute top-3 right-3 h-10 w-10 rounded-full border border-white/12 bg-neutral-950/80 backdrop-blur shadow-lg text-lg leading-none hover:border-white/30 hover:bg-neutral-900/80">${favActive ? "★" : "☆"}</button>
+            <button type="button" class="fav absolute top-3 right-3 h-10 w-10 rounded-full border border-white/12 bg-neutral-950/80 backdrop-blur shadow-lg text-lg leading-none text-neutral-300 hover:border-white/30 hover:bg-neutral-900/80">${favActive ? "★" : "☆"}</button>
           </div>
           <div class="p-4 flex flex-col gap-3">
             <div class="flex flex-col gap-1">
@@ -1460,11 +1471,14 @@
               <button type="button" aria-label="Zur Playlist hinzufügen" title="Zur Playlist hinzufügen" data-name="${item.name}" class="add-playlist h-9 w-9 grid place-items-center rounded-full border border-neutral-700 text-neutral-200 bg-neutral-800/70 hover:bg-neutral-700" style="padding:0;">
                 ${SVG_PLAYLIST_ADD}
               </button>
-              <button type="button" aria-label="Kategorien hinzufügen" title="Kategorien hinzufügen" class="assign-cat h-9 w-9 rounded-full border border-neutral-700 text-neutral-200 bg-neutral-800/70 hover:bg-neutral-700">+</button>
+              <button type="button" aria-label="Kategorien hinzufügen" title="Kategorien hinzufügen" class="assign-cat h-9 w-9 grid place-items-center rounded-full border border-neutral-700 text-neutral-200 bg-neutral-800/70 hover:bg-neutral-700" style="padding:0;">
+                ${SVG_CATEGORY_ADD}
+              </button>
             </div>
           </div>
         `;
         const favBtnCard = a.querySelector(".fav");
+        setFavVisual(favBtnCard, favActive);
         favBtnCard.addEventListener("click", async (ev) => {
           ev.preventDefault();
           ev.stopPropagation();
@@ -1474,9 +1488,9 @@
             await setFavoriteOnBackend(item.name, makeFav);
             if (makeFav) state.library.favorites.add(item.name);
             else state.library.favorites.delete(item.name);
-            btn.textContent = makeFav ? "★" : "☆";
+            setFavVisual(btn, makeFav);
           } catch {
-            btn.textContent = state.library.favorites.has(item.name) ? "★" : "☆";
+            setFavVisual(btn, state.library.favorites.has(item.name));
           }
         });
         const assignBtn = a.querySelector('.assign-cat');
@@ -1527,15 +1541,18 @@
             <div class="text-xs text-neutral-400 truncate">${subtitleParts.join(" • ")}</div>
             <div class="flex flex-wrap gap-1 mt-1">${renderCategoryBadges(item)}</div>
           </div>
-          <div class="flex flex-col items-end gap-2">
-            <button class="fav text-xl leading-none">${state.library.favorites.has(item.name) ? "★" : "☆"}</button>
+          <div class="flex items-center gap-2 shrink-0 whitespace-nowrap">
+            <button class="fav text-xl leading-none text-neutral-300" aria-pressed="${state.library.favorites.has(item.name)}">${state.library.favorites.has(item.name) ? "★" : "☆"}</button>
             <button class="add-playlist h-9 w-9 grid place-items-center rounded-full border border-neutral-700 text-neutral-200 bg-neutral-800/70 hover:bg-neutral-700" data-name="${item.name}" title="Zur Playlist hinzufügen" style="padding:0;">
               ${SVG_PLAYLIST_ADD}
             </button>
-            <button class="assign-cat px-3 py-1 rounded-full border border-neutral-700 text-xs text-neutral-200 hover:bg-neutral-800">✦</button>
+            <button class="assign-cat h-9 w-9 grid place-items-center rounded-full border border-neutral-700 text-neutral-200 bg-neutral-800/70 hover:bg-neutral-700" title="Kategorien hinzufügen" style="padding:0;" aria-label="Kategorien hinzufügen">
+              ${SVG_CATEGORY_ADD}
+            </button>
           </div>
         `;
         const favBtnRow = a.querySelector(".fav");
+        setFavVisual(favBtnRow, state.library.favorites.has(item.name));
         favBtnRow.addEventListener("click", async (ev) => {
           ev.preventDefault();
           ev.stopPropagation();
@@ -1545,9 +1562,9 @@
             await setFavoriteOnBackend(item.name, makeFav);
             if (makeFav) state.library.favorites.add(item.name);
             else state.library.favorites.delete(item.name);
-            btn.textContent = makeFav ? "★" : "☆";
+            setFavVisual(btn, makeFav);
           } catch {
-            btn.textContent = state.library.favorites.has(item.name) ? "★" : "☆";
+            setFavVisual(btn, state.library.favorites.has(item.name));
           }
         });
         const assignBtn = a.querySelector('.assign-cat');
