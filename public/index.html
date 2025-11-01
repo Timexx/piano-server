@@ -162,6 +162,11 @@
         #headerUploadBtn span { display: none; }
         #headerUploadBtn svg { width: 18px; height: 18px; }
       }
+
+      /* Sort dropdown: ensure it fits on narrow screens */
+      @media (max-width: 480px) {
+        #sortMenu { max-width: 92vw; }
+      }
     </style>
   </head>
   <body class="min-h-screen bg-neutral-950 text-neutral-100 antialiased tap-highlight-none">
@@ -1041,7 +1046,7 @@
         appEl.innerHTML = `
           <section class="mb-4 rounded-xl border border-neutral-800 bg-neutral-900/70 p-3">
             <div class="flex flex-wrap items-center gap-2">
-              <div class="relative flex-1 min-w-[220px]">
+              <div class="relative w-full sm:w-[420px] md:w-[520px] lg:w-[640px] min-w-[220px]">
                 <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-neutral-400">${SVG_SEARCH}</span>
                 <input id="search" placeholder="Suche nach Titel…" class="w-full pl-9 pr-3 py-2 rounded-lg bg-neutral-950/70 border border-neutral-800 focus:border-[--accent-color] outline-none" />
               </div>
@@ -1056,7 +1061,7 @@
                   <button id="sortMenuBtn" class="px-3 py-2 rounded-lg bg-neutral-950/70 border border-neutral-800 text-neutral-200 hover:bg-neutral-800 flex items-center gap-2" aria-haspopup="menu" aria-expanded="false" title="Sortieren">
                     <span id="sortLabel"></span>
                   </button>
-                  <div id="sortMenu" class="hidden absolute right-0 mt-1 min-w-[170px] rounded-lg border border-neutral-800 bg-neutral-900 shadow-xl z-20 overflow-hidden">
+                  <div id="sortMenu" class="hidden min-w-[170px] rounded-lg border border-neutral-800 bg-neutral-900 shadow-xl z-20 overflow-hidden">
                     <button class="w-full text-left px-3 py-2 hover:bg-neutral-800 text-neutral-200" data-sort="name">Name</button>
                     <button class="w-full text-left px-3 py-2 hover:bg-neutral-800 text-neutral-200" data-sort="mtime">Zuletzt geändert</button>
                     <button class="w-full text-left px-3 py-2 hover:bg-neutral-800 text-neutral-200" data-sort="size">Dateigröße</button>
@@ -1116,14 +1121,73 @@
 
         // Sort dropdown behavior
         if (sortMenuBtn && sortMenu) {
-          const closeMenu = () => { sortMenu.classList.add('hidden'); sortMenuBtn.setAttribute('aria-expanded','false'); document.removeEventListener('click', onDocClick, true); };
+          let repositionHandlersAttached = false;
+          function positionSortMenu() {
+            // Switch to fixed positioning and place menu within viewport (below or above button)
+            sortMenu.style.position = 'fixed';
+            sortMenu.style.zIndex = '1000';
+            sortMenu.style.maxWidth = '360px';
+            // Also cap to viewport on narrow screens
+            const vw = window.innerWidth; const vh = window.innerHeight; const margin = 8;
+            const cap = Math.min(360, Math.floor(vw - margin * 2));
+            sortMenu.style.maxWidth = cap + 'px';
+            // Temporarily make visible to measure
+            const prevDisplay = sortMenu.style.display;
+            if (sortMenu.classList.contains('hidden')) sortMenu.classList.remove('hidden');
+            sortMenu.style.display = 'block';
+            const btnRect = sortMenuBtn.getBoundingClientRect();
+            const menuRect = sortMenu.getBoundingClientRect();
+            // Default align-left to the button; clamp within viewport
+            let left = btnRect.left;
+            if (left + menuRect.width + margin > vw) left = Math.max(margin, vw - menuRect.width - margin);
+            if (left < margin) left = margin;
+            let top = btnRect.bottom + 6;
+            let maxH = vh - top - margin;
+            if (maxH < menuRect.height) {
+              // Try opening upwards
+              const altTop = btnRect.top - menuRect.height - 6;
+              if (altTop >= margin) { top = altTop; maxH = vh - top - margin; }
+              else { top = Math.max(margin, altTop); maxH = vh - top - margin; }
+            }
+            sortMenu.style.left = `${Math.round(left)}px`;
+            sortMenu.style.top = `${Math.round(top)}px`;
+            sortMenu.style.maxHeight = `${Math.max(120, Math.floor(maxH))}px`;
+            sortMenu.style.overflowY = 'auto';
+            // Restore display flag if previously hidden (but remain visible since opening)
+            sortMenu.style.display = prevDisplay || '';
+          }
+          const closeMenu = () => {
+            sortMenu.classList.add('hidden');
+            sortMenuBtn.setAttribute('aria-expanded','false');
+            document.removeEventListener('click', onDocClick, true);
+            if (repositionHandlersAttached) {
+              window.removeEventListener('resize', handleReposition, true);
+              window.removeEventListener('scroll', handleReposition, true);
+              repositionHandlersAttached = false;
+            }
+            // Clean inline styles so re-render sets defaults
+            sortMenu.style.position = '';
+            sortMenu.style.left = '';
+            sortMenu.style.top = '';
+            sortMenu.style.maxHeight = '';
+            sortMenu.style.overflowY = '';
+            sortMenu.style.zIndex = '';
+          };
           const onDocClick = (ev) => { if (!sortMenu.contains(ev.target) && ev.target !== sortMenuBtn) closeMenu(); };
+          const handleReposition = () => { if (!sortMenu.classList.contains('hidden')) positionSortMenu(); };
           sortMenuBtn.addEventListener('click', (ev)=>{
             ev.preventDefault(); ev.stopPropagation();
             const isOpen = !sortMenu.classList.contains('hidden');
             if (isOpen) { closeMenu(); }
             else {
-              sortMenu.classList.remove('hidden'); sortMenuBtn.setAttribute('aria-expanded','true');
+              sortMenu.classList.remove('hidden');
+              sortMenuBtn.setAttribute('aria-expanded','true');
+              positionSortMenu();
+              if (!repositionHandlersAttached) {
+                window.addEventListener('resize', handleReposition, true);
+                window.addEventListener('scroll', handleReposition, true);
+                repositionHandlersAttached = true;
+              }
               document.addEventListener('click', onDocClick, true);
             }
           });
@@ -1229,7 +1293,7 @@
                 <span>Ohne</span>
               </button>`);
 
-          const manageBtn = `<button id="btnManageCategories" class="ml-auto h-9 w-9 grid place-items-center rounded-full border border-neutral-700 text-neutral-200 hover:bg-neutral-800" title="Kategorien verwalten">${SVG_SETTINGS}</button>`;
+          const manageBtn = `<button id="btnManageCategories" class="h-9 w-9 grid place-items-center rounded-full border border-neutral-700 text-neutral-200 hover:bg-neutral-800" title="Kategorien verwalten">${SVG_SETTINGS}</button>`;
 
           host.innerHTML = wrapStart + chips.join('') + manageBtn + wrapEnd;
 
