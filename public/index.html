@@ -227,6 +227,22 @@
         </svg>`;
 
       // Icons for playlist list UI
+      const SVG_SEARCH = `
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>`;
+      const SVG_GRID = `
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>`;
+      const SVG_LIST = `
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><circle cx="4" cy="6" r="1"></circle><circle cx="4" cy="12" r="1"></circle><circle cx="4" cy="18" r="1"></circle></svg>`;
+      const SVG_SORT_ASC = `
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M11 5h10"/><path d="M11 9h7"/><path d="M11 13h4"/><path d="M3 17l3 3 3-3"/></svg>`;
+      const SVG_SORT_DESC = `
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M11 5h4"/><path d="M11 9h7"/><path d="M11 13h10"/><path d="M3 7l3-3 3 3"/></svg>`;
+      const SVG_STAR = `
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true" focusable="false"><path d="M12 .587l3.668 7.431 8.2 1.193-5.934 5.786 1.401 8.168L12 18.896l-7.335 3.869 1.401-8.168L.132 9.211l8.2-1.193z"/></svg>`;
+      const SVG_SETTINGS = `
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c0 .66.39 1.26 1 1.51H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>`;
+      const SVG_ORDER = `
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -960 960 960" width="18" height="18" fill="currentColor" aria-hidden="true" focusable="false"><path d="M240-160 80-320l56-56 64 62v-332l-64 62-56-56 160-160 160 160-56 56-64-62v332l64-62 56 56-160 160Zm240-40v-80h400v80H480Zm0-240v-80h400v80H480Zm0-240v-80h400v80H480Z"/></svg>`;
       const SVG_PLAY = `
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true" focusable="false">
           <path d="M8 5v14l11-7z"></path>
@@ -1023,25 +1039,39 @@
         const totalPages = Math.max(1, Math.ceil(L.total / L.pageSize));
 
         appEl.innerHTML = `
-          <section class="mb-4 flex flex-wrap items-center gap-2">
-            <input id="search" placeholder="Suche nach Titel…"
-                  class="w-full sm:w-72 px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-800" />
-            <select id="sort" class="px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-800">
-              <option value="name">Name</option>
-              <option value="mtime">Zuletzt geändert</option>
-              <option value="size">Dateigröße</option>
-            </select>
-            <select id="order" class="px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-800">
-              <option value="asc">↑ aufsteigend</option>
-              <option value="desc">↓ absteigend</option>
-            </select>
-            <button id="toggleView" class="px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-800">
-              Ansicht: ${L.view === "grid" ? "Grid" : "Liste"}
-            </button>
-            <button id="filterFav" class="px-3 py-2 rounded-lg ${favCls}" aria-pressed="${L.onlyFavorites}">★ Favoriten</button>
-            <span class="hidden sm:inline sm:ml-auto text-sm text-neutral-400">Seite ${L.page} / ${totalPages} • ${L.total} Dateien</span>
+          <section class="mb-4 rounded-xl border border-neutral-800 bg-neutral-900/70 p-3">
+            <div class="flex flex-wrap items-center gap-2">
+              <div class="relative flex-1 min-w-[220px]">
+                <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-neutral-400">${SVG_SEARCH}</span>
+                <input id="search" placeholder="Suche nach Titel…" class="w-full pl-9 pr-3 py-2 rounded-lg bg-neutral-950/70 border border-neutral-800 focus:border-[--accent-color] outline-none" />
+              </div>
+
+              <div id="viewSwitch" class="inline-flex p-1 rounded-lg border border-neutral-800 bg-neutral-900">
+                <button type="button" data-view="grid" aria-pressed="${L.view==='grid'}" class="h-9 w-9 grid place-items-center rounded-md ${L.view==='grid' ? 'bg-neutral-800 text-neutral-50' : 'text-neutral-300'}" title="Grid Ansicht">${SVG_GRID}</button>
+                <button type="button" data-view="list" aria-pressed="${L.view==='list'}" class="h-9 w-9 grid place-items-center rounded-md ${L.view==='list' ? 'bg-neutral-800 text-neutral-50' : 'text-neutral-300'}" title="Listenansicht">${SVG_LIST}</button>
+              </div>
+
+              <div class="flex items-center gap-2 relative">
+                <div class="relative">
+                  <button id="sortMenuBtn" class="px-3 py-2 rounded-lg bg-neutral-950/70 border border-neutral-800 text-neutral-200 hover:bg-neutral-800 flex items-center gap-2" aria-haspopup="menu" aria-expanded="false" title="Sortieren">
+                    <span id="sortLabel"></span>
+                  </button>
+                  <div id="sortMenu" class="hidden absolute right-0 mt-1 min-w-[170px] rounded-lg border border-neutral-800 bg-neutral-900 shadow-xl z-20 overflow-hidden">
+                    <button class="w-full text-left px-3 py-2 hover:bg-neutral-800 text-neutral-200" data-sort="name">Name</button>
+                    <button class="w-full text-left px-3 py-2 hover:bg-neutral-800 text-neutral-200" data-sort="mtime">Zuletzt geändert</button>
+                    <button class="w-full text-left px-3 py-2 hover:bg-neutral-800 text-neutral-200" data-sort="size">Dateigröße</button>
+                  </div>
+                </div>
+                <button id="orderToggle" class="h-9 w-9 grid place-items-center rounded-lg bg-neutral-950/70 border border-neutral-800 text-neutral-300 hover:bg-neutral-800 ${L.order==='desc' ? 'rotate-180' : ''}" title="Sortierreihenfolge" style="transition: transform .15s ease">${SVG_ORDER}</button>
+              </div>
+
+              <button id="filterFav" class="px-3 py-2 rounded-full ${favCls} flex items-center gap-2" aria-pressed="${L.onlyFavorites}" title="Nur Favoriten">
+                <span class="text-amber-400">★</span><span class="hidden sm:inline">Favoriten</span>
+              </button>
+            </div>
           </section>
-          <section id="categoryBar" class="mb-4 flex flex-wrap items-center gap-2"></section>
+
+          <section id="categoryBar" class="mb-4"></section>
           <section id="virtualWrap" class="relative overflow-auto border border-neutral-800 rounded-xl bg-neutral-900 h-[70vh]"></section>
           <section class="mt-3 flex items-center justify-between">
             <button id="prevPage" class="px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-800 ${L.page<=1?"invisible pointer-events-none select-none opacity-0":""}" ${L.page<=1?"aria-disabled=\"true\" tabindex=\"-1\"":""}>« Zurück</button>
@@ -1060,14 +1090,17 @@
         ensureUploadButton();
         setUploadButtonVisible(true);
 
-        const searchEl = document.querySelector('#search');
-        const sortEl = document.querySelector('#sort');
-        const orderEl = document.querySelector('#order');
-        const viewBtn = document.querySelector('#toggleView');
+  const searchEl = document.querySelector('#search');
+  const sortMenuBtn = document.querySelector('#sortMenuBtn');
+  const sortMenu = document.querySelector('#sortMenu');
+  const orderBtn = document.querySelector('#orderToggle');
+  const viewSwitch = document.querySelector('#viewSwitch');
 
-        searchEl.value = L.q;
-        sortEl.value = L.sort;
-        orderEl.value = L.order;
+    searchEl.value = L.q;
+    const sortLabelEl = document.querySelector('#sortLabel');
+    const sortMap = { name: 'Name', mtime: 'Zuletzt geändert', size: 'Dateigröße' };
+    if (sortLabelEl) sortLabelEl.textContent = sortMap[L.sort] || 'Name';
+  // order icon already reflects state (rotation)
 
         let searchTimer = null;
         searchEl.addEventListener("input", (e) => {
@@ -1081,25 +1114,51 @@
           }, 300);
         });
 
-        sortEl.onchange = async (e) => {
-          L.sort = e.target.value; localStorage.setItem("libSort", L.sort);
+        // Sort dropdown behavior
+        if (sortMenuBtn && sortMenu) {
+          const closeMenu = () => { sortMenu.classList.add('hidden'); sortMenuBtn.setAttribute('aria-expanded','false'); document.removeEventListener('click', onDocClick, true); };
+          const onDocClick = (ev) => { if (!sortMenu.contains(ev.target) && ev.target !== sortMenuBtn) closeMenu(); };
+          sortMenuBtn.addEventListener('click', (ev)=>{
+            ev.preventDefault(); ev.stopPropagation();
+            const isOpen = !sortMenu.classList.contains('hidden');
+            if (isOpen) { closeMenu(); }
+            else {
+              sortMenu.classList.remove('hidden'); sortMenuBtn.setAttribute('aria-expanded','true');
+              document.addEventListener('click', onDocClick, true);
+            }
+          });
+          sortMenu.querySelectorAll('[data-sort]').forEach((btn)=>{
+            btn.addEventListener('click', async ()=>{
+              const v = btn.getAttribute('data-sort');
+              if (!v) return;
+              if (v !== L.sort) {
+                L.sort = v; localStorage.setItem('libSort', L.sort);
+                L.page = 1;
+                appEl.innerHTML = '<div class="flex items-center justify-center h-[70vh] text-neutral-400">Lade…</div>';
+                await loadPage();
+              }
+              renderLibrary();
+            });
+          });
+        }
+        if (orderBtn) orderBtn.onclick = async () => {
+          L.order = L.order === 'asc' ? 'desc' : 'asc';
+          localStorage.setItem('libOrder', L.order);
           L.page = 1;
           appEl.innerHTML = '<div class="flex items-center justify-center h-[70vh] text-neutral-400">Lade…</div>';
           await loadPage();
           renderLibrary();
         };
-        orderEl.onchange = async (e) => {
-          L.order = e.target.value; localStorage.setItem("libOrder", L.order);
-          L.page = 1;
-          appEl.innerHTML = '<div class="flex items-center justify-center h-[70vh] text-neutral-400">Lade…</div>';
-          await loadPage();
-          renderLibrary();
-        };
-        viewBtn.onclick = () => {
-          L.view = L.view === "grid" ? "list" : "grid";
-          localStorage.setItem("libView", L.view);
-          renderLibrary();
-        };
+        viewSwitch?.querySelectorAll('button[data-view]')?.forEach((btn)=>{
+          btn.addEventListener('click', ()=>{
+            const v = btn.getAttribute('data-view');
+            if (v && (v === 'grid' || v === 'list') && v !== L.view) {
+              L.view = v;
+              localStorage.setItem('libView', L.view);
+              renderLibrary();
+            }
+          });
+        });
 
         document.querySelector('#filterFav').onclick = async () => {
           L.onlyFavorites = !L.onlyFavorites;
@@ -1133,64 +1192,59 @@
         function renderCategoryBar() {
           const host = document.querySelector('#categoryBar');
           if (!host) return;
-          const categories = state.categories;
+          const categories = state.categories || [];
           const activeId = state.library.categoryFilter;
 
-          if (!categories.length) {
-            host.innerHTML = `
-              <div class="flex flex-wrap items-center gap-3 text-sm text-neutral-400">
-                <span>Keine Kategorien angelegt.</span>
-                <button id="btnCreateCategoryPrimary" class="px-3 py-1.5 rounded-full bg-neutral-800 hover:bg-neutral-700 border border-neutral-700">Kategorie erstellen</button>
-              </div>`;
-            const createBtn = document.querySelector('#btnCreateCategoryPrimary');
-            if (createBtn) createBtn.addEventListener('click', () => openCategoryManager({ focusMode: 'create' }));
-            applyAccentTheme(null);
-            return;
-          }
+          const wrapStart = `
+            <div class="relative">
+              <div class="flex items-center gap-2 overflow-x-auto no-scrollbar -mx-2 px-2 py-1">
+          `;
+          const wrapEnd = `
+              </div>
+            </div>
+          `;
 
-          const pills = categories.map((cat) => {
+          // Build chips (start with "Alle")
+          const chips = [];
+          const allActive = !activeId;
+          chips.push(`<button class="category-pill px-3 py-1.5 rounded-full border flex items-center gap-2 text-sm ${allActive ? 'font-semibold' : 'font-medium'}" data-cat="__all" style="background:${allActive ? 'rgba(148,163,184,0.28)' : 'rgba(148,163,184,0.12)'};border-color:${allActive ? '#94a3b8' : 'rgba(148,163,184,0.35)'};color:${allActive ? '#e5e7eb' : '#94a3b8'};">
+              <span class="text-base leading-none">◎</span>
+              <span>Alle</span>
+            </button>`);
+
+          for (const cat of categories) {
             const isActive = cat.id === activeId;
             const bg = isActive ? `${cat.color}33` : `${cat.color}1a`;
             const border = isActive ? cat.color : `${cat.color}40`;
             const text = isActive ? '#f8fafc' : cat.color;
             const fontWeight = isActive ? 'font-semibold' : 'font-medium';
-            return `<button class="category-pill px-3 py-1.5 rounded-full border flex items-center gap-2 text-sm ${fontWeight}" data-cat="${cat.id}" style="background:${bg};border-color:${border};color:${text};">
+            chips.push(`<button class="category-pill px-3 py-1.5 rounded-full border flex items-center gap-2 text-sm ${fontWeight}" data-cat="${cat.id}" style="background:${bg};border-color:${border};color:${text};">
                 <span class="text-base leading-none">${cat.icon || '♪'}</span>
                 <span>${cat.name}</span>
-              </button>`;
-          }).join("");
-          // Special pill for uncategorized
+              </button>`);
+          }
           const noneActive = activeId === 'none';
-          const noneBtn = `<button class="category-pill px-3 py-1.5 rounded-full border flex items-center gap-2 text-sm ${noneActive ? 'font-semibold' : 'font-medium'}" data-cat="none" style="background:${noneActive ? 'rgba(148,163,184,0.28)' : 'rgba(148,163,184,0.12)'};border-color:${noneActive ? '#94a3b8' : 'rgba(148,163,184,0.35)'};color:${noneActive ? '#e5e7eb' : '#94a3b8'};">
+          chips.push(`<button class="category-pill px-3 py-1.5 rounded-full border flex items-center gap-2 text-sm ${noneActive ? 'font-semibold' : 'font-medium'}" data-cat="none" style="background:${noneActive ? 'rgba(148,163,184,0.28)' : 'rgba(148,163,184,0.12)'};border-color:${noneActive ? '#94a3b8' : 'rgba(148,163,184,0.35)'};color:${noneActive ? '#e5e7eb' : '#94a3b8'};">
                 <span class="text-base leading-none">◌</span>
-                <span>Ohne Kategorie</span>
-              </button>`;
+                <span>Ohne</span>
+              </button>`);
 
-          const clearBtn = activeId ? `<button id="btnClearCategory" class="px-3 py-1.5 rounded-full border border-neutral-700 text-sm text-neutral-300 hover:bg-neutral-800">Filter zurücksetzen</button>` : '';
+          const manageBtn = `<button id="btnManageCategories" class="ml-auto h-9 w-9 grid place-items-center rounded-full border border-neutral-700 text-neutral-200 hover:bg-neutral-800" title="Kategorien verwalten">${SVG_SETTINGS}</button>`;
 
-          host.innerHTML = `
-            <div class="flex flex-wrap items-center gap-2">
-              ${pills}
-              ${noneBtn}
-              ${clearBtn}
-              <button id="btnManageCategories" class="ml-auto px-3 py-1.5 rounded-full border border-neutral-700 text-sm text-neutral-200 hover:bg-neutral-800">Kategorien verwalten</button>
-            </div>`;
+          host.innerHTML = wrapStart + chips.join('') + manageBtn + wrapEnd;
 
           host.querySelectorAll('[data-cat]').forEach((btn) => {
             btn.addEventListener('click', async () => {
               const id = btn.getAttribute('data-cat');
-              const target = id === state.library.categoryFilter ? null : id;
+              const target = (id === '__all') ? null : (id === state.library.categoryFilter ? null : id);
               await applyCategoryFilter(target);
             });
           });
 
-          const clear = document.querySelector('#btnClearCategory');
-          if (clear) clear.addEventListener('click', async () => await applyCategoryFilter(null));
-
           const manage = document.querySelector('#btnManageCategories');
           if (manage) manage.addEventListener('click', () => openCategoryManager());
 
-          // Don't accent for the synthetic 'none' filter
+          // Accent (skip synthetic none)
           applyAccentTheme(activeId === 'none' ? null : activeId);
         }
 
