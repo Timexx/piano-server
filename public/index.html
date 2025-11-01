@@ -193,6 +193,26 @@
       const headerActionsEl = document.querySelector('#header-actions');
   let uploadBtn = null;
 
+      // Icons for playlist toggle (add/remove)
+      const SVG_PLAYLIST_ADD = `
+        <svg xmlns="http://www.w3.org/2000/svg" height="24" viewBox="0 -960 960 960" width="24" fill="currentColor" aria-hidden="true" focusable="false">
+          <path d="M120-320v-80h280v80H120Zm0-160v-80h440v80H120Zm0-160v-80h440v80H120Zm520 480v-160H480v-80h160v-160h80v160h160v80H720v160h-80Z"/>
+        </svg>`;
+      const SVG_PLAYLIST_REMOVE = `
+        <svg xmlns="http://www.w3.org/2000/svg" height="24" viewBox="0 -960 960 960" width="24" fill="currentColor" aria-hidden="true" focusable="false">
+          <path d="m576-80-56-56 104-104-104-104 56-56 104 104 104-104 56 56-104 104 104 104-56 56-104-104L576-80ZM120-320v-80h280v80H120Zm0-160v-80h440v80H120Zm0-160v-80h440v80H120Z"/>
+        </svg>`;
+
+      // Playlist client state
+      const playlist = {
+        items: [], // array of rel names
+        currentIndex: -1,
+        name: null,
+        updatedAt: 0,
+        es: null,
+        mode: localStorage.getItem('playlistMode') === '1'
+      };
+
       // Reflect fullscreen state on <html> to enable safe-area CSS
       document.addEventListener("fullscreenchange", () => {
         document.documentElement.classList.toggle("is-fs", !!document.fullscreenElement);
@@ -432,6 +452,9 @@
 
       // ===== Router =====
       (async function init() {
+        // Initialize playlist sync early for UI affordances
+        try { await fetchPlaylist(); } catch {}
+        connectPlaylistEvents();
         if (currentFile) {
           await hydrateCategories();
           await renderViewer(decodeURIComponent(currentFile));
@@ -935,6 +958,12 @@
         controlsEl.classList.add("hidden");
         headerActionsEl.innerHTML = "";
 
+        // If playlist mode is active, render the playlist overview instead of the normal library
+        if (playlist.mode) {
+          renderPlaylistLibrary();
+          return;
+        }
+
         const L = state.library;
         applyAccentTheme(L.categoryFilter);
         const allMode = L.pageSize === "all";
@@ -976,8 +1005,8 @@
         if (activeHeaderCategory) {
           headerActionsEl.innerHTML = `<span class="category-chip" style="background:${activeHeaderCategory.color}1f;border-color:${activeHeaderCategory.color}44;color:${activeHeaderCategory.color};">${activeHeaderCategory.icon || '♪'}<span>${activeHeaderCategory.name}</span></span>`;
         }
-        
-        // Add upload button AFTER category chip (or as only element if no category)
+        // Add header segmented mode switch + upload
+        ensureModeSwitcher();
         ensureUploadButton();
         setUploadButtonVisible(true);
 
@@ -1118,6 +1147,183 @@
         requestAnimationFrame(() => {
           const wrap = document.querySelector('#virtualWrap');
           if (wrap) mountVirtualizer(true);
+          updateLibraryPlaylistButtons();
+        });
+      }
+      function ensureModeSwitcher() {
+        let wrap = document.querySelector('#headerModeSwitch');
+        if (wrap && wrap.isConnected) {
+          // update active styles
+          const btnLib = wrap.querySelector('[data-mode="lib"]');
+          const btnPl = wrap.querySelector('[data-mode="pl"]');
+          const on = playlist.mode === true; // true = Playlist active
+          btnLib?.classList.toggle('bg-neutral-800', !on);
+          btnLib?.classList.toggle('bg-neutral-900', on);
+          btnPl?.classList.toggle('bg-neutral-800', on);
+          btnPl?.classList.toggle('bg-neutral-900', !on);
+          btnLib?.setAttribute('aria-pressed', String(!on));
+          btnPl?.setAttribute('aria-pressed', String(on));
+          return;
+        }
+        wrap = document.createElement('div');
+        wrap.id = 'headerModeSwitch';
+        wrap.className = 'inline-flex p-1 rounded-lg border border-neutral-800 bg-neutral-900';
+        wrap.innerHTML = `
+          <button type="button" data-mode="lib" aria-pressed="${!playlist.mode}" class="px-3 py-1.5 rounded-md ${playlist.mode ? 'bg-neutral-900' : 'bg-neutral-800'}">Bibliothek</button>
+          <button type="button" data-mode="pl" aria-pressed="${playlist.mode}" class="px-3 py-1.5 rounded-md ${playlist.mode ? 'bg-neutral-800' : 'bg-neutral-900'}">Playlist</button>
+        `;
+        const btnLib = wrap.querySelector('[data-mode="lib"]');
+        const btnPl = wrap.querySelector('[data-mode="pl"]');
+        btnLib?.addEventListener('click', () => {
+          if (!playlist.mode) return;
+          playlist.mode = false;
+          localStorage.setItem('playlistMode', '0');
+          ensureModeSwitcher();
+          renderLibrary();
+        });
+        btnPl?.addEventListener('click', () => {
+          if (playlist.mode) return;
+          playlist.mode = true;
+          localStorage.setItem('playlistMode', '1');
+          ensureModeSwitcher();
+          renderLibrary();
+        });
+        headerActionsEl.appendChild(wrap);
+      }
+
+      async function fetchPlaylist() {
+        try {
+          const res = await fetch('/api/playlist', { cache: 'no-store' });
+          if (!res.ok) return;
+          const data = await res.json();
+          applyPlaylistSnapshot(data);
+        } catch {}
+      }
+      function connectPlaylistEvents() {
+        try { playlist.es?.close?.(); } catch {}
+        const es = new EventSource('/api/playlist/events');
+        es.onmessage = (ev) => {
+          try { const data = JSON.parse(ev.data); applyPlaylistSnapshot(data); } catch {}
+        };
+        es.onerror = () => { try { es.close(); } catch {}; setTimeout(connectPlaylistEvents, 2000); };
+        playlist.es = es;
+      }
+      function applyPlaylistSnapshot(data) {
+        if (!data || typeof data !== 'object') return;
+        playlist.items = Array.isArray(data.items) ? data.items : [];
+        playlist.currentIndex = Number.isInteger(data.currentIndex) ? data.currentIndex : -1;
+        playlist.name = data.name || null;
+        playlist.updatedAt = Number(data.updatedAt) || Date.now();
+        // Update any open panels or controls
+        updatePlaylistPanel();
+        updateViewerPlaylistControls();
+        updateLibraryPlaylistButtons();
+        if (!document.body.classList.contains('in-viewer') && playlist.mode) {
+          // If we're in library and playlist is visible, refresh the grid
+          renderPlaylistLibrary();
+        }
+      }
+
+      async function addToPlaylist(name) {
+        try {
+          await fetch('/api/playlist/add', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
+        } catch {}
+      }
+      async function removeFromPlaylist(name) {
+        try {
+          await fetch('/api/playlist/remove', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
+        } catch {}
+      }
+      async function setPlaylistOrder(order) {
+        try {
+          await fetch('/api/playlist/reorder', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ order }) });
+        } catch {}
+      }
+      async function setPlaylistCurrentIndex(index) {
+        try { await fetch('/api/playlist/current', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ index }) }); } catch {}
+      }
+
+      function toDisplayName(rel) {
+        return rel.split('/').pop();
+      }
+
+      let playlistBackdrop = null;
+      async function openPlaylistPanel() {
+        if (playlistBackdrop?.isConnected) return;
+        playlistBackdrop = document.createElement('div');
+        playlistBackdrop.className = 'modal-backdrop';
+        playlistBackdrop.dataset.modal = 'playlist';
+        playlistBackdrop.innerHTML = `
+          <div class="glass-panel w-[680px] max-w-full p-6 text-sm text-neutral-200" role="dialog" aria-modal="true">
+            <div class="flex items-center justify-between gap-3">
+              <div>
+                <div class="text-xs uppercase tracking-wide text-neutral-500">Playlist</div>
+                <h2 class="text-lg font-semibold text-neutral-100">Aktuelle Auswahl</h2>
+              </div>
+              <div class="flex items-center gap-2">
+                <button id="btnPlaylistClear" class="px-2 py-1.5 rounded-full border border-neutral-700 text-neutral-300 hover:bg-neutral-800">Leeren</button>
+                <button id="btnPlaylistClose" class="px-2 py-1 rounded-full border border-neutral-700 text-neutral-400 hover:text-neutral-200">✕</button>
+              </div>
+            </div>
+            <div id="playlistList" class="mt-4 divide-y divide-neutral-800 max-h-[60vh] overflow-y-auto">
+            </div>
+          </div>`;
+        document.body.appendChild(playlistBackdrop);
+        playlistBackdrop.addEventListener('click', (ev) => { if (ev.target === playlistBackdrop) closePlaylistPanel(); });
+        playlistBackdrop.querySelector('#btnPlaylistClose').onclick = closePlaylistPanel;
+        playlistBackdrop.querySelector('#btnPlaylistClear').onclick = async () => {
+          try { await fetch('/api/playlist/clear', { method: 'POST' }); } catch {}
+        };
+        updatePlaylistPanel();
+      }
+      function closePlaylistPanel() {
+        if (!playlistBackdrop?.isConnected) return;
+        playlistBackdrop.remove();
+        playlistBackdrop = null;
+      }
+      function updatePlaylistPanel() {
+        const list = document.querySelector('#playlistList');
+        if (!list) return;
+        const rows = (playlist.items || []).map((rel, idx) => {
+          const active = idx === playlist.currentIndex;
+          const dn = toDisplayName(rel);
+          return `<div class="flex items-center gap-3 py-2 px-1 ${active ? 'bg-neutral-800/50' : ''}">
+            <div class="w-6 text-neutral-500 text-right">${idx + 1}</div>
+            <div class="flex-1 truncate">${dn}</div>
+            <div class="flex items-center gap-2">
+              <button data-act="play" data-idx="${idx}" class="px-2 py-1 rounded border border-neutral-700 hover:bg-neutral-800">Öffnen</button>
+              <button data-act="up" data-idx="${idx}" class="px-2 py-1 rounded border border-neutral-700 hover:bg-neutral-800" ${idx===0?'disabled':''}>↑</button>
+              <button data-act="down" data-idx="${idx}" class="px-2 py-1 rounded border border-neutral-700 hover:bg-neutral-800" ${idx>=playlist.items.length-1?'disabled':''}>↓</button>
+              <button data-act="remove" data-idx="${idx}" class="px-2 py-1 rounded border border-rose-700 text-rose-300 hover:bg-rose-900/20">Entfernen</button>
+            </div>
+          </div>`;
+        }).join('') || '<div class="py-6 text-neutral-400">Noch keine Titel in der Playlist. Füge welche aus der Bibliothek hinzu.</div>';
+        list.innerHTML = rows;
+        list.querySelectorAll('button[data-act]').forEach((btn) => {
+          btn.addEventListener('click', async () => {
+            const act = btn.getAttribute('data-act');
+            const idx = Number(btn.getAttribute('data-idx'));
+            if (!Number.isFinite(idx)) return;
+            const rel = playlist.items[idx];
+            if (!rel) return;
+            if (act === 'remove') {
+              await removeFromPlaylist(rel);
+            } else if (act === 'play') {
+              await setPlaylistCurrentIndex(idx);
+              // open viewer with this file
+              history.replaceState(null, '', '/');
+              renderViewer(rel);
+              closePlaylistPanel();
+            } else if (act === 'up' || act === 'down') {
+              const order = [...playlist.items];
+              const to = act === 'up' ? Math.max(0, idx - 1) : Math.min(order.length - 1, idx + 1);
+              if (to !== idx) {
+                const [m] = order.splice(idx, 1);
+                order.splice(to, 0, m);
+                await setPlaylistOrder(order);
+              }
+            }
+          });
         });
       }
 
@@ -1194,6 +1400,8 @@
 
             spacer.appendChild(el);
             pool.set(key, el);
+            // Keep playlist add-buttons in sync for newly mounted nodes
+            updateLibraryPlaylistButtons();
           }
         }
 
@@ -1249,6 +1457,9 @@
             </div>
             <div class="flex items-center gap-2">
               <div class="badge-stack flex flex-wrap gap-1 min-h-[32px] flex-1">${renderCategoryBadges(item)}</div>
+              <button type="button" aria-label="Zur Playlist hinzufügen" title="Zur Playlist hinzufügen" data-name="${item.name}" class="add-playlist h-9 w-9 grid place-items-center rounded-full border border-neutral-700 text-neutral-200 bg-neutral-800/70 hover:bg-neutral-700" style="padding:0;">
+                ${SVG_PLAYLIST_ADD}
+              </button>
               <button type="button" aria-label="Kategorien hinzufügen" title="Kategorien hinzufügen" class="assign-cat h-9 w-9 rounded-full border border-neutral-700 text-neutral-200 bg-neutral-800/70 hover:bg-neutral-700">+</button>
             </div>
           </div>
@@ -1273,6 +1484,19 @@
           ev.preventDefault();
           ev.stopPropagation();
           openCategoryAssignDialog(item);
+        });
+        const addBtn = a.querySelector('.add-playlist');
+        if (addBtn) addBtn.addEventListener('click', async (ev) => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          const name = item.name;
+          const inList = playlist.items.includes(name);
+          if (inList) {
+            await removeFromPlaylist(name);
+          } else {
+            await addToPlaylist(name);
+          }
+          updateLibraryPlaylistButtons();
         });
         queueMicrotask(() => {
           const badgeWrap = a.querySelector('.badge-stack');
@@ -1305,6 +1529,9 @@
           </div>
           <div class="flex flex-col items-end gap-2">
             <button class="fav text-xl leading-none">${state.library.favorites.has(item.name) ? "★" : "☆"}</button>
+            <button class="add-playlist h-9 w-9 grid place-items-center rounded-full border border-neutral-700 text-neutral-200 bg-neutral-800/70 hover:bg-neutral-700" data-name="${item.name}" title="Zur Playlist hinzufügen" style="padding:0;">
+              ${SVG_PLAYLIST_ADD}
+            </button>
             <button class="assign-cat px-3 py-1 rounded-full border border-neutral-700 text-xs text-neutral-200 hover:bg-neutral-800">✦</button>
           </div>
         `;
@@ -1329,7 +1556,118 @@
           ev.stopPropagation();
           openCategoryAssignDialog(item);
         });
+        const addBtn = a.querySelector('.add-playlist');
+        if (addBtn) addBtn.addEventListener('click', async (ev) => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          const name = item.name;
+          const inList = playlist.items.includes(name);
+          if (inList) {
+            await removeFromPlaylist(name);
+          } else {
+            await addToPlaylist(name);
+          }
+          updateLibraryPlaylistButtons();
+        });
         return a;
+      }
+
+      function updateLibraryPlaylistButtons() {
+        document.querySelectorAll('.add-playlist').forEach((btn) => {
+          const name = btn.getAttribute('data-name');
+          const inList = !!name && playlist.items.includes(name);
+          btn.innerHTML = inList ? SVG_PLAYLIST_REMOVE : SVG_PLAYLIST_ADD;
+          btn.title = inList ? 'Aus Playlist entfernen' : 'Zur Playlist hinzufügen';
+          btn.setAttribute('aria-label', inList ? 'Aus Playlist entfernen' : 'Zur Playlist hinzufügen');
+          btn.setAttribute('aria-pressed', String(inList));
+          btn.classList.remove('hidden');
+        });
+      }
+
+      function renderPlaylistLibrary() {
+        // Header actions
+        ensureModeSwitcher();
+        ensureUploadButton();
+        setUploadButtonVisible(true);
+
+        applyAccentTheme(null);
+        const total = playlist.items.length;
+        appEl.innerHTML = `
+          <section class="mb-4 flex flex-wrap items-center gap-2">
+            <div class="text-sm text-neutral-300">Playlist • ${total} Titel</div>
+            <span class="ml-auto flex items-center gap-2">
+              <button id="btnPlClear" class="px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-800 hover:bg-neutral-800">Leeren</button>
+            </span>
+          </section>
+          <section id="plGrid" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3"></section>
+        `;
+
+        const grid = document.querySelector('#plGrid');
+        const makeItem = (rel) => {
+          const encoded = encodePathSegments(rel);
+          const name = rel.split('/').pop();
+          return {
+            id: encodeURIComponent(rel),
+            name: rel,
+            displayName: name,
+            url: `/sheets/${encoded}`,
+            thumbnail: `/thumbnails/${encoded.replace(/\.pdf$/i, '.jpg')}`
+          };
+        };
+        const items = playlist.items.map(makeItem);
+        grid.innerHTML = '';
+        items.forEach((item, idx) => {
+          const card = document.createElement('div');
+          card.className = 'card overflow-hidden border border-neutral-800/80 bg-neutral-900/90 rounded-2xl hover:border-neutral-700 hover:bg-neutral-900 transition';
+          card.innerHTML = `
+            <a href="/?file=${item.id}" class="block">
+              <div class="relative w-full h-[220px] bg-neutral-950/95 grid place-items-center overflow-hidden">
+                <img src="${item.thumbnail}" alt="${item.name}" class="thumb max-h-full max-w-full object-contain" loading="lazy" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex'">
+                <div class="text-neutral-500 text-sm hidden items-center justify-center">📄 PDF</div>
+                <div class="absolute top-2 left-2 px-2 py-0.5 rounded bg-black/50 text-xs text-neutral-300 border border-white/10">${idx + 1}</div>
+              </div>
+              <div class="p-3 flex items-center justify-between gap-2">
+                <div class="truncate text-sm">${item.displayName}</div>
+                <div class="flex items-center gap-1">
+                  <button data-act="up" data-idx="${idx}" class="px-2 py-1 rounded border border-neutral-700 text-xs hover:bg-neutral-800" ${idx===0?'disabled':''}>↑</button>
+                  <button data-act="down" data-idx="${idx}" class="px-2 py-1 rounded border border-neutral-700 text-xs hover:bg-neutral-800" ${idx>=items.length-1?'disabled':''}>↓</button>
+                  <button data-act="remove" data-idx="${idx}" class="px-2 py-1 rounded border border-rose-700 text-rose-300 text-xs hover:bg-rose-900/20">Entfernen</button>
+                </div>
+              </div>
+            </a>
+          `;
+          grid.appendChild(card);
+        });
+
+        // wire actions
+        grid.querySelectorAll('button[data-act]').forEach((btn) => {
+          btn.addEventListener('click', async (ev) => {
+            ev.preventDefault(); ev.stopPropagation();
+            const act = btn.getAttribute('data-act');
+            const idx = Number(btn.getAttribute('data-idx'));
+            if (!Number.isFinite(idx)) return;
+            const rel = playlist.items[idx];
+            if (!rel) return;
+            if (act === 'remove') {
+              await removeFromPlaylist(rel);
+              renderPlaylistLibrary();
+            } else if (act === 'up' || act === 'down') {
+              const order = [...playlist.items];
+              const to = act === 'up' ? Math.max(0, idx - 1) : Math.min(order.length - 1, idx + 1);
+              if (to !== idx) {
+                const [m] = order.splice(idx, 1);
+                order.splice(to, 0, m);
+                await setPlaylistOrder(order);
+                renderPlaylistLibrary();
+              }
+            }
+          });
+        });
+
+        const btnClear = document.querySelector('#btnPlClear');
+        if (btnClear) btnClear.addEventListener('click', async () => {
+          try { await fetch('/api/playlist/clear', { method: 'POST' }); } catch {}
+        });
       }
 
       function openCategoryAssignDialog(item) {
@@ -1732,6 +2070,9 @@
           if (e.key === "Escape") { if (state.viewer.autoScroll.running) { stopAutoScroll(); refreshPlayPauseUI(); } }
         });
 
+        // Reflect playlist controls in the viewer bar
+        updateViewerPlaylistControls();
+
         updateStatus("Lade…");
         await mountPdfVirtual(container, state.viewer.url);
         await new Promise((resolve) => requestAnimationFrame(resolve));
@@ -1783,6 +2124,60 @@
           window.removeEventListener('beforeunload', cleanup);
         };
         window.addEventListener('beforeunload', cleanup);
+      }
+
+      function getEffectivePlaylistIndex() {
+        let idx = Number.isInteger(playlist.currentIndex) ? playlist.currentIndex : -1;
+        const cur = state.viewer.fileName;
+        if (cur) {
+          const found = playlist.items.indexOf(cur);
+          if (found !== -1) idx = found;
+        }
+        return idx;
+      }
+      function updateViewerPlaylistControls() {
+        const has = playlist.mode && playlist.items.length > 0 && document.body.classList.contains('in-viewer');
+        let prev = document.querySelector('#btnPrevTrack');
+        let next = document.querySelector('#btnNextTrack');
+        if (!has) {
+          if (prev) prev.remove();
+          if (next) next.remove();
+          return;
+        }
+        const anchor = document.querySelector('#btnFullscreen');
+        if (!prev) {
+          prev = document.createElement('button');
+          prev.id = 'btnPrevTrack';
+          prev.type = 'button';
+          prev.className = 'px-3 py-2 rounded-lg bg-neutral-800 hover:bg-neutral-700 border border-neutral-700';
+          prev.textContent = '◀︎ Titel';
+          prev.addEventListener('click', () => navigatePlaylist(-1));
+          anchor?.after(prev);
+        }
+        if (!next) {
+          next = document.createElement('button');
+          next.id = 'btnNextTrack';
+          next.type = 'button';
+          next.className = 'px-3 py-2 rounded-lg bg-neutral-800 hover:bg-neutral-700 border border-neutral-700';
+          next.textContent = 'Titel ▶︎';
+          next.addEventListener('click', () => navigatePlaylist(1));
+          if (prev?.nextSibling) prev.after(next); else anchor?.after(next);
+        }
+        const idx = getEffectivePlaylistIndex();
+        prev.disabled = !(idx > 0);
+        next.disabled = !(idx >= 0 && idx < playlist.items.length - 1);
+      }
+      async function navigatePlaylist(delta) {
+        const idx = getEffectivePlaylistIndex();
+        if (idx < 0) return; // not in playlist
+        const next = idx + delta;
+        if (next < 0 || next >= playlist.items.length) return;
+        try { await setPlaylistCurrentIndex(next); } catch {}
+        const rel = playlist.items[next];
+        if (rel) {
+          history.replaceState(null, '', '/');
+          renderViewer(rel);
+        }
       }
 
       // Allow manual scroll override while auto-scroll is running

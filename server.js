@@ -57,6 +57,7 @@ const PUBLIC_DIR = path.join(ROOT, "public");
 const SHEETS_DIR = path.join(ROOT, "sheets");
 const DATA_DIR = path.join(ROOT, "data");
 const CONFIG_FILE = path.join(DATA_DIR, "config.json");
+const PLAYLIST_FILE = path.join(DATA_DIR, "playlist.json");
 const THUMBS_DIR = path.join(DATA_DIR, "thumbnails"); // New: thumbnail cache directory
 const CPU_COUNT = Math.max(1, typeof os.cpus === "function" ? os.cpus().length : 1);
 
@@ -552,6 +553,53 @@ let configFileState = (() => {
     return null;
   }
 })();
+
+/* ---------------- Playlist persistence ---------------- */
+function loadPlaylist() {
+  try {
+    const raw = fs.readFileSync(PLAYLIST_FILE, "utf8");
+    const j = JSON.parse(raw);
+    const items = Array.isArray(j.items) ? j.items.map((name) => {
+      const info = resolvePdfName(name, { requireExists: false });
+      return info ? info.rel : null;
+    }).filter(Boolean) : [];
+    const currentIndex = Number.isInteger(j.currentIndex) ? Math.max(-1, Math.min(items.length - 1, j.currentIndex)) : -1;
+    return { items, currentIndex, updatedAt: Number(j.updatedAt) || Date.now(), name: typeof j.name === 'string' ? j.name : null };
+  } catch {
+    return { items: [], currentIndex: -1, updatedAt: Date.now(), name: null };
+  }
+}
+let PLAYLIST = loadPlaylist();
+let _playlistSaveInProgress = null;
+async function savePlaylistImmediate() {
+  if (_playlistSaveInProgress) {
+    try { await _playlistSaveInProgress; } catch {}
+  }
+  const task = (async () => {
+    try {
+      await fs.promises.mkdir(path.dirname(PLAYLIST_FILE), { recursive: true });
+      const tmp = PLAYLIST_FILE + ".tmp";
+      await fs.promises.writeFile(tmp, JSON.stringify(PLAYLIST, null, 2), "utf8");
+      await fs.promises.rename(tmp, PLAYLIST_FILE);
+    } catch (e) {
+      console.error("savePlaylistImmediate failed:", e);
+      throw e;
+    } finally {
+      _playlistSaveInProgress = null;
+    }
+  })();
+  _playlistSaveInProgress = task;
+  return task;
+}
+
+/* ---------------- Playlist SSE broadcasting ---------------- */
+const playlistClients = new Set();
+function broadcastPlaylist() {
+  const payload = `data: ${JSON.stringify(PLAYLIST)}\n\n`;
+  for (const res of playlistClients) {
+    try { res.write(payload); } catch {}
+  }
+}
 
 function refreshIndexFromConfig() {
   if (!indexCache || !Array.isArray(indexCache.items) || !indexCache.items.length) return;
@@ -1068,6 +1116,118 @@ app.post("/api/system/cache/clear", (req, res) => {
   }
 });
 
+/* ---------------- Playlist API (REST + SSE) ---------------- */
+app.get("/api/playlist", async (req, res) => {
+  // Return current playlist
+  res.setHeader("Cache-Control", "no-store");
+  res.json(PLAYLIST);
+});
+app.get("/api/playlist/events", (req, res) => {
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-store");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders?.();
+
+  // Send initial snapshot
+  try { res.write(`data: ${JSON.stringify(PLAYLIST)}\n\n`); } catch {}
+  playlistClients.add(res);
+
+  const keepAlive = setInterval(() => {
+    try { res.write(`: ping\n\n`); } catch {}
+  }, 25000);
+
+  req.on("close", () => {
+    clearInterval(keepAlive);
+    playlistClients.delete(res);
+    try { res.end(); } catch {}
+  });
+});
+
+function normalizeRelName(name) {
+  const info = resolvePdfName(name, { requireExists: false });
+  return info ? info.rel : null;
+}
+function ensureUniqueOrder(items) {
+  const seen = new Set();
+  const out = [];
+  for (const rel of items) {
+    if (!rel || seen.has(rel)) continue;
+    seen.add(rel);
+    out.push(rel);
+  }
+  return out;
+}
+
+app.post("/api/playlist/add", async (req, res) => {
+  const { name } = req.body || {};
+  const rel = normalizeRelName(name);
+  if (!rel) return res.status(400).json({ error: "Invalid file name" });
+  if (!PLAYLIST.items.includes(rel)) {
+    PLAYLIST.items.push(rel);
+    PLAYLIST.updatedAt = Date.now();
+    await savePlaylistImmediate().catch(() => {});
+    broadcastPlaylist();
+  }
+  res.json({ ok: true, playlist: PLAYLIST });
+});
+app.post("/api/playlist/remove", async (req, res) => {
+  const { name } = req.body || {};
+  const rel = normalizeRelName(name);
+  if (!rel) return res.status(400).json({ error: "Invalid file name" });
+  const idx = PLAYLIST.items.indexOf(rel);
+  if (idx !== -1) {
+    PLAYLIST.items.splice(idx, 1);
+    if (typeof PLAYLIST.currentIndex === 'number' && PLAYLIST.currentIndex >= idx) {
+      PLAYLIST.currentIndex = Math.max(-1, PLAYLIST.currentIndex - 1);
+    }
+    PLAYLIST.updatedAt = Date.now();
+    await savePlaylistImmediate().catch(() => {});
+    broadcastPlaylist();
+  }
+  res.json({ ok: true, playlist: PLAYLIST });
+});
+app.post("/api/playlist/clear", async (req, res) => {
+  PLAYLIST.items = [];
+  PLAYLIST.currentIndex = -1;
+  PLAYLIST.updatedAt = Date.now();
+  await savePlaylistImmediate().catch(() => {});
+  broadcastPlaylist();
+  res.json({ ok: true, playlist: PLAYLIST });
+});
+app.post("/api/playlist/reorder", async (req, res) => {
+  const { order } = req.body || {};
+  if (!Array.isArray(order)) return res.status(400).json({ error: "order must be an array" });
+  const normalized = order.map((n) => normalizeRelName(n)).filter(Boolean);
+  PLAYLIST.items = ensureUniqueOrder(normalized);
+  // Clamp currentIndex
+  if (!PLAYLIST.items.length) PLAYLIST.currentIndex = -1;
+  else if (typeof PLAYLIST.currentIndex === 'number') PLAYLIST.currentIndex = Math.max(-1, Math.min(PLAYLIST.items.length - 1, PLAYLIST.currentIndex));
+  PLAYLIST.updatedAt = Date.now();
+  await savePlaylistImmediate().catch(() => {});
+  broadcastPlaylist();
+  res.json({ ok: true, playlist: PLAYLIST });
+});
+app.post("/api/playlist", async (req, res) => {
+  const { items, currentIndex, name } = req.body || {};
+  if (!Array.isArray(items)) return res.status(400).json({ error: "items must be an array" });
+  const normalized = items.map((n) => normalizeRelName(n)).filter(Boolean);
+  PLAYLIST.items = ensureUniqueOrder(normalized);
+  PLAYLIST.currentIndex = Number.isInteger(currentIndex) ? Math.max(-1, Math.min(PLAYLIST.items.length - 1, currentIndex)) : (PLAYLIST.items.length ? 0 : -1);
+  PLAYLIST.name = typeof name === 'string' ? name : PLAYLIST.name || null;
+  PLAYLIST.updatedAt = Date.now();
+  await savePlaylistImmediate().catch(() => {});
+  broadcastPlaylist();
+  res.json({ ok: true, playlist: PLAYLIST });
+});
+app.post("/api/playlist/current", async (req, res) => {
+  const { index } = req.body || {};
+  if (!Number.isInteger(index)) return res.status(400).json({ error: "index must be integer" });
+  PLAYLIST.currentIndex = Math.max(-1, Math.min(PLAYLIST.items.length - 1, index));
+  PLAYLIST.updatedAt = Date.now();
+  await savePlaylistImmediate().catch(() => {});
+  broadcastPlaylist();
+  res.json({ ok: true, playlist: PLAYLIST });
+});
 /* ---------------- Sheets API (enhanced with pagination) ---------------- */
 app.get("/api/sheets", async (req, res) => {
   try {
