@@ -1,0 +1,2228 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Piano Sheets</title>
+
+    <!-- Tailwind CSS (CDN) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- PDF.js & Fuse.js (local, served by server.js) -->
+    <script src="/vendor/pdfjs/pdf.min.js" defer></script>
+    <script src="/vendor/fuse.min.js" defer></script>
+    <script src="/vendor/nosleep.min.js" defer></script>
+
+    <style>
+      :root {
+        color-scheme: light dark;
+        --surface-0: #050506;
+        --surface-1: #0b0b0c;
+        --surface-2: #111114;
+        --accent-color: #6366F1;
+        --accent-soft: rgba(99, 102, 241, 0.16);
+        --accent-muted: rgba(99, 102, 241, 0.35);
+        --accent-contrast: #F9FAFB;
+      }
+      html, body { height: 100%; }
+      body {
+        background: linear-gradient(145deg, color-mix(in srgb, var(--accent-color) 8%, var(--surface-0)) 0%, var(--surface-0) 55%, var(--surface-1) 100%);
+        transition: background 0.4s ease;
+      }
+      .vh { height: 100vh; height: 100dvh; }
+      .no-scrollbar::-webkit-scrollbar { display: none; }
+      .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+  /* iOS smoother programmatic scrolling */
+  #viewer { -webkit-overflow-scrolling: touch; }
+      .card:hover { transform: translateY(-2px); }
+      .tap-highlight-none { -webkit-tap-highlight-color: rgba(0,0,0,0); }
+      /* iOS/iPad safe-area handling + fullscreen fixes */
+      :root {
+        --sat: env(safe-area-inset-top, 0px);
+        --sab: env(safe-area-inset-bottom, 0px);
+      }
+      /* Controls bar: keep clear of Home indicator */
+      #controls { padding-bottom: var(--sab); }
+      /* In fullscreen hide header and add top/bottom safe padding to viewer */
+      html.is-fs header { display: none !important; }
+      html.is-fs #viewer { padding-top: var(--sat); padding-bottom: calc(var(--sab) + 12px); }
+      body[data-accent-active="true"] header {
+        border-color: var(--accent-muted) !important;
+        background: color-mix(in srgb, var(--accent-color) 10%, rgba(12,12,15,0.85));
+      }
+      body[data-accent-active="true"] #controls {
+        border-color: var(--accent-muted) !important;
+        background: color-mix(in srgb, var(--accent-color) 12%, rgba(12,12,15,0.88));
+      }
+      .category-pill {
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+      }
+      .category-pill:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 18px 32px -28px rgba(0, 0, 0, 0.6);
+      }
+      .category-pill.is-selected {
+        outline: 2px solid rgba(250, 250, 255, 0.5);
+        outline-offset: 2px;
+      }
+      .category-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.3rem;
+        font-size: 0.75rem;
+        padding: 0.15rem 0.55rem;
+        border-radius: 999px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        background: rgba(255, 255, 255, 0.04);
+        text-shadow: 0 1px 1px rgba(0,0,0,0.25);
+      }
+      .badge-stack {
+        max-height: 4.5rem;
+        overflow: hidden;
+        position: relative;
+        padding-bottom: 0.35rem;
+      }
+      .badge-stack::after {
+        content: "";
+        position: absolute;
+        inset: auto 0 0 0;
+        height: 28px;
+        background: linear-gradient(to bottom, rgba(9,9,12,0) 0%, rgba(9,9,12,0.9) 100%);
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity 0.2s ease;
+      }
+      .badge-stack.is-overflowing::after {
+        opacity: 1;
+      }
+      .glass-panel {
+        backdrop-filter: blur(28px);
+        background: rgba(15, 15, 21, 0.9);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 18px;
+        box-shadow: 0 24px 48px -32px rgba(0, 0, 0, 0.65);
+      }
+      .modal-backdrop {
+        position: fixed;
+        inset: 0;
+        background: rgba(6, 6, 9, 0.68);
+        backdrop-filter: blur(18px);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 80;
+        padding: 1.25rem;
+      }
+      #headerUploadBtn {
+        display: inline-flex !important;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.5rem 1rem;
+        font-size: 0.875rem;
+        font-weight: 500;
+        color: #e5e7eb;
+        background: rgba(99, 102, 241, 0.15);
+        border: 1px solid rgba(99, 102, 241, 0.3);
+        border-radius: 0.5rem;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        white-space: nowrap;
+      }
+      #headerUploadBtn:hover {
+        color: #ffffff;
+        background: rgba(99, 102, 241, 0.25);
+        border-color: rgba(99, 102, 241, 0.5);
+        transform: translateY(-1px);
+      }
+      #headerUploadBtn svg {
+        width: 16px;
+        height: 16px;
+        opacity: 0.85;
+        flex-shrink: 0;
+      }
+      #headerUploadBtn:hover svg {
+        opacity: 1;
+      }
+      @media (max-width: 768px) {
+        .glass-panel { width: 92vw; }
+      }
+    </style>
+  </head>
+  <body class="min-h-screen bg-neutral-950 text-neutral-100 antialiased tap-highlight-none">
+    <!-- Header -->
+    <header class="sticky top-0 z-30 bg-neutral-950/80 backdrop-blur border-b border-neutral-800">
+      <div class="mx-auto max-w-7xl px-4 h-14 flex items-center justify-between gap-3">
+        <a href="/" class="text-lg font-semibold tracking-tight">🎼 Piano Sheets</a>
+        <div id="header-actions" class="flex items-center gap-2"></div>
+      </div>
+    </header>
+
+    <!-- Main app mount point -->
+    <main id="app" class="mx-auto max-w-7xl px-4 py-6"></main>
+
+    <!-- Viewer Controls (single Play/Pause with integrated Screen-On) -->
+    <div id="controls" class="fixed bottom-0 inset-x-0 z-40 hidden bg-neutral-900/85 backdrop-blur border-t border-neutral-800">
+      <div class="mx-auto max-w-7xl px-4 py-3 flex items-center gap-3">
+        <button id="btnBack" class="px-3 py-2 rounded-lg bg-neutral-800 hover:bg-neutral-700 border border-neutral-700">← Library</button>
+        <button id="btnFullscreen" class="px-3 py-2 rounded-lg bg-neutral-800 hover:bg-neutral-700 border border-neutral-700">⤢ Fullscreen</button>
+
+        <div class="flex items-center gap-2 ml-2">
+          <label for="secsPerPage" class="text-sm text-neutral-300">Sek./Seite</label>
+          <input id="secsPerPage" type="number" min="5" max="600" step="1"
+                 class="w-24 px-2 py-1 rounded bg-neutral-800 border border-neutral-700" />
+        </div>
+
+        <!-- ONE Play/Pause button -->
+        <button id="btnPlayPause" class="px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white">
+          ▶︎ Start
+        </button>
+
+        <span id="status" class="ml-auto text-sm text-neutral-400"></span>
+      </div>
+    </div>
+
+    <!-- App logic embedded as module -->
+    <script type="module">
+      // force same-origin worker to avoid blob/CORS issues (Safari/iPad)
+      pdfjsLib.GlobalWorkerOptions.workerSrc = "/vendor/pdfjs/pdf.worker.min.js";
+
+  const $ = (sel, el = document) => el.querySelector(sel);
+  const encodePathSegments = (rel) => rel.split('/').map(encodeURIComponent).join('/');
+      const appEl = document.querySelector('#app');
+      const controlsEl = document.querySelector('#controls');
+      const headerActionsEl = document.querySelector('#header-actions');
+  let uploadBtn = null;
+
+      // Reflect fullscreen state on <html> to enable safe-area CSS
+      document.addEventListener("fullscreenchange", () => {
+        document.documentElement.classList.toggle("is-fs", !!document.fullscreenElement);
+      });
+
+      // --- Memory Management ---
+      function checkMemoryPressure() {
+        const now = Date.now();
+        if (now - state.memory.lastCheck < state.memory.checkInterval) return;
+        state.memory.lastCheck = now;
+        
+        try {
+          // Use performance.memory if available (Chrome/Edge)
+          if (performance.memory) {
+            const { usedJSHeapSize, totalJSHeapSize } = performance.memory;
+            const memoryUsage = usedJSHeapSize / totalJSHeapSize;
+            state.memory.isLowMemory = memoryUsage > 0.8; // 80% threshold
+            
+            if (state.memory.isLowMemory) {
+              console.warn('High memory usage detected:', Math.round(memoryUsage * 100) + '%');
+              aggressiveCleanup();
+            }
+          }
+        } catch (e) {
+          // Fallback: assume low memory on iPad/mobile after extended use
+          const isTouch = 'ontouchstart' in window;
+          if (isTouch && state.thumbs.cache.size > 20) {
+            state.memory.isLowMemory = true;
+            aggressiveCleanup();
+          }
+        }
+      }
+      
+      function aggressiveCleanup() {
+        console.log('Performing aggressive memory cleanup...');
+        
+        // Clear offscreen canvases in viewer
+        const container = document.querySelector('#viewer');
+        if (container) {
+          const canvases = container.querySelectorAll('canvas');
+          canvases.forEach((canvas, index) => {
+            const rect = canvas.getBoundingClientRect();
+            const containerRect = container.getBoundingClientRect();
+            const isVisible = rect.bottom > containerRect.top && rect.top < containerRect.bottom;
+            
+            // Keep only visible canvases and a few around them
+            if (!isVisible && index > 5) {
+              const ctx = canvas.getContext('2d');
+              if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+              canvas.width = canvas.height = 0;
+              canvas.remove();
+            }
+          });
+        }
+        
+        // Force garbage collection if available
+        if (window.gc) {
+          try { window.gc(); } catch (e) {}
+        }
+      }
+
+      // --- Wake Lock: default ON in viewer (auto + resilient) ---
+      function setWakeBtn(active) {
+        const btn = document.querySelector('#btnWakeLock');
+        if (btn) btn.textContent = active ? '☀︎ Screen On ✓' : '☀︎ Screen On';
+      }
+      function armWakeLockFromGestures(rootEl = document) {
+        const once = async () => {
+          await acquireWakeLockAuto();
+          window.removeEventListener('pointerdown', once);
+          window.removeEventListener('keydown', once);
+          rootEl.removeEventListener?.('touchstart', once);
+          rootEl.removeEventListener?.('pointerdown', once);
+        };
+        window.addEventListener('pointerdown', once, { once: true });
+        window.addEventListener('keydown', once, { once: true });
+        rootEl.addEventListener?.('touchstart', once, { once: true, passive: true });
+        rootEl.addEventListener?.('pointerdown', once, { once: true });
+      }
+      async function acquireWakeLockAuto() {
+        // Prefer Screen Wake Lock API
+        try {
+          if ('wakeLock' in navigator) {
+            if (!state.viewer.wakeLock) {
+              state.viewer.wakeLock = await navigator.wakeLock.request('screen');
+              state.viewer.wakeLock.addEventListener?.('release', () => {
+                state.viewer.wakeLock = null;
+                setWakeBtn(false);
+                if (document.body.classList.contains('in-viewer')) {
+                  // try to re-acquire silently
+                  acquireWakeLockAuto();
+                }
+              });
+            }
+            if (state.viewer.wakeDesired) setWakeBtn(true);
+            return true;
+          }
+        } catch (e) {
+          console.warn('WakeLock.request failed', e);
+        }
+        // Fallback: NoSleep.js (must be created from a user gesture on iOS)
+        try {
+          if (!state.viewer.noSleep && window.NoSleep) {
+            state.viewer.noSleep = new window.NoSleep();
+          }
+          if (state.viewer.noSleep && !state.viewer.noSleepEnabled) {
+            state.viewer.noSleep.enable(); // may throw if not from gesture on iOS
+            state.viewer.noSleepEnabled = true;
+            if (state.viewer.wakeDesired) setWakeBtn(true);
+            return true;
+          }
+        } catch (e) {
+          console.warn('NoSleep.enable failed (needs user gesture on iOS)', e);
+        }
+        return false;
+      }
+      
+      // Synchrone Wake Lock Aktivierung für iOS/iPad - MUSS im Click-Handler aufgerufen werden
+      function acquireWakeLockSync() {
+        // NoSleep.js SOFORT aktivieren (synchron, in der User-Geste)
+        try {
+          if (!state.viewer.noSleep && window.NoSleep) {
+            state.viewer.noSleep = new window.NoSleep();
+          }
+          if (state.viewer.noSleep && !state.viewer.noSleepEnabled) {
+            state.viewer.noSleep.enable();
+            state.viewer.noSleepEnabled = true;
+            if (state.viewer.wakeDesired) setWakeBtn(true);
+          }
+        } catch (e) {
+          console.warn('NoSleep sync activation failed', e);
+        }
+        // Wake Lock API async im Hintergrund
+        if ('wakeLock' in navigator && !state.viewer.wakeLock) {
+          navigator.wakeLock.request('screen').then(lock => {
+            state.viewer.wakeLock = lock;
+            lock.addEventListener?.('release', () => {
+              state.viewer.wakeLock = null;
+              setWakeBtn(false);
+              if (document.body.classList.contains('in-viewer')) {
+                acquireWakeLockAuto();
+              }
+            });
+            if (state.viewer.wakeDesired) setWakeBtn(true);
+          }).catch(e => {
+            console.warn('WakeLock.request failed', e);
+          });
+        }
+      }
+      async function releaseWakeLock() {
+        try { if (state.viewer.wakeLock) { await state.viewer.wakeLock.release(); state.viewer.wakeLock = null; } } catch {}
+        try { if (state.viewer.noSleep && state.viewer.noSleepEnabled) { state.viewer.noSleep.disable(); state.viewer.noSleepEnabled = false; } } catch {}
+        setWakeBtn(false);
+      }
+
+      // Wake-lock watchdog: re-assert lock every 15s while in viewer
+      function startWakeWatch() {
+        stopWakeWatch();
+        state.viewer.wakeTimer = setInterval(() => {
+          if (document.visibilityState === 'visible' && document.body.classList.contains('in-viewer')) {
+            acquireWakeLockAuto();
+          }
+        }, 15000);
+      }
+      function stopWakeWatch() {
+        if (state.viewer.wakeTimer) { clearInterval(state.viewer.wakeTimer); state.viewer.wakeTimer = null; }
+      }
+      // Re-acquire when the tab becomes visible again (Safari can drop locks)
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible' && document.body.classList.contains('in-viewer')) {
+          acquireWakeLockAuto();
+        }
+      });
+      // Re-acquire on fullscreen/rotation changes (often releases locks on iPadOS)
+      document.addEventListener('fullscreenchange', () => {
+        if (document.fullscreenElement && document.body.classList.contains('in-viewer')) {
+          acquireWakeLockAuto();
+        }
+      });
+      window.addEventListener('orientationchange', () => {
+        if (document.body.classList.contains('in-viewer')) acquireWakeLockAuto();
+      });
+      window.addEventListener('pageshow', () => {
+        if (document.body.classList.contains('in-viewer')) acquireWakeLockAuto();
+      });
+      window.addEventListener('pagehide', () => {
+        // nothing; iOS may suspend timers – watchdog will restart on pageshow
+      });
+
+      const params = new URLSearchParams(location.search);
+      const currentFile = params.get("file"); // encoded
+
+      // ---- Global State (simplified for server-side thumbnails) ----
+      const state = {
+        library: {
+          total: 0,
+          sort: localStorage.getItem("libSort") || "name",
+          order: localStorage.getItem("libOrder") || "asc",
+          q: "",
+          view: localStorage.getItem("libView") || "grid",
+          favorites: new Set(),
+          onlyFavorites: localStorage.getItem("onlyFav") === "true",
+          pageSize: "80",
+          page: 1,
+          items: [],
+          categoryFilter: localStorage.getItem("libCategory") || null
+        },
+        viewer: {
+          fileName: null, url: null, numPages: 0,
+          secsPerPage: 45,
+          autoScroll: { running: false, lastTs: 0, speedPxPerSec: 0, needsRecalc: false, pending: false, token: null, pos: 0 },
+          wakeDesired: false,
+          wakeLock: null, noSleep: null, noSleepEnabled: false,
+          wakeTimer: null,
+          categories: [],
+          layoutObserver: null
+        },
+        categories: [],
+        ui: {
+          accentColor: null,
+          accentSource: null,
+          uploadOpen: false,
+          uploadLimitMb: 200,
+          uploadSupported: true
+        },
+        thumbs: {
+          cache: new Map(),
+          maxCacheSize: 48,
+          lastCleanup: 0
+        },
+        memory: {
+          lastCheck: 0,
+          isLowMemory: false,
+          checkInterval: 10000 // Check every 10s
+        }
+      };
+
+      // ===== Router =====
+      (async function init() {
+        if (currentFile) {
+          await hydrateCategories();
+          await renderViewer(decodeURIComponent(currentFile));
+        } else {
+          await loadPrefsFromBackend();
+          await hydrateCategories();
+          await loadPage();
+          renderLibrary();
+        }
+      })();
+
+      // ===== Backend Prefs =====
+      async function loadPrefsFromBackend() {
+        try {
+          const res = await fetch("/api/prefs", { cache: "no-store" });
+          if (!res.ok) return;
+          const prefs = await res.json();
+          if (Array.isArray(prefs.favorites)) {
+            state.library.favorites = new Set(prefs.favorites);
+          }
+        } catch {}
+      }
+      async function setFavoriteOnBackend(name, favorite) {
+        try {
+          const res = await fetch("/api/prefs/favorites", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name, favorite })
+          });
+          if (res.ok) {
+            const j = await res.json();
+            if (Array.isArray(j.favorites)) {
+              state.library.favorites = new Set(j.favorites);
+            }
+          }
+        } catch {}
+      }
+      async function getFilePrefsFromBackend(name) {
+        try {
+          const res = await fetch(`/api/prefs/file?name=${encodeURIComponent(name)}`, { cache: "no-store" });
+          if (!res.ok) return null;
+          const j = await res.json();
+          return {
+            secsPerPage: Number(j.secsPerPage) || null,
+            categories: Array.isArray(j.categories) ? j.categories : [],
+            categoryIds: Array.isArray(j.categoryIds) ? j.categoryIds : []
+          };
+        } catch { return null; }
+      }
+      async function setFileSecsOnBackend(name, secs) {
+        try {
+          await fetch("/api/prefs/file", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name, secsPerPage: secs })
+          });
+        } catch {}
+      }
+
+      async function setFileCategoriesOnBackend(name, categories) {
+        try {
+          const res = await fetch("/api/prefs/file", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name, categories })
+          });
+          if (res?.ok) {
+            const payload = await res.json();
+            return payload;
+          }
+        } catch {}
+        return null;
+      }
+
+      async function hydrateCategories() {
+        try {
+          const res = await fetch("/api/categories", { cache: "no-store" });
+          if (!res.ok) return;
+          const data = await res.json();
+          if (Array.isArray(data.categories)) {
+            state.categories = data.categories;
+            if (state.library.categoryFilter && !state.categories.some(cat => cat.id === state.library.categoryFilter)) {
+              state.library.categoryFilter = null;
+              localStorage.removeItem("libCategory");
+            }
+          }
+        } catch {}
+      }
+
+      async function createCategoryOnBackend(payload) {
+        try {
+          const res = await fetch("/api/categories", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+          });
+          if (res?.ok) {
+            const data = await res.json();
+            if (Array.isArray(data.categories)) {
+              state.categories = data.categories;
+            }
+            return data.category || null;
+          }
+        } catch {}
+        return null;
+      }
+
+      async function updateCategoryOnBackend(id, payload) {
+        try {
+          const res = await fetch(`/api/categories/${encodeURIComponent(id)}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+          });
+          if (res?.ok) {
+            const data = await res.json();
+            if (Array.isArray(data.categories)) {
+              state.categories = data.categories;
+            }
+            return data.category || null;
+          }
+        } catch {}
+        return null;
+      }
+
+      async function deleteCategoryOnBackend(id) {
+        try {
+          const res = await fetch(`/api/categories/${encodeURIComponent(id)}`, {
+            method: "DELETE"
+          });
+          if (res?.ok) {
+            const data = await res.json();
+            if (Array.isArray(data.categories)) {
+              state.categories = data.categories;
+            }
+            return true;
+          }
+        } catch {}
+        return false;
+      }
+
+      const categoryHelpers = {
+        byId(id) {
+          return state.categories.find((cat) => cat.id === id) || null;
+        },
+        toChip(cat, size = "sm") {
+          if (!cat) return "";
+          const px = size === "lg" ? "0.35rem 0.75rem" : "0.2rem 0.55rem";
+          const font = size === "lg" ? "0.8rem" : "0.72rem";
+          return `<span class="category-chip" style="background:${cat.color}1a;border-color:${cat.color}44;color:${cat.color};padding:${px};font-size:${font};">${cat.icon || "♪"}<span class="truncate max-w-[8rem] inline-block align-middle">${cat.name}</span></span>`;
+        }
+      };
+
+      function applyAccentTheme(catId) {
+        const targetCat = catId ? categoryHelpers.byId(catId) : null;
+        const accent = targetCat?.color || null;
+        const icon = targetCat?.icon || null;
+        state.ui.accentColor = accent;
+        state.ui.accentSource = targetCat ? { id: targetCat.id, icon } : null;
+
+        const root = document.documentElement;
+        if (accent) {
+          root.style.setProperty("--accent-color", accent);
+          root.style.setProperty("--accent-soft", `${accent}26`);
+          root.style.setProperty("--accent-muted", `${accent}4d`);
+          document.body.setAttribute("data-accent-active", "true");
+        } else {
+          root.style.setProperty("--accent-color", "#6366F1");
+          root.style.setProperty("--accent-soft", "rgba(99, 102, 241, 0.16)");
+          root.style.setProperty("--accent-muted", "rgba(99, 102, 241, 0.35)");
+          document.body.removeAttribute("data-accent-active");
+        }
+      }
+
+      const DEFAULT_UPLOAD_LIMIT_MB = 200;
+
+      function ensureUploadButton() {
+        // Check if button exists AND is still in the DOM
+        if (uploadBtn && uploadBtn.isConnected) return;
+        
+        uploadBtn = document.createElement('button');
+        uploadBtn.id = 'headerUploadBtn';
+        uploadBtn.type = 'button';
+        uploadBtn.setAttribute('aria-label', 'Neues PDF hochladen');
+        uploadBtn.innerHTML = `
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="17 8 12 3 7 8"></polyline>
+            <line x1="12" y1="3" x2="12" y2="15"></line>
+          </svg>
+          <span>Upload</span>
+        `;
+        uploadBtn.addEventListener('click', () => {
+          openUploadDialog();
+        });
+        headerActionsEl.appendChild(uploadBtn);
+      }
+
+      function setUploadButtonVisible(visible) {
+        if (!uploadBtn || !uploadBtn.isConnected) return;
+        const shouldShow = Boolean(visible && !state.ui.uploadOpen && state.ui.uploadSupported);
+        uploadBtn.hidden = !shouldShow;
+      }
+
+      async function openUploadDialog() {
+        if (state.ui.uploadOpen) return;
+        state.ui.uploadOpen = true;
+        let backdrop = null;
+        try {
+          try { await hydrateCategories(); } catch (err) { console.warn('Kategorien konnten nicht aktualisiert werden:', err); }
+
+          ensureUploadButton();
+          setUploadButtonVisible(false);
+
+          const categories = Array.isArray(state.categories) ? state.categories : [];
+          const selected = new Set();
+          const limitMb = state.ui.uploadLimitMb || DEFAULT_UPLOAD_LIMIT_MB;
+
+          const categoriesMarkup = categories.length
+            ? categories.map((cat) => {
+              const color = cat.color || '#6366F1';
+              return `<button type="button" class="category-pill px-3 py-1.5 rounded-full border border-neutral-700/70 text-sm text-neutral-200 hover:bg-neutral-800 flex items-center gap-2" data-cat="${cat.id}">
+                  <span class="text-lg">${cat.icon || '♪'}</span>
+                  <span>${cat.name}</span>
+                  <span data-role="indicator" class="hidden text-xs text-emerald-300">✓</span>
+                </button>`;
+            }).join('')
+            : '<div class="rounded-xl border border-dashed border-neutral-700 p-4 text-neutral-400 text-sm">Keine Kategorien vorhanden.</div>';
+
+          backdrop = document.createElement('div');
+          backdrop.className = 'modal-backdrop';
+          backdrop.dataset.modal = 'upload';
+          backdrop.innerHTML = `
+            <div class="glass-panel w-[560px] max-w-full p-6 text-sm text-neutral-200" role="dialog" aria-modal="true">
+              <div class="flex items-center justify-between gap-3">
+                <div>
+                  <div class="text-xs uppercase tracking-wide text-neutral-500">Bibliothek</div>
+                  <h2 class="text-lg font-semibold text-neutral-100">Neues PDF hinzufügen</h2>
+                </div>
+                <button type="button" class="px-2 py-1 rounded-full border border-neutral-700 text-neutral-400 hover:text-neutral-200" data-role="close">✕</button>
+              </div>
+              <form id="uploadForm" class="mt-5 space-y-4" enctype="multipart/form-data">
+                <label class="flex flex-col gap-2 text-sm text-neutral-300">
+                  <span class="text-xs uppercase tracking-wide text-neutral-400">PDF Datei</span>
+                  <input type="file" name="file" accept="application/pdf" required class="px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-700 text-sm" />
+                  <span data-role="fileLabel" class="text-xs text-neutral-500">${limitMb} MB max • Nur PDF</span>
+                </label>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <label class="text-xs uppercase tracking-wide text-neutral-400">Scrollzeit pro Seite
+                    <input type="number" name="secsPerPage" min="5" max="600" class="mt-1 w-full px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-700" placeholder="z.B. 45" />
+                  </label>
+                  <label class="flex items-center gap-2 text-sm text-neutral-300 sm:mt-6">
+                    <input type="checkbox" name="favorite" class="h-4 w-4 rounded border-neutral-600 bg-neutral-900" />
+                    <span>Als Favorit markieren</span>
+                  </label>
+                </div>
+                <div>
+                  <div class="flex items-center justify-between gap-2">
+                    <span class="text-xs uppercase tracking-wide text-neutral-400">Kategorien (optional)</span>
+                    <button type="button" data-role="manage" class="text-xs text-emerald-400 hover:text-emerald-200">Neue Kategorie</button>
+                  </div>
+                  <div id="uploadCategoryList" class="mt-3 flex flex-wrap gap-2">${categoriesMarkup}</div>
+                </div>
+                <p data-role="status" class="text-xs text-amber-400 min-h-[1.25rem]"></p>
+                <div class="flex justify-end gap-2">
+                  <button type="button" data-role="cancel" class="px-3 py-2 rounded-lg border border-neutral-700 text-neutral-200 hover:bg-neutral-800">Abbrechen</button>
+                  <button type="submit" class="px-3 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-500">Hochladen</button>
+                </div>
+              </form>
+            </div>`;
+
+          document.body.appendChild(backdrop);
+
+          const form = backdrop.querySelector('#uploadForm');
+          const statusEl = form.querySelector('[data-role="status"]');
+          const fileInput = form.querySelector('input[name="file"]');
+          const fileLabel = form.querySelector('[data-role="fileLabel"]');
+          const favoriteInput = form.querySelector('input[name="favorite"]');
+          const secsInput = form.querySelector('input[name="secsPerPage"]');
+          const submitBtn = form.querySelector('button[type="submit"]');
+          const cancelBtn = form.querySelector('[data-role="cancel"]');
+          const manageBtn = form.querySelector('[data-role="manage"]');
+
+          let modalClosed = false;
+          const handleKeyDown = (ev) => {
+            if (ev.key === 'Escape') {
+              ev.preventDefault();
+              closeModal();
+            }
+          };
+
+          function closeModal() {
+            if (modalClosed) return;
+            modalClosed = true;
+            document.removeEventListener('keydown', handleKeyDown);
+            backdrop.remove();
+            state.ui.uploadOpen = false;
+            setUploadButtonVisible(true);
+            uploadBtn?.focus();
+          }
+
+          document.addEventListener('keydown', handleKeyDown);
+
+          backdrop.addEventListener('click', (ev) => {
+            if (ev.target === backdrop) closeModal();
+          });
+
+          backdrop.querySelectorAll('[data-role="close"]').forEach((btn) => btn.addEventListener('click', closeModal));
+          cancelBtn?.addEventListener('click', closeModal);
+
+          if (manageBtn) {
+            manageBtn.addEventListener('click', () => {
+              closeModal();
+              openCategoryManager({ focusMode: 'create' });
+            });
+          }
+
+          backdrop.querySelectorAll('[data-cat]').forEach((btn) => {
+            btn.addEventListener('click', () => {
+              const id = btn.getAttribute('data-cat');
+              if (!id) return;
+              if (selected.has(id)) {
+                selected.delete(id);
+                btn.classList.remove('is-selected');
+                btn.querySelector('[data-role="indicator"]')?.classList.add('hidden');
+              } else {
+                selected.add(id);
+                btn.classList.add('is-selected');
+                btn.querySelector('[data-role="indicator"]')?.classList.remove('hidden');
+              }
+            });
+          });
+
+          fileInput.addEventListener('change', () => {
+            const name = fileInput.files?.[0]?.name;
+            fileLabel.textContent = name ? `Ausgewählt: ${name}` : `${limitMb} MB max • Nur PDF`;
+            statusEl.textContent = '';
+          });
+
+          form.addEventListener('submit', async (ev) => {
+            ev.preventDefault();
+            statusEl.textContent = '';
+            const file = fileInput.files?.[0];
+            if (!file) {
+              statusEl.textContent = 'Bitte wähle eine PDF-Datei aus.';
+              return;
+            }
+            const lowerName = (file.name || '').toLowerCase();
+            const declaredType = (file.type || '').toLowerCase();
+            if (!declaredType.includes('pdf') && !lowerName.endsWith('.pdf')) {
+              statusEl.textContent = 'Nur PDF-Dateien können hochgeladen werden.';
+              return;
+            }
+            const secsRaw = (secsInput.value || '').trim();
+            let secsValue = null;
+            if (secsRaw) {
+              const parsed = Number(secsRaw);
+              if (!Number.isFinite(parsed) || parsed < 5 || parsed > 600) {
+                statusEl.textContent = 'Sekunden pro Seite müssen zwischen 5 und 600 liegen.';
+                return;
+              }
+              secsValue = Math.round(parsed);
+            }
+            const metaPayload = {
+              originalName: file.name || 'upload.pdf',
+              categories: Array.from(selected),
+              favorite: favoriteInput.checked
+            };
+            if (secsValue !== null) metaPayload.secsPerPage = secsValue;
+
+            submitBtn.disabled = true;
+            cancelBtn.disabled = true;
+            submitBtn.textContent = 'Lade hoch…';
+
+            try {
+              const headers = new Headers({
+                'Content-Type': declaredType.includes('pdf') ? declaredType : 'application/pdf',
+                'X-Upload-Name': file.name || 'upload.pdf',
+                'X-Upload-Meta': JSON.stringify(metaPayload),
+                'Accept': 'application/json'
+              });
+
+              const res = await fetch('/api/upload', { method: 'POST', headers, body: file });
+              const payload = await res.json().catch(() => ({}));
+              if (!res.ok || !payload.ok) {
+                const err = new Error(payload.error || 'Upload fehlgeschlagen.');
+                err.status = res.status;
+                throw err;
+              }
+              state.ui.uploadSupported = true;
+              if (Array.isArray(payload.favorites)) {
+                state.library.favorites = new Set(payload.favorites);
+              }
+              if (payload.maxUploadBytes) {
+                const mb = Math.round(Number(payload.maxUploadBytes) / 1024 / 1024);
+                if (Number.isFinite(mb) && mb > 0) {
+                  state.ui.uploadLimitMb = mb;
+                }
+              }
+              closeModal();
+              await loadPage();
+              renderLibrary();
+            } catch (error) {
+              if (error.status === 503) {
+                state.ui.uploadSupported = false;
+                statusEl.textContent = error.message || 'Uploads sind aktuell nicht verfügbar.';
+                setTimeout(() => {
+                  closeModal();
+                  setUploadButtonVisible(false);
+                }, 1000);
+                return;
+              }
+              if (error.status === 413) {
+                statusEl.textContent = `Datei ist zu groß (max. ${limitMb} MB).`;
+              } else if (error.status === 415) {
+                statusEl.textContent = 'Nur PDF-Dateien erlaubt.';
+              } else {
+                statusEl.textContent = error.message || 'Upload fehlgeschlagen.';
+              }
+              submitBtn.disabled = false;
+              cancelBtn.disabled = false;
+              submitBtn.textContent = 'Hochladen';
+            }
+          });
+
+          requestAnimationFrame(() => fileInput.focus());
+        } catch (err) {
+          console.error('Upload-Dialog konnte nicht geöffnet werden:', err);
+          if (backdrop?.isConnected) backdrop.remove();
+          state.ui.uploadOpen = false;
+          setUploadButtonVisible(true);
+        }
+      }
+
+      // ===== API (Library) =====
+      async function fetchPage({ q = "", sort, order, page, pageSize, fav = false, category = null }) {
+        const qs = new URLSearchParams({ q, sort, order, page: String(page), pageSize: String(pageSize) });
+        if (fav) qs.set("fav", "1");
+        if (category) qs.set("category", category);
+        const res = await fetch(`/api/sheets?${qs.toString()}`, { cache: "no-store" });
+        if (!res.ok) throw new Error("API error");
+        return res.json();
+      }
+      async function loadPage() {
+        const L = state.library;
+        // Keep page fixed when paginating; don't reset page here.
+        const data = await fetchPage({ q: L.q, sort: L.sort, order: L.order, page: L.page, pageSize: L.pageSize, fav: L.onlyFavorites, category: L.categoryFilter });
+        L.items = data.items || [];
+        L.total = data.total || 0;
+        if (Array.isArray(data.categories)) {
+          state.categories = data.categories;
+          if (L.categoryFilter && !state.categories.some(cat => cat.id === L.categoryFilter)) {
+            L.categoryFilter = null;
+            localStorage.removeItem("libCategory");
+          }
+        }
+      }
+
+      async function applyCategoryFilter(catId) {
+        state.library.categoryFilter = catId || null;
+        applyAccentTheme(state.library.categoryFilter);
+        if (state.library.categoryFilter) localStorage.setItem("libCategory", state.library.categoryFilter);
+        else localStorage.removeItem("libCategory");
+        state.library.page = 1;
+        appEl.innerHTML = '<div class="flex items-center justify-center h-[60vh] text-neutral-400">Lade…</div>';
+        await loadPage();
+        renderLibrary();
+      }
+
+      // ===== Library UI =====
+      function renderLibrary() {
+        document.body.classList.remove('in-viewer');
+        releaseWakeLock();
+        stopWakeWatch();
+        stopAutoScroll();
+        if (state.viewer.layoutObserver) {
+          state.viewer.layoutObserver.disconnect();
+          state.viewer.layoutObserver = null;
+        }
+        
+        // Cleanup viewer memory when returning to library
+        aggressiveCleanup();
+        
+        controlsEl.classList.add("hidden");
+        headerActionsEl.innerHTML = "";
+
+        const L = state.library;
+        applyAccentTheme(L.categoryFilter);
+        const allMode = L.pageSize === "all";
+        const favCls = L.onlyFavorites
+          ? "bg-amber-500/20 border-amber-400 text-amber-300"
+          : "bg-neutral-900 border-neutral-800";
+        const totalPages = Math.max(1, Math.ceil(L.total / L.pageSize));
+
+        appEl.innerHTML = `
+          <section class="mb-4 flex flex-wrap items-center gap-2">
+            <input id="search" placeholder="Suche nach Titel…"
+                  class="w-72 max-w-full px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-800" />
+            <select id="sort" class="px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-800">
+              <option value="name">Name</option>
+              <option value="mtime">Zuletzt geändert</option>
+              <option value="size">Dateigröße</option>
+            </select>
+            <select id="order" class="px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-800">
+              <option value="asc">↑ aufsteigend</option>
+              <option value="desc">↓ absteigend</option>
+            </select>
+            <button id="toggleView" class="px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-800">
+              Ansicht: ${L.view === "grid" ? "Grid" : "Liste"}
+            </button>
+            <button id="filterFav" class="px-3 py-2 rounded-lg ${favCls}" aria-pressed="${L.onlyFavorites}">★ Favoriten</button>
+            <button id="memoryStatus" class="px-2 py-1 text-xs rounded bg-neutral-800 border border-neutral-700 hidden">RAM: --</button>
+            <span class="ml-auto text-sm text-neutral-400">Seite ${L.page} / ${totalPages} • ${L.total} Dateien</span>
+          </section>
+          <section id="categoryBar" class="mb-4 flex flex-wrap items-center gap-2"></section>
+          <section id="virtualWrap" class="relative overflow-auto border border-neutral-800 rounded-xl bg-neutral-900 h-[70vh]"></section>
+          <section class="mt-3 flex items-center justify-between">
+            <button id="prevPage" class="px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-800" ${L.page<=1?"disabled":""}>« Zurück</button>
+            <div class="text-sm text-neutral-400">Seite <span id="pNow">${L.page}</span> / ${totalPages}</div>
+            <button id="nextPage" class="px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-800" ${L.page>=totalPages?"disabled":""}>Weiter »</button>
+          </section>`;
+
+        // Update memory status
+        updateMemoryStatus();
+        renderCategoryBar();
+
+        const activeHeaderCategory = state.library.categoryFilter ? categoryHelpers.byId(state.library.categoryFilter) : null;
+        if (activeHeaderCategory) {
+          headerActionsEl.innerHTML = `<span class="category-chip" style="background:${activeHeaderCategory.color}1f;border-color:${activeHeaderCategory.color}44;color:${activeHeaderCategory.color};">${activeHeaderCategory.icon || '♪'}<span>${activeHeaderCategory.name}</span></span>`;
+        }
+        
+        // Add upload button AFTER category chip (or as only element if no category)
+        ensureUploadButton();
+        setUploadButtonVisible(true);
+
+        const searchEl = document.querySelector('#search');
+        const sortEl = document.querySelector('#sort');
+        const orderEl = document.querySelector('#order');
+        const viewBtn = document.querySelector('#toggleView');
+
+        searchEl.value = L.q;
+        sortEl.value = L.sort;
+        orderEl.value = L.order;
+
+        let searchTimer = null;
+        searchEl.addEventListener("input", (e) => {
+          clearTimeout(searchTimer);
+          searchTimer = setTimeout(async () => {
+            state.library.q = e.target.value.trim();
+            state.library.page = 1;
+            appEl.innerHTML = '<div class="flex items-center justify-center h-[70vh] text-neutral-400">Lade…</div>';
+            await loadPage();
+            renderLibrary();
+          }, 300);
+        });
+
+        sortEl.onchange = async (e) => {
+          L.sort = e.target.value; localStorage.setItem("libSort", L.sort);
+          L.page = 1;
+          appEl.innerHTML = '<div class="flex items-center justify-center h-[70vh] text-neutral-400">Lade…</div>';
+          await loadPage();
+          renderLibrary();
+        };
+        orderEl.onchange = async (e) => {
+          L.order = e.target.value; localStorage.setItem("libOrder", L.order);
+          L.page = 1;
+          appEl.innerHTML = '<div class="flex items-center justify-center h-[70vh] text-neutral-400">Lade…</div>';
+          await loadPage();
+          renderLibrary();
+        };
+        viewBtn.onclick = () => {
+          L.view = L.view === "grid" ? "list" : "grid";
+          localStorage.setItem("libView", L.view);
+          renderLibrary();
+        };
+
+        document.querySelector('#filterFav').onclick = async () => {
+          L.onlyFavorites = !L.onlyFavorites;
+          localStorage.setItem("onlyFav", String(L.onlyFavorites));
+          L.page = 1;
+          appEl.innerHTML = '<div class="flex items-center justify-center h-[70vh] text-neutral-400">Lade…</div>';
+          await loadPage();
+          renderLibrary();
+        };
+        document.querySelector('#prevPage').onclick = async () => {
+          if (L.page > 1) {
+            L.page--;
+            appEl.innerHTML = '<div class="flex items-center justify-center h-[70vh] text-neutral-400">Lade…</div>';
+            await loadPage();
+            renderLibrary();
+          }
+        };
+        document.querySelector('#nextPage').onclick = async () => {
+          const totalPages = Math.max(1, Math.ceil(L.total / L.pageSize));
+          if (L.page < totalPages) {
+            L.page++;
+            appEl.innerHTML = '<div class="flex items-center justify-center h-[70vh] text-neutral-400">Lade…</div>';
+            await loadPage();
+            renderLibrary();
+          }
+        };
+
+        // Memory status display
+        function updateMemoryStatus() {
+          const btn = document.querySelector('#memoryStatus');
+          if (!btn) return;
+
+          try {
+            if (performance.memory) {
+              const used = Math.round(performance.memory.usedJSHeapSize / 1024 / 1024);
+              const total = Math.round(performance.memory.totalJSHeapSize / 1024 / 1024);
+              const percentage = Math.round((used / total) * 100);
+
+              btn.textContent = `RAM: ${used}/${total}MB (${percentage}%)`;
+              btn.classList.remove('hidden');
+
+              // Color coding based on usage
+              btn.className = btn.className.replace(/bg-\w+-\d+/, '');
+              if (percentage > 80) {
+                btn.classList.add('bg-red-800');
+              } else if (percentage > 60) {
+                btn.classList.add('bg-yellow-800');
+              } else {
+                btn.classList.add('bg-green-800');
+              }
+            } else {
+              btn.textContent = `Cache: ${state.thumbs.cache.size}`;
+              btn.classList.remove('hidden');
+            }
+          } catch (e) {
+            btn.classList.add('hidden');
+          }
+        }
+
+        function renderCategoryBar() {
+          const host = document.querySelector('#categoryBar');
+          if (!host) return;
+          const categories = state.categories;
+          const activeId = state.library.categoryFilter;
+
+          if (!categories.length) {
+            host.innerHTML = `
+              <div class="flex flex-wrap items-center gap-3 text-sm text-neutral-400">
+                <span>Keine Kategorien angelegt.</span>
+                <button id="btnCreateCategoryPrimary" class="px-3 py-1.5 rounded-full bg-neutral-800 hover:bg-neutral-700 border border-neutral-700">Kategorie erstellen</button>
+              </div>`;
+            const createBtn = document.querySelector('#btnCreateCategoryPrimary');
+            if (createBtn) createBtn.addEventListener('click', () => openCategoryManager({ focusMode: 'create' }));
+            applyAccentTheme(null);
+            return;
+          }
+
+          const pills = categories.map((cat) => {
+            const isActive = cat.id === activeId;
+            const bg = isActive ? `${cat.color}33` : `${cat.color}1a`;
+            const border = isActive ? cat.color : `${cat.color}40`;
+            const text = isActive ? '#f8fafc' : cat.color;
+            const fontWeight = isActive ? 'font-semibold' : 'font-medium';
+            return `<button class="category-pill px-3 py-1.5 rounded-full border flex items-center gap-2 text-sm ${fontWeight}" data-cat="${cat.id}" style="background:${bg};border-color:${border};color:${text};">
+                <span class="text-base leading-none">${cat.icon || '♪'}</span>
+                <span>${cat.name}</span>
+              </button>`;
+          }).join("");
+
+          const clearBtn = activeId ? `<button id="btnClearCategory" class="px-3 py-1.5 rounded-full border border-neutral-700 text-sm text-neutral-300 hover:bg-neutral-800">Filter zurücksetzen</button>` : '';
+
+          host.innerHTML = `
+            <div class="flex flex-wrap items-center gap-2">
+              ${pills}
+              ${clearBtn}
+              <button id="btnManageCategories" class="ml-auto px-3 py-1.5 rounded-full border border-neutral-700 text-sm text-neutral-200 hover:bg-neutral-800">Kategorien verwalten</button>
+            </div>`;
+
+          host.querySelectorAll('[data-cat]').forEach((btn) => {
+            btn.addEventListener('click', async () => {
+              const id = btn.getAttribute('data-cat');
+              const target = id === state.library.categoryFilter ? null : id;
+              await applyCategoryFilter(target);
+            });
+          });
+
+          const clear = document.querySelector('#btnClearCategory');
+          if (clear) clear.addEventListener('click', async () => await applyCategoryFilter(null));
+
+          const manage = document.querySelector('#btnManageCategories');
+          if (manage) manage.addEventListener('click', () => openCategoryManager());
+
+          applyAccentTheme(activeId);
+        }
+
+        requestAnimationFrame(() => {
+          const wrap = document.querySelector('#virtualWrap');
+          if (wrap) mountVirtualizer(true);
+        });
+      }
+
+      // ===== Virtualized Grid/List (simplified without canvas thumbnails) =====
+      function mountVirtualizer(resetScroll = false) {
+        const wrap = document.querySelector('#virtualWrap');
+        wrap.innerHTML = "";
+
+        const L = state.library;
+        let items = L.items;
+
+        const fuse = window.Fuse && L.q
+          ? new Fuse(items, { keys: ["name"], threshold: 0.3 })
+          : null;
+        if (fuse) items = fuse.search(L.q).map(r => r.item);
+
+        const isGrid = L.view === "grid";
+  const cardW = isGrid ? 220 : wrap.clientWidth;
+  const cardH = isGrid ? 360 : 72;
+        const gap = isGrid ? 12 : 0;
+        let cols = isGrid ? Math.max(1, Math.floor((wrap.clientWidth - 16) / (cardW + gap))) : 1;
+
+        const total = items.length;
+        const rows = Math.ceil(total / cols);
+        const totalHeight = rows * (cardH + (isGrid ? gap : 0));
+
+        const scroller = document.createElement("div");
+        scroller.className = "relative w-full h-full overflow-auto no-scrollbar";
+        const spacer = document.createElement("div");
+        spacer.style.height = `${totalHeight}px`;
+        spacer.style.position = "relative";
+        scroller.appendChild(spacer);
+        wrap.appendChild(scroller);
+
+        const pool = new Map();
+
+        function renderViewport() {
+          const scrollTop = scroller.scrollTop;
+          const viewH = scroller.clientHeight;
+          const bufferRows = 3;
+
+          const firstRow = Math.max(0, Math.floor(scrollTop / (cardH + (isGrid ? gap : 0))) - bufferRows);
+          const lastRow  = Math.min(rows - 1, Math.floor((scrollTop + viewH) / (cardH + (isGrid ? gap : 0))) + bufferRows);
+
+          const firstIndex = firstRow * cols;
+          const lastIndex  = Math.min(total - 1, (lastRow + 1) * cols - 1);
+
+          // Simple cleanup - remove out-of-view elements
+          for (const [key, el] of pool) {
+            const idx = Number(key);
+            if (idx < firstIndex || idx > lastIndex) {
+              el.remove();
+              pool.delete(key);
+            }
+          }
+
+          for (let i = firstIndex; i <= lastIndex; i++) {
+            if (i < 0 || i >= total) continue;
+            const key = String(i);
+            if (pool.has(key)) continue;
+
+            const item = items[i];
+            const col = i % cols;
+            const row = Math.floor(i / cols);
+            const x = isGrid ? col * (cardW + gap) : 0;
+            const y = row * (cardH + (isGrid ? gap : 0));
+
+            const el = isGrid ? renderCard(item) : renderRow(item);
+            el.style.position = "absolute";
+            el.style.left = `${x}px`;
+            el.style.top = `${y}px`;
+            el.style.width = `${isGrid ? cardW : wrap.clientWidth}px`;
+            el.style.height = `${cardH}px`;
+
+            spacer.appendChild(el);
+            pool.set(key, el);
+          }
+        }
+
+        // Throttle renderViewport using requestAnimationFrame
+        let renderTimer = null;
+        function scheduleRenderViewport() {
+          if (renderTimer) return;
+          renderTimer = requestAnimationFrame(() => {
+            renderViewport();
+            renderTimer = null;
+          });
+        }
+        scroller.addEventListener("scroll", scheduleRenderViewport, { passive: true });
+        window.addEventListener("resize", () => mountVirtualizer(false), { once: true });
+
+        renderViewport();
+        if (resetScroll) scroller.scrollTop = 0;
+      }
+
+      function renderCategoryBadges(item) {
+        const cats = Array.isArray(item.categories) ? item.categories : [];
+        if (!cats.length) {
+          return '<span class="category-chip border-dashed border-neutral-700/60 text-neutral-400 bg-neutral-800/30">Keine Kategorie</span>';
+        }
+        return cats.map(cat => {
+          const color = cat.color || '#4A5568';
+          const icon = cat.icon || '♪';
+          return `<span class="category-chip" style="border-color:${color}44;background:${color}1a;color:${color};">${icon}<span>${cat.name}</span></span>`;
+        }).join('');
+      }
+
+      function renderCard(item) {
+        const a = document.createElement("a");
+        a.href = `/?file=${item.id}`;
+        a.className = "card block overflow-hidden border border-neutral-800/80 bg-neutral-900/90 hover:border-neutral-700 hover:bg-neutral-900 rounded-2xl transition will-change-transform";
+        const displayName = item.displayName || item.name;
+        const subtitleParts = [formatSize(item.size), new Date(item.mtime).toLocaleDateString()];
+        if (item.folder) subtitleParts.push(item.folder);
+        const favActive = state.library.favorites.has(item.name);
+        a.innerHTML = `
+          <div class="relative w-full h-[240px] bg-neutral-950/95 grid place-items-center overflow-hidden">
+            <img src="${item.thumbnail}" alt="${item.name}" 
+                 class="thumb max-h-full max-w-full object-contain"
+                 loading="lazy"
+                 onerror="this.style.display='none'; this.nextElementSibling.style.display='flex'">
+            <div class="text-neutral-500 text-sm hidden items-center justify-center">📄 PDF</div>
+            <button type="button" class="fav absolute top-3 right-3 h-10 w-10 rounded-full border border-white/12 bg-neutral-950/80 backdrop-blur shadow-lg text-lg leading-none hover:border-white/30 hover:bg-neutral-900/80">${favActive ? "★" : "☆"}</button>
+          </div>
+          <div class="p-4 flex flex-col gap-3">
+            <div class="flex flex-col gap-1">
+              <div class="font-semibold text-sm truncate" title="${displayName}">${displayName}</div>
+              <div class="text-xs text-neutral-400 truncate">${subtitleParts.join(" • ")}</div>
+            </div>
+            <div class="flex items-center gap-2">
+              <div class="badge-stack flex flex-wrap gap-1 min-h-[32px] flex-1">${renderCategoryBadges(item)}</div>
+              <button type="button" aria-label="Kategorien hinzufügen" title="Kategorien hinzufügen" class="assign-cat h-9 w-9 rounded-full border border-neutral-700 text-neutral-200 bg-neutral-800/70 hover:bg-neutral-700">+</button>
+            </div>
+          </div>
+        `;
+        const favBtnCard = a.querySelector(".fav");
+        favBtnCard.addEventListener("click", async (ev) => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          const btn = favBtnCard;
+          const makeFav = !state.library.favorites.has(item.name);
+          try {
+            await setFavoriteOnBackend(item.name, makeFav);
+            if (makeFav) state.library.favorites.add(item.name);
+            else state.library.favorites.delete(item.name);
+            btn.textContent = makeFav ? "★" : "☆";
+          } catch {
+            btn.textContent = state.library.favorites.has(item.name) ? "★" : "☆";
+          }
+        });
+        const assignBtn = a.querySelector('.assign-cat');
+        if (assignBtn) assignBtn.addEventListener('click', (ev) => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          openCategoryAssignDialog(item);
+        });
+        queueMicrotask(() => {
+          const badgeWrap = a.querySelector('.badge-stack');
+          if (!badgeWrap) return;
+          requestAnimationFrame(() => {
+            const overflow = badgeWrap.scrollHeight - badgeWrap.clientHeight;
+            if (overflow > 4) badgeWrap.classList.add('is-overflowing');
+            else badgeWrap.classList.remove('is-overflowing');
+          });
+        });
+        return a;
+      }
+      function renderRow(item) {
+        const a = document.createElement("a");
+        a.href = `/?file=${item.id}`;
+        a.className = "flex items-center gap-3 px-3 border-b border-neutral-800 hover:bg-neutral-900";
+        const displayName = item.displayName || item.name;
+        const subtitleParts = [formatSize(item.size), new Date(item.mtime).toLocaleDateString()];
+        if (item.folder) subtitleParts.push(item.folder);
+        a.innerHTML = `
+          <img src="${item.thumbnail}" alt="${item.name}" 
+               class="thumb shrink-0 rounded bg-neutral-950 w-14 h-18 object-cover"
+               loading="lazy"
+               onerror="this.style.display='none'; this.nextElementSibling.style.display='block'">
+          <div class="thumb shrink-0 rounded bg-neutral-950 w-14 h-18 hidden flex items-center justify-center text-neutral-500 text-xs">PDF</div>
+          <div class="flex-1 min-w-0">
+            <div class="font-medium truncate" title="${displayName}">${displayName}</div>
+            <div class="text-xs text-neutral-400 truncate">${subtitleParts.join(" • ")}</div>
+            <div class="flex flex-wrap gap-1 mt-1">${renderCategoryBadges(item)}</div>
+          </div>
+          <div class="flex flex-col items-end gap-2">
+            <button class="fav text-xl leading-none">${state.library.favorites.has(item.name) ? "★" : "☆"}</button>
+            <button class="assign-cat px-3 py-1 rounded-full border border-neutral-700 text-xs text-neutral-200 hover:bg-neutral-800">✦</button>
+          </div>
+        `;
+        const favBtnRow = a.querySelector(".fav");
+        favBtnRow.addEventListener("click", async (ev) => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          const btn = favBtnRow;
+          const makeFav = !state.library.favorites.has(item.name);
+          try {
+            await setFavoriteOnBackend(item.name, makeFav);
+            if (makeFav) state.library.favorites.add(item.name);
+            else state.library.favorites.delete(item.name);
+            btn.textContent = makeFav ? "★" : "☆";
+          } catch {
+            btn.textContent = state.library.favorites.has(item.name) ? "★" : "☆";
+          }
+        });
+        const assignBtn = a.querySelector('.assign-cat');
+        if (assignBtn) assignBtn.addEventListener('click', (ev) => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          openCategoryAssignDialog(item);
+        });
+        return a;
+      }
+
+      function openCategoryAssignDialog(item) {
+        const categories = state.categories;
+        const selected = new Set(Array.isArray(item.categoryIds) ? item.categoryIds : []);
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `
+          <div class="glass-panel w-[520px] max-w-full p-6 text-sm text-neutral-200">
+            <div class="flex items-center justify-between gap-3">
+              <div>
+                <div class="text-xs uppercase tracking-wide text-neutral-500">Kategorien</div>
+                <h2 class="text-lg font-semibold text-neutral-100 truncate max-w-[320px]">${item.name}</h2>
+              </div>
+              <button type="button" class="px-2 py-1 rounded-full border border-neutral-700 text-neutral-400 hover:text-neutral-200" data-role="close">✕</button>
+            </div>
+            <div class="mt-5 space-y-2 max-h-[48vh] overflow-y-auto pr-1" id="assignCategoryList">
+              ${categories.length ? categories.map(cat => {
+                const isActive = selected.has(cat.id);
+                const bg = isActive ? `${cat.color}33` : `${cat.color}14`;
+                const border = isActive ? cat.color : `${cat.color}30`;
+                const text = isActive ? '#f8fafc' : cat.color;
+                return `<button type="button" class="w-full flex items-center justify-between gap-3 px-3 py-2 rounded-xl border transition category-pill${isActive ? ' is-selected' : ''}" data-id="${cat.id}" style="background:${bg};border-color:${border};color:${text};">
+                    <div class="flex items-center gap-3">
+                      <span class="text-xl">${cat.icon || '♪'}</span>
+                      <div class="text-left">
+                        <div class="font-medium">${cat.name}</div>
+                        <div class="text-[11px] text-neutral-400 uppercase tracking-wide">${cat.color}</div>
+                      </div>
+                    </div>
+                    <span data-role="indicator" class="${isActive ? '' : 'hidden'} text-xs font-semibold">Aktiv</span>
+                  </button>`;
+              }).join('') : `<div class="rounded-xl border border-dashed border-neutral-700 p-4 text-neutral-400 text-sm">Noch keine Kategorien vorhanden.</div>`}
+            </div>
+            <div class="mt-6 flex items-center justify-between gap-3">
+              <button type="button" id="assignManageBtn" class="px-3 py-1.5 rounded-full border border-neutral-700 text-neutral-200 hover:bg-neutral-800">Neue Kategorie</button>
+              <div class="flex items-center gap-2">
+                <button type="button" class="px-3 py-1.5 rounded-full border border-neutral-700 text-neutral-200 hover:bg-neutral-800" data-role="close">Abbrechen</button>
+                <button type="button" class="px-3 py-1.5 rounded-full bg-emerald-600 text-white hover:bg-emerald-500" data-role="save">Speichern</button>
+              </div>
+            </div>
+          </div>`;
+
+        const closeModal = () => backdrop.remove();
+        backdrop.addEventListener('click', (ev) => {
+          if (ev.target === backdrop) closeModal();
+        });
+
+        const list = backdrop.querySelector('#assignCategoryList');
+        list?.querySelectorAll('[data-id]').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            const id = btn.getAttribute('data-id');
+            if (!id) return;
+            if (selected.has(id)) selected.delete(id); else selected.add(id);
+            const active = selected.has(id);
+            btn.classList.toggle('is-selected', active);
+            const indicator = btn.querySelector('[data-role="indicator"]');
+            indicator?.classList.toggle('hidden', !active);
+          });
+        });
+
+        backdrop.querySelectorAll('[data-role="close"]').forEach(btn => btn.addEventListener('click', closeModal));
+
+        const manageBtn = backdrop.querySelector('#assignManageBtn');
+        if (manageBtn) manageBtn.addEventListener('click', () => {
+          closeModal();
+          openCategoryManager({ focusMode: 'create' });
+        });
+
+        const saveBtn = backdrop.querySelector('[data-role="save"]');
+        if (saveBtn) {
+          saveBtn.addEventListener('click', async () => {
+            saveBtn.disabled = true;
+            saveBtn.textContent = 'Speichere…';
+            const ids = Array.from(selected);
+            const payload = await setFileCategoriesOnBackend(item.name, ids);
+            if (payload && Array.isArray(payload.categories)) {
+              closeModal();
+              await loadPage();
+              renderLibrary();
+            } else {
+              saveBtn.disabled = false;
+              saveBtn.textContent = 'Speichern';
+            }
+          });
+        }
+
+        document.body.appendChild(backdrop);
+      }
+
+      function openCategoryManager(options = {}) {
+        let categories = [...state.categories];
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `
+          <div class="glass-panel w-[560px] max-w-full p-6 text-sm text-neutral-200">
+            <div class="flex items-center justify-between gap-3">
+              <div>
+                <div class="text-xs uppercase tracking-wide text-neutral-500">Sammlung</div>
+                <h2 class="text-lg font-semibold text-neutral-100">Kategorien verwalten</h2>
+              </div>
+              <button type="button" class="px-2 py-1 rounded-full border border-neutral-700 text-neutral-400 hover:text-neutral-200" data-role="close">✕</button>
+            </div>
+            <form id="createCategoryForm" class="mt-5 grid grid-cols-1 gap-3">
+              <div class="grid grid-cols-6 gap-3 items-end">
+                <label class="col-span-3 text-xs uppercase tracking-wide text-neutral-400">Name
+                  <input name="name" required maxlength="40" class="mt-1 w-full px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-700" placeholder="z.B. Filmmusik" />
+                </label>
+                <label class="col-span-2 text-xs uppercase tracking-wide text-neutral-400">Icon
+                  <input name="icon" maxlength="2" class="mt-1 w-full px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-700" placeholder="♪" />
+                </label>
+                <label class="col-span-1 text-xs uppercase tracking-wide text-neutral-400">Farbe
+                  <input name="color" type="color" value="#6366F1" class="mt-1 h-[42px] w-full rounded-lg border border-neutral-700 bg-neutral-900" />
+                </label>
+              </div>
+              <div class="flex justify-end">
+                <button type="submit" class="px-3 py-1.5 rounded-full bg-emerald-600 text-white hover:bg-emerald-500">Kategorie anlegen</button>
+              </div>
+            </form>
+            <div class="mt-6">
+              <div class="text-xs uppercase tracking-wide text-neutral-500">Bestehende Kategorien</div>
+              <div id="categoryManagerList" class="mt-3 space-y-2 max-h-[45vh] overflow-y-auto pr-1"></div>
+            </div>
+          </div>`;
+
+        const closeModal = () => backdrop.remove();
+        backdrop.addEventListener('click', (ev) => {
+          if (ev.target === backdrop) closeModal();
+        });
+        backdrop.querySelector('[data-role="close"]').addEventListener('click', closeModal);
+
+        const listEl = backdrop.querySelector('#categoryManagerList');
+
+        function refreshList() {
+          if (!listEl) return;
+          if (!categories.length) {
+            listEl.innerHTML = '<div class="rounded-xl border border-dashed border-neutral-700 p-4 text-neutral-400 text-sm">Keine Kategorien vorhanden. Erstelle deine erste Kategorie unten.</div>';
+            return;
+          }
+          listEl.innerHTML = categories.map(cat => {
+            return `<div class="flex items-center gap-3 px-3 py-2 rounded-xl border border-neutral-800 bg-neutral-900/60" data-id="${cat.id}">
+              <div class="w-12 h-12 rounded-full grid place-items-center text-xl" style="background:${cat.color}1f;border:1px solid ${cat.color}44;color:${cat.color};">${cat.icon || '♪'}</div>
+              <div class="flex-1 min-w-0">
+                <div class="font-medium text-neutral-100 truncate">${cat.name}</div>
+                <div class="text-xs text-neutral-500">${cat.color}</div>
+              </div>
+              <div class="flex items-center gap-2">
+                <button type="button" class="px-2 py-1 rounded-full border border-neutral-700 text-neutral-200 hover:bg-neutral-800" data-action="edit">Bearbeiten</button>
+                <button type="button" class="px-2 py-1 rounded-full border border-red-700 text-red-300 hover:bg-red-700/30" data-action="delete">Löschen</button>
+              </div>
+            </div>`;
+          }).join('');
+
+          listEl.querySelectorAll('[data-action="edit"]').forEach((btn) => {
+            btn.addEventListener('click', () => {
+              const row = btn.closest('[data-id]');
+              if (!row) return;
+              const id = row.getAttribute('data-id');
+              const cat = categories.find(c => c.id === id);
+              if (!cat) return;
+              row.innerHTML = `<form class="w-full space-y-3" data-role="editForm">
+                  <div class="grid grid-cols-6 gap-3 items-end">
+                    <label class="col-span-3 text-xs uppercase tracking-wide text-neutral-400">Name
+                      <input name="name" value="${cat.name}" required maxlength="40" class="mt-1 w-full px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-700" />
+                    </label>
+                    <label class="col-span-2 text-xs uppercase tracking-wide text-neutral-400">Icon
+                      <input name="icon" value="${cat.icon || ''}" maxlength="2" class="mt-1 w-full px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-700" />
+                    </label>
+                    <label class="col-span-1 text-xs uppercase tracking-wide text-neutral-400">Farbe
+                      <input name="color" type="color" value="${cat.color || '#6366F1'}" class="mt-1 h-[42px] w-full rounded-lg border border-neutral-700 bg-neutral-900" />
+                    </label>
+                  </div>
+                  <div class="flex justify-end gap-2">
+                    <button type="button" class="px-3 py-1.5 rounded-full border border-neutral-700 text-neutral-300 hover:bg-neutral-800" data-role="cancel">Abbrechen</button>
+                    <button type="submit" class="px-3 py-1.5 rounded-full bg-emerald-600 text-white hover:bg-emerald-500">Speichern</button>
+                  </div>
+                </form>`;
+              const form = row.querySelector('[data-role="editForm"]');
+              const cancelBtn = row.querySelector('[data-role="cancel"]');
+              cancelBtn?.addEventListener('click', refreshList);
+              form?.addEventListener('submit', async (ev) => {
+                ev.preventDefault();
+                const data = new FormData(form);
+                const name = data.get('name')?.toString().trim();
+                const icon = data.get('icon')?.toString().trim();
+                const color = data.get('color')?.toString();
+                if (!name) return;
+                await updateCategoryOnBackend(id, { name, icon, color });
+                categories = [...state.categories];
+                await loadPage();
+                renderLibrary();
+                refreshList();
+              });
+            });
+          });
+
+          listEl.querySelectorAll('[data-action="delete"]').forEach((btn) => {
+            btn.addEventListener('click', async () => {
+              const row = btn.closest('[data-id]');
+              if (!row) return;
+              const id = row.getAttribute('data-id');
+              const cat = categories.find(c => c.id === id);
+              if (!cat) return;
+              if (!confirm(`Kategorie "${cat.name}" wirklich löschen?`)) return;
+              const ok = await deleteCategoryOnBackend(id);
+              if (ok) {
+                categories = [...state.categories];
+                await loadPage();
+                renderLibrary();
+                refreshList();
+              }
+            });
+          });
+        }
+
+        refreshList();
+
+        const createForm = backdrop.querySelector('#createCategoryForm');
+        if (createForm) {
+          createForm.addEventListener('submit', async (ev) => {
+            ev.preventDefault();
+            const data = new FormData(createForm);
+            const name = data.get('name')?.toString().trim();
+            const color = data.get('color')?.toString();
+            const icon = data.get('icon')?.toString();
+            if (!name) return;
+            const submitBtn = createForm.querySelector('button[type="submit"]');
+            if (submitBtn) {
+              submitBtn.disabled = true;
+              submitBtn.textContent = 'Erstelle…';
+            }
+            await createCategoryOnBackend({ name, color, icon });
+            categories = [...state.categories];
+            createForm.reset();
+            if (submitBtn) {
+              submitBtn.disabled = false;
+              submitBtn.textContent = 'Kategorie anlegen';
+            }
+            await loadPage();
+            renderLibrary();
+            refreshList();
+          });
+        }
+
+        document.body.appendChild(backdrop);
+
+        if (options.focusMode === 'create') {
+          setTimeout(() => {
+            backdrop.querySelector('#createCategoryForm input[name="name"]')?.focus();
+          }, 50);
+        }
+      }
+
+      function formatSize(bytes) {
+        if (bytes < 1024) return `${bytes} B`;
+        if (bytes < 1024 * 1024) return `${(bytes/1024).toFixed(1)} KB`;
+        return `${(bytes/1024/1024).toFixed(1)} MB`;
+      }
+
+      // ===== Thumbnails (lazy + concurrency limit + memory management) =====
+      function cleanupThumbnailCache() {
+        const now = Date.now();
+        if (now - state.thumbs.lastCleanup < 30000) return; // Clean every 30s max
+        state.thumbs.lastCleanup = now;
+        
+        if (state.thumbs.cache.size <= state.thumbs.maxCacheSize) return;
+        
+        // Remove oldest entries (LRU-style cleanup)
+        const entries = Array.from(state.thumbs.cache.entries());
+        const excess = entries.length - state.thumbs.maxCacheSize;
+        const toDelete = entries.slice(0, excess);
+        
+        toDelete.forEach(([key, canvas]) => {
+          if (canvas) {
+            const ctx = canvas.getContext('2d');
+            if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+            canvas.width = canvas.height = 0;
+          }
+          state.thumbs.cache.delete(key);
+        });
+        
+        console.log(`Cleaned ${excess} thumbnails from cache`);
+      }
+      
+      // ===== Viewer =====
+      async function renderViewer(fileName) {
+        document.body.classList.add('in-viewer');
+        setUploadButtonVisible(false);
+        state.viewer.wakeDesired = true;
+        if (state.viewer.layoutObserver) {
+          state.viewer.layoutObserver.disconnect();
+          state.viewer.layoutObserver = null;
+        }
+        state.viewer.autoScroll.running = false;
+        state.viewer.autoScroll.speedPxPerSec = 0;
+        state.viewer.autoScroll.lastTs = 0;
+        state.viewer.autoScroll.needsRecalc = false;
+  state.viewer.autoScroll.pending = false;
+  state.viewer.autoScroll.token = null;
+        
+        // Clear any existing memory before starting
+        aggressiveCleanup();
+        
+        // Ensure wake lock is actually activated before UI continues
+        await acquireWakeLockAuto();
+        if (state.viewer.wakeDesired) setWakeBtn(true);
+        // Retry after 1s in case first attempt failed (iOS defers activation until tick)
+        setTimeout(() => {
+          if (!state.viewer.wakeLock && !(state.viewer.noSleepEnabled)) {
+            acquireWakeLockAuto();
+          }
+        }, 1000);
+
+        controlsEl.classList.remove("hidden");
+        headerActionsEl.innerHTML = `<a href="/" class="px-3 py-2 rounded-lg bg-neutral-800 hover:bg-neutral-700 border border-neutral-700">← Library</a>`;
+
+        appEl.innerHTML = `
+          <section>
+            <h1 class="sr-only">Viewer ${fileName}</h1>
+            <div id="viewer" class="vh no-scrollbar overflow-y-auto rounded-xl border border-neutral-800 bg-neutral-900"></div>
+          </section>
+        `;
+
+        const container = document.querySelector('#viewer');
+        state.viewer.fileName = fileName;
+  state.viewer.url = `/sheets/${encodePathSegments(fileName)}`;
+
+        document.querySelector('#btnBack').onclick = () => {
+          // Cleanup before leaving viewer
+          aggressiveCleanup();
+          location.href = "/";
+        };
+  document.querySelector('#btnFullscreen').onclick = toggleFullscreen;
+
+        const btnPlayPause = document.querySelector('#btnPlayPause');
+        btnPlayPause.onclick = togglePlayAndWake;
+
+        // Arm gesture activator for wake lock on the viewer container
+        armWakeLockFromGestures(container);
+        startWakeWatch();
+
+        const prefs = await getFilePrefsFromBackend(fileName);
+        state.viewer.secsPerPage = prefs?.secsPerPage || 45;
+        state.viewer.categories = Array.isArray(prefs?.categories) ? prefs.categories : [];
+        applyAccentTheme(state.viewer.categories[0]?.id || state.library.categoryFilter);
+        const secsInput = document.querySelector('#secsPerPage');
+        secsInput.value = state.viewer.secsPerPage;
+        secsInput.addEventListener("change", async (e) => {
+          const v = Math.max(5, Math.min(600, Number(e.target.value || 45)));
+          state.viewer.secsPerPage = v;
+          await setFileSecsOnBackend(fileName, v);
+          updateStatus();
+          if (state.viewer.autoScroll.running) {
+            computeSpeed();
+            state.viewer.autoScroll.lastTs = performance.now();
+            state.viewer.autoScroll.needsRecalc = state.viewer.autoScroll.speedPxPerSec <= 0.01;
+          } else if (state.viewer.autoScroll.needsRecalc) {
+            computeSpeed();
+            state.viewer.autoScroll.needsRecalc = state.viewer.autoScroll.speedPxPerSec <= 0.01;
+          }
+        });
+
+        window.addEventListener("keydown", (e) => {
+          if (e.code === "Space") { e.preventDefault(); btnPlayPause.click(); }
+          if (e.key === "f" || e.key === "F") { e.preventDefault(); toggleFullscreen(); }
+          if (e.key === "Escape") { if (state.viewer.autoScroll.running) { stopAutoScroll(); refreshPlayPauseUI(); } }
+        });
+
+        updateStatus("Lade…");
+        await mountPdfVirtual(container, state.viewer.url);
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+        computeSpeed();
+        if (state.viewer.autoScroll.running || state.viewer.autoScroll.needsRecalc) {
+          state.viewer.autoScroll.lastTs = performance.now();
+          state.viewer.autoScroll.needsRecalc = false;
+        }
+        if (!state.viewer.layoutObserver && typeof ResizeObserver === "function") {
+          const ro = new ResizeObserver(() => {
+            if (!container.isConnected) return;
+            if (!state.viewer.autoScroll.running && !state.viewer.autoScroll.needsRecalc) return;
+            computeSpeed();
+            state.viewer.autoScroll.lastTs = performance.now();
+            if (!state.viewer.autoScroll.running) {
+              state.viewer.autoScroll.needsRecalc = state.viewer.autoScroll.speedPxPerSec <= 0;
+            }
+          });
+          ro.observe(container);
+          const inner = container.firstElementChild;
+          if (inner && inner instanceof HTMLElement) ro.observe(inner);
+          state.viewer.layoutObserver = ro;
+        } else if (typeof ResizeObserver !== "function") {
+          // Fallback: recompute on window resize when ResizeObserver is unavailable
+          if (!state.viewer.layoutObserver) {
+            const onResize = () => {
+              if (!state.viewer.autoScroll.running && !state.viewer.autoScroll.needsRecalc) return;
+              computeSpeed();
+              state.viewer.autoScroll.lastTs = performance.now();
+              if (!state.viewer.autoScroll.running) {
+                state.viewer.autoScroll.needsRecalc = state.viewer.autoScroll.speedPxPerSec <= 0;
+              }
+            };
+            window.addEventListener('resize', onResize);
+            state.viewer.layoutObserver = { disconnect() { window.removeEventListener('resize', onResize); } };
+          }
+        }
+        updateStatus();
+        refreshPlayPauseUI();
+        
+        // Start periodic memory monitoring in viewer
+        const memoryCheckInterval = setInterval(() => {
+          checkMemoryPressure();
+        }, state.memory.checkInterval);
+        
+        // Cleanup interval when leaving viewer
+        const cleanup = () => {
+          clearInterval(memoryCheckInterval);
+          window.removeEventListener('beforeunload', cleanup);
+        };
+        window.addEventListener('beforeunload', cleanup);
+      }
+
+      async function mountPdfVirtual(container, url) {
+        if (!window.pdfjsLib) {
+          container.innerHTML = `<embed src="${url}" type="application/pdf" class="w-full h-full" />
+            <div class="p-4 text-sm text-amber-400">Hinweis: Fallback-Viewer aktiv.</div>`;
+          state.viewer.numPages = 1;
+          state.viewer._pdf = null;
+          return;
+        }
+
+        let pdf;
+        try {
+          pdf = await pdfjsLib.getDocument(url).promise;
+        } catch (e) {
+          console.warn('PDF.js konnte das Dokument nicht laden, Fallback auf <embed>', e);
+          container.innerHTML = `<embed src="${url}" type="application/pdf" class="w-full h-full" />
+            <div class="p-4 text-sm text-amber-400">Hinweis: PDF konnte nicht geparst werden – Fallback-Viewer aktiv.</div>`;
+          state.viewer.numPages = 1;
+          state.viewer._pdf = null;
+          return;
+        }
+
+        state.viewer.numPages = pdf.numPages;
+        // Halte Referenz für spätere, explizite Render-Anstöße (iOS Workaround)
+        state.viewer._pdf = pdf;
+
+        const wrap = document.createElement("div");
+        wrap.className = "w-full flex flex-col items-center gap-4 py-6";
+        container.innerHTML = ""; container.appendChild(wrap);
+
+        let pageH = 1400;
+        const placeholders = [];
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const ph = document.createElement("div");
+          ph.className = "w-full flex flex-col items-center";
+          ph.style.height = `${pageH}px`; // initial reservation to reduce layout shifts
+          ph.style.minHeight = `${pageH}px`;
+          ph.dataset.page = String(i);
+          const skeletonHeight = Math.max(pageH - 48, 120);
+          ph.innerHTML = `<div class="text-xs text-neutral-400 mb-0.5" data-role="page-label">Seite ${i} / ${pdf.numPages}</div>
+                          <div data-role="skeleton" class="w-[95%] max-w-[1400px] bg-black/60 rounded animate-pulse" style="height:${skeletonHeight}px"></div>`;
+          wrap.appendChild(ph); placeholders.push(ph);
+        }
+        // Extra bottom spacer (~10% of one page) to avoid hard stop at the end
+        let endSpacer = document.createElement("div");
+        endSpacer.style.width = "100%";
+        endSpacer.style.height = `${Math.round(pageH * 0.1)}px`;
+        endSpacer.setAttribute("data-role", "end-spacer");
+        wrap.appendChild(endSpacer);
+
+        const io = new IntersectionObserver(async (entries) => {
+          for (const en of entries) {
+            if (!en.isIntersecting) continue;
+            const ph = en.target; io.unobserve(ph);
+            const pageIndex = Number(ph.dataset.page);
+            await renderOnePageInto(ph, pdf, pageIndex);
+            if (pageIndex === 1) {
+              const blockHeight = Number(ph.dataset.blockHeight);
+              if (Number.isFinite(blockHeight) && blockHeight > 0) {
+                pageH = blockHeight;
+                placeholders.forEach(node => {
+                  if (!node.dataset.rendered) {
+                    node.style.height = `${pageH}px`;
+                    node.style.minHeight = `${pageH}px`;
+                    const skeleton = node.querySelector('[data-role="skeleton"]');
+                    if (skeleton) skeleton.style.height = `${Math.max(pageH - 48, 120)}px`;
+                  }
+                });
+                const spacer = wrap.querySelector('[data-role="end-spacer"]');
+                if (spacer) spacer.style.height = `${Math.round(pageH * 0.1)}px`;
+              }
+            }
+          }
+        }, { root: container, rootMargin: "800px 0px" });
+
+  const cleanupIO = new IntersectionObserver((entries) => {
+          for (const en of entries) {
+            const ph = en.target;
+            if (en.isIntersecting) continue;
+            const canvas = ph.querySelector("canvas");
+            if (!canvas) continue;
+            const rect = ph.getBoundingClientRect();
+            const rootRect = container.getBoundingClientRect();
+            const far = (rect.bottom < rootRect.top - 1500) || (rect.top > rootRect.bottom + 1500);
+            if (far) {
+              // More aggressive cleanup for better memory management
+              const ctx = canvas.getContext('2d');
+              if (ctx) {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                // Clear ImageData references
+                ctx.canvas.width = 1;
+                ctx.canvas.height = 1;
+              }
+              canvas.remove();
+              const fallbackHeight = Number(ph.dataset.blockHeight) || pageH;
+              ph.querySelectorAll('[data-role="skeleton"]').forEach((el) => el.remove());
+              const skeleton = document.createElement("div");
+              skeleton.dataset.role = "skeleton";
+              skeleton.className = "w-[95%] max-w-[1400px] bg-black/60 rounded animate-pulse";
+              skeleton.style.height = `${Math.max(fallbackHeight - 48, 120)}px`;
+              const label = ph.querySelector('[data-role="page-label"]');
+              if (label) label.after(skeleton); else ph.appendChild(skeleton);
+              ph.style.height = `${fallbackHeight}px`;
+              ph.style.minHeight = `${fallbackHeight}px`;
+              delete ph.dataset.rendered;
+              delete ph.dataset.renderedHeight;
+              delete ph.dataset.blockHeight;
+              io.observe(ph);
+              state.viewer.autoScroll.needsRecalc = true;
+              if (state.viewer.autoScroll.running) {
+                computeSpeed();
+                state.viewer.autoScroll.lastTs = performance.now();
+                state.viewer.autoScroll.needsRecalc = state.viewer.autoScroll.speedPxPerSec <= 0.01;
+              }
+            }
+          }
+        }, { root: container, rootMargin: "500px" });
+
+        placeholders.forEach(ph => { io.observe(ph); cleanupIO.observe(ph); });
+      }
+
+  async function renderOnePageInto(ph, pdf, i) {
+        try {
+          const page = await pdf.getPage(i);
+          const container = ph.parentElement;
+          const scale = await computeFitWidthScale(page, container);
+          const viewport = page.getViewport({ scale });
+          const outputScale = Math.min(window.devicePixelRatio || 1, 2);
+
+          const cssWidth = Math.round(viewport.width);
+          const cssHeight = Math.round(viewport.height);
+          const label = ph.querySelector('[data-role="page-label"]');
+          const labelAllowance = label ? label.offsetHeight + 16 : 48;
+          const blockHeight = cssHeight + labelAllowance;
+
+          const canvas = document.createElement("canvas");
+          canvas.width = Math.max(1, Math.floor(cssWidth * outputScale));
+          canvas.height = Math.max(1, Math.floor(cssHeight * outputScale));
+          canvas.style.width = `${cssWidth}px`;
+          canvas.style.height = `${cssHeight}px`;
+          canvas.style.maxWidth = "calc(100% - 32px)";
+          canvas.className = "rounded bg-white shadow-xl";
+
+          const ctx = canvas.getContext("2d", {
+            alpha: false,
+            willReadFrequently: false,
+            desynchronized: true
+          });
+
+          const renderContext = {
+            canvasContext: ctx,
+            viewport,
+            transform: outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : null
+          };
+
+          await page.render(renderContext).promise;
+          if (typeof page.cleanup === "function") page.cleanup();
+
+          canvas.dataset.cssHeight = String(cssHeight);
+          ph.dataset.rendered = "1";
+          ph.dataset.renderedHeight = String(cssHeight);
+          ph.dataset.blockHeight = String(blockHeight);
+          ph.style.height = "auto";
+          ph.style.minHeight = `${blockHeight}px`;
+
+          const skeleton = ph.querySelector('[data-role="skeleton"]');
+          if (skeleton) skeleton.replaceWith(canvas);
+          else ph.appendChild(canvas);
+
+          state.viewer.autoScroll.needsRecalc = true;
+          if (state.viewer.autoScroll.running) {
+            computeSpeed();
+            state.viewer.autoScroll.lastTs = performance.now();
+            state.viewer.autoScroll.needsRecalc = state.viewer.autoScroll.speedPxPerSec <= 0.01;
+          }
+
+          if (i === 1) {
+            requestAnimationFrame(() => {
+              canvas.style.display = 'none';
+              void canvas.offsetHeight;
+              canvas.style.display = '';
+            });
+          }
+        } catch (e) {
+          console.warn(`Failed to render page ${i}:`, e);
+          const errorBox = document.createElement("div");
+          errorBox.dataset.role = "skeleton";
+          errorBox.className = "w-[95%] max-w-[1400px] h-[400px] bg-red-900/20 border border-red-500 rounded flex items-center justify-center text-red-400";
+          errorBox.textContent = `Fehler beim Laden von Seite ${i}`;
+          const skeleton = ph.querySelector('[data-role="skeleton"]');
+          if (skeleton) skeleton.replaceWith(errorBox);
+          else ph.appendChild(errorBox);
+          const fallbackHeight = Number(ph.dataset.blockHeight) || parseFloat(ph.style.minHeight) || 800;
+          ph.style.height = `${fallbackHeight}px`;
+          ph.style.minHeight = `${fallbackHeight}px`;
+          ph.dataset.rendered = "error";
+          state.viewer.autoScroll.needsRecalc = true;
+          if (state.viewer.autoScroll.running) {
+            computeSpeed();
+            state.viewer.autoScroll.lastTs = performance.now();
+            state.viewer.autoScroll.needsRecalc = state.viewer.autoScroll.speedPxPerSec <= 0.01;
+          }
+        }
+      }
+      async function computeFitWidthScale(page, container) {
+        const unscaled = page.getViewport({ scale: 1 });
+        const pad = 24;
+        const containerWidth = container.clientWidth - pad;
+        const maxWidth = Math.min(1400, containerWidth * 0.95);
+        const scale = maxWidth / unscaled.width;
+        return Math.max(0.6, Math.min(scale, 3.0));
+      }
+
+      // Eager-Render für iOS: rendere Seite 1 (und optional 2) sofort, falls noch nichts sichtbar ist
+      async function ensureFirstPagesRendered() {
+        try {
+          const container = document.querySelector('#viewer');
+          if (!container || !state.viewer._pdf) return;
+          const wrap = container.firstElementChild;
+          if (!wrap) return;
+          // Wenn bereits ein Canvas vorhanden ist, nichts tun
+          if (wrap.querySelector('canvas')) return;
+
+          const ph1 = wrap.querySelector('[data-page="1"]');
+          if (ph1 && !ph1.dataset.rendered) {
+            await renderOnePageInto(ph1, state.viewer._pdf, 1);
+          }
+          const ph2 = wrap.querySelector('[data-page="2"]');
+          if (ph2 && !ph2.dataset.rendered) {
+            // zweite Seite nur anstoßen, nicht blockieren
+            renderOnePageInto(ph2, state.viewer._pdf, 2).catch(() => {});
+          }
+        } catch {}
+      }
+
+      // ===== Auto Scroll + UI Toggle =====
+      function hasScrollableContent(el) {
+        if (!el) return false;
+        return (el.scrollHeight - el.clientHeight) > 12;
+      }
+
+      async function waitForScrollableContent(el, timeoutMs = 8000) {
+        if (!el) return false;
+        if (hasScrollableContent(el)) return true;
+
+        const deadline = performance.now() + Math.max(500, timeoutMs);
+        let rafId = null;
+        let observer = null;
+
+        return new Promise((resolve) => {
+          let finished = false;
+          const done = (status) => {
+            if (finished) return;
+            finished = true;
+            if (rafId !== null) cancelAnimationFrame(rafId);
+            observer?.disconnect?.();
+            resolve(status);
+          };
+
+          const check = () => {
+            if (!state.viewer.autoScroll.pending && !state.viewer.autoScroll.running) {
+              done(false);
+              return;
+            }
+            if (hasScrollableContent(el)) {
+              done(true);
+              return;
+            }
+            if (performance.now() >= deadline) {
+              done(hasScrollableContent(el));
+              return;
+            }
+            rafId = requestAnimationFrame(check);
+          };
+
+          if (typeof ResizeObserver === "function") {
+            observer = new ResizeObserver(() => {
+              if (!state.viewer.autoScroll.pending && !state.viewer.autoScroll.running) {
+                done(false);
+                return;
+              }
+              if (hasScrollableContent(el)) done(true);
+            });
+            observer.observe(el);
+            const inner = el.firstElementChild;
+            if (inner && inner instanceof HTMLElement) observer.observe(inner);
+          }
+
+          rafId = requestAnimationFrame(check);
+        });
+      }
+
+      function computeSpeed() {
+        const el = document.querySelector('#viewer');
+        if (!el) {
+          state.viewer.autoScroll.speedPxPerSec = 0;
+          return;
+        }
+        const totalScrollable = Math.max(0, el.scrollHeight - el.clientHeight);
+        const pages = Math.max(1, state.viewer.numPages || 0);
+        const totalSecs = state.viewer.secsPerPage * pages;
+        state.viewer.autoScroll.speedPxPerSec = totalSecs > 0 ? totalScrollable / totalSecs : 0;
+      }
+      async function startAutoScroll() {
+        const viewerEl = document.querySelector('#viewer');
+        if (!viewerEl) return;
+        if (state.viewer.autoScroll.running || state.viewer.autoScroll.pending) return;
+
+        // Scrolling SOFORT starten, ohne auf Content zu warten
+        state.viewer.autoScroll.running = true;
+        state.viewer.autoScroll.lastTs = performance.now();
+        state.viewer.autoScroll.needsRecalc = true;
+        // Akkumulator initialisieren, um Subpixel-Verluste zu vermeiden (iOS)
+        state.viewer.autoScroll.pos = viewerEl.scrollTop || 0;
+
+        // iOS Kick: minimal scrollen, damit IO-Callbacks sicher feuern
+        try { viewerEl.scrollTop = Math.min(1, viewerEl.scrollHeight - viewerEl.clientHeight); } catch {}
+
+        // Falls noch nichts gerendert ist: erste Seiten sofort rendern
+        await ensureFirstPagesRendered();
+
+        computeSpeed();
+        updateStatus("Auto-Scroll: läuft");
+        refreshPlayPauseUI();
+        requestAnimationFrame(tickAutoScroll);
+      }
+
+      // Unified handler: activates screen-on and toggles play/pause in one action
+      function togglePlayAndWake() {
+        const btn = document.querySelector('#btnPlayPause');
+        if (!btn || btn.disabled) return;
+        btn.disabled = true;
+
+        if (state.viewer.autoScroll.running || state.viewer.autoScroll.pending) {
+          // Pause
+          stopAutoScroll();
+          btn.disabled = false;
+          refreshPlayPauseUI();
+        } else {
+          // Start: ensure screen stays on (synchronously for iOS), then start scrolling
+          try { acquireWakeLockSync(); } catch {}
+          startAutoScroll()
+            .finally(() => {
+              btn.disabled = false;
+              refreshPlayPauseUI();
+            });
+        }
+      }
+      function stopAutoScroll() {
+        state.viewer.autoScroll.running = false;
+        state.viewer.autoScroll.pending = false;
+        state.viewer.autoScroll.needsRecalc = false;
+        state.viewer.autoScroll.token = null;
+        updateStatus("Auto-Scroll: pausiert");
+      }
+      function tickAutoScroll(ts) {
+        if (!state.viewer.autoScroll.running) return;
+        const el = document.querySelector('#viewer');
+        if (!el) { 
+          stopAutoScroll(); 
+          refreshPlayPauseUI(); 
+          return; 
+        }
+        
+        // Geschwindigkeit neu berechnen wenn nötig (z.B. wenn Seiten nachladen)
+        if (state.viewer.autoScroll.needsRecalc || state.viewer.autoScroll.speedPxPerSec <= 0.01) {
+          computeSpeed();
+          state.viewer.autoScroll.needsRecalc = false;
+        }
+        
+        const dt = (ts - state.viewer.autoScroll.lastTs) / 1000;
+        state.viewer.autoScroll.lastTs = ts;
+
+        const delta = state.viewer.autoScroll.speedPxPerSec * dt;
+        // Falls noch nicht scrollbar, NICHT stoppen – warten bis Content kommt
+        const maxScrollTop = Math.max(0, el.scrollHeight - el.clientHeight);
+        if (maxScrollTop <= 1) {
+          // Kick: kleiner Scrollstoß hält die Schleife „aktiv“
+          if (el.scrollTop < 1) {
+            try { el.scrollTop = 1; } catch {}
+          }
+          // Nächster Frame: erneut versuchen
+          state.viewer.autoScroll.needsRecalc = true;
+          requestAnimationFrame(tickAutoScroll);
+          return;
+        }
+
+        // Float-Akkumulator verwenden, um Subpixel-Bewegung nicht zu verlieren
+        state.viewer.autoScroll.pos = Math.min(state.viewer.autoScroll.pos + delta, maxScrollTop);
+        el.scrollTop = state.viewer.autoScroll.pos;
+
+        // Am Ende angekommen?
+        if (el.scrollTop >= maxScrollTop - 1) {
+          stopAutoScroll();
+          refreshPlayPauseUI();
+          updateStatus("Ende erreicht");
+          return;
+        }
+        
+        requestAnimationFrame(tickAutoScroll);
+      }
+      function refreshPlayPauseUI() {
+        const btn = document.querySelector('#btnPlayPause');
+        if (!btn) return;
+        if (state.viewer.autoScroll.running) {
+          btn.textContent = "❚❚ Pause";
+        } else if (state.viewer.autoScroll.pending) {
+          btn.textContent = "⏳ Warte…";
+        } else {
+          btn.textContent = "▶︎ Start";
+        }
+      }
+      function updateStatus(extra) {
+        const s = document.querySelector('#status');
+        const p = state.viewer;
+        const base = `Seiten: ${p.numPages || "?"} • Sek./Seite: ${p.secsPerPage}`;
+        s.textContent = extra ? `${base} • ${extra}` : base;
+      }
+
+      // ===== Fullscreen & Wake Lock =====
+      async function toggleFullscreen() {
+        const el = document.fullscreenElement;
+        if (el) { await document.exitFullscreen(); return; }
+        try { await document.documentElement.requestFullscreen(); } catch {}
+      }
+      async function toggleWakeLock() {
+        const btn = document.querySelector('#btnWakeLock');
+        try {
+          if ("wakeLock" in navigator) {
+            if (!state.viewer.wakeLock) {
+              state.viewer.wakeLock = await navigator.wakeLock.request("screen");
+              state.viewer.wakeLock.addEventListener("release", () => {
+                state.viewer.wakeLock = null;
+                btn.textContent = "☀︎ Screen On";
+              });
+              btn.textContent = "☀︎ Screen On ✓";
+            } else {
+              await state.viewer.wakeLock.release();
+              state.viewer.wakeLock = null;
+              btn.textContent = "☀︎ Screen On";
+            }
+            return;
+          }
+          // Fallback: NoSleep.js
+          if (!state.viewer.noSleep) {
+            await new Promise((resolve, reject) => {
+              const s = document.createElement('script');
+              s.src = '/vendor/nosleep.min.js';
+              s.onload = resolve; s.onerror = reject; document.head.appendChild(s);
+            });
+            state.viewer.noSleep = new window.NoSleep();
+          }
+          if (state.viewer.noSleepEnabled) {
+            state.viewer.noSleep.disable();
+            state.viewer.noSleepEnabled = false;
+            btn.textContent = "☀︎ Screen On";
+          } else {
+            state.viewer.noSleep.enable(); // user gesture: this click
+            state.viewer.noSleepEnabled = true;
+            btn.textContent = "☀︎ Screen On ✓";
+          }
+        } catch (e) {
+          console.warn('Wake lock failed or blocked', e);
+          btn.textContent = "☀︎ Nicht unterstützt";
+        }
+      }
+    </script>
+  </body>
+</html>
