@@ -807,15 +807,21 @@
             submitBtn.textContent = 'Lade hoch…';
 
             try {
+              // Avoid setting Content-Type explicitly to let the browser choose;
+              // some iOS browsers throw TypeError on manual Content-Type with Blob bodies.
               const headers = new Headers({
-                'Content-Type': declaredType.includes('pdf') ? declaredType : 'application/pdf',
-                'X-Upload-Name': file.name || 'upload.pdf',
+                'X-Upload-Name': (file.name && file.name.toLowerCase().endsWith('.pdf')) ? file.name : (file.name || 'upload.pdf'),
                 'X-Upload-Meta': JSON.stringify(metaPayload),
                 'Accept': 'application/json'
               });
 
               const res = await fetch('/api/upload', { method: 'POST', headers, body: file });
-              const payload = await res.json().catch(() => ({}));
+              let payload;
+              try {
+                payload = await res.json();
+              } catch {
+                payload = {};
+              }
               if (!res.ok || !payload.ok) {
                 const err = new Error(payload.error || 'Upload fehlgeschlagen.');
                 err.status = res.status;
@@ -835,6 +841,10 @@
               await loadPage();
               renderLibrary();
             } catch (error) {
+              // Normalize Safari/iOS TypeError messages
+              if (error?.name === 'TypeError' && !error.status) {
+                error.message = 'Netzwerkfehler beim Upload (TypeError). Bitte erneut versuchen.';
+              }
               if (error.status === 503) {
                 state.ui.uploadSupported = false;
                 statusEl.textContent = error.message || 'Uploads sind aktuell nicht verfügbar.';

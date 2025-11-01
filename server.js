@@ -1126,21 +1126,12 @@ app.get("/api/sheets", async (req, res) => {
   }
 });
 
+// Improved upload endpoint (accepts PDF by MIME or .pdf filename)
 app.post("/api/upload", async (req, res) => {
   const limitMb = Math.round(MAX_UPLOAD_BYTES / 1024 / 1024);
   const contentType = ((req.headers["content-type"] || "").toString().toLowerCase());
-  const isPdfMime = contentType.includes("application/pdf") || contentType.includes("application/octet-stream");
-  if (!isPdfMime) {
-    return res.status(415).json({ error: "Nur PDF-Dateien können hochgeladen werden." });
-  }
-
-  const contentLength = Number(req.headers["content-length"]);
-  if (Number.isFinite(contentLength) && contentLength > MAX_UPLOAD_BYTES) {
-    return res.status(413).json({ error: `Datei ist größer als ${limitMb} MB.` });
-  }
-
-  let meta = {};
   const metaHeader = req.headers["x-upload-meta"];
+  let meta = {};
   if (metaHeader) {
     try {
       meta = JSON.parse(metaHeader.toString());
@@ -1149,6 +1140,21 @@ app.post("/api/upload", async (req, res) => {
     }
   }
   if (!meta || typeof meta !== "object") meta = {};
+
+  const headerName = typeof req.headers["x-upload-name"] === "string" ? req.headers["x-upload-name"].trim() : "";
+  const metaOriginal = typeof meta.originalName === "string" ? meta.originalName.trim() : "";
+  const declaredName = headerName || metaOriginal;
+
+  const isPdfByMime = contentType.includes("application/pdf") || contentType.includes("application/octet-stream");
+  const isPdfByName = declaredName.toLowerCase().endsWith(".pdf");
+  if (!isPdfByMime && !isPdfByName) {
+    return res.status(415).json({ error: "Nur PDF-Dateien erlaubt (fehlender PDF Content-Type und Dateiendung)" });
+  }
+
+  const contentLength = Number(req.headers["content-length"]);
+  if (Number.isFinite(contentLength) && contentLength > MAX_UPLOAD_BYTES) {
+    return res.status(413).json({ error: `Datei ist größer als ${limitMb} MB.` });
+  }
 
   const rawName = (meta.originalName && typeof meta.originalName === "string")
     ? meta.originalName.trim()
