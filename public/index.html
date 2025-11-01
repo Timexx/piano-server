@@ -1973,6 +1973,8 @@
               await removeFromPlaylist(rel);
             } else if (act === 'play') {
               await setPlaylistCurrentIndex(idx);
+              // Wake Lock SOFORT aktivieren (synchron in User-Geste für iOS)
+              acquireWakeLockSync();
               // open viewer with this file
               history.replaceState(null, '', '/');
               renderViewer(rel);
@@ -2188,6 +2190,19 @@
         });
         // Ensure playlist icons reflect current state
         queueMicrotask(() => updateLibraryPlaylistButtons());
+        
+        // Click-Handler für direktes Laden (ohne Page-Reload) + Wake Lock Aktivierung
+        a.addEventListener('click', (ev) => {
+          // Nur wenn es ein normaler Klick ist (kein Ctrl/Cmd+Click für neuen Tab)
+          if (!ev.ctrlKey && !ev.metaKey && !ev.shiftKey) {
+            ev.preventDefault();
+            // Wake Lock SOFORT aktivieren (synchron in User-Geste für iOS)
+            acquireWakeLockSync();
+            history.replaceState(null, '', a.href);
+            renderViewer(item.name);
+          }
+        });
+        
         return a;
       }
       function renderRow(item) {
@@ -2261,6 +2276,19 @@
           }
           updateLibraryPlaylistButtons();
         });
+        
+        // Click-Handler für direktes Laden (ohne Page-Reload) + Wake Lock Aktivierung
+        a.addEventListener('click', (ev) => {
+          // Nur wenn es ein normaler Klick ist (kein Ctrl/Cmd+Click für neuen Tab)
+          if (!ev.ctrlKey && !ev.metaKey && !ev.shiftKey) {
+            ev.preventDefault();
+            // Wake Lock SOFORT aktivieren (synchron in User-Geste für iOS)
+            acquireWakeLockSync();
+            history.replaceState(null, '', a.href);
+            renderViewer(item.name);
+          }
+        });
+        
         return a;
       }
 
@@ -2455,6 +2483,8 @@
             const rel = playlist.items[idx];
             if (!rel) return;
             try { await setPlaylistCurrentIndex(idx); } catch {}
+            // Wake Lock SOFORT aktivieren (synchron in User-Geste für iOS)
+            acquireWakeLockSync();
             history.replaceState(null, '', '/');
             renderViewer(rel);
           });
@@ -2628,6 +2658,8 @@
           if (!playlist.items.length) return;
           try { await setPlaylistCurrentIndex(0); } catch {}
           const rel = playlist.items[0];
+          // Wake Lock SOFORT aktivieren (synchron in User-Geste für iOS)
+          acquireWakeLockSync();
           history.replaceState(null, '', '/');
           renderViewer(rel);
         };
@@ -2961,8 +2993,9 @@
         // Clear any existing memory before starting
         aggressiveCleanup();
         
-        // Ensure wake lock is actually activated before UI continues
-        await acquireWakeLockAuto();
+        // Wake Lock IMMER aktivieren wenn Viewer geöffnet wird (unabhängig von Play)
+        acquireWakeLockSync(); // Synchron für iOS/iPad
+        await acquireWakeLockAuto(); // Async für moderne Browser
         if (state.viewer.wakeDesired) setWakeBtn(true);
         // Retry after 1s in case first attempt failed (iOS defers activation until tick)
         setTimeout(() => {
@@ -3165,6 +3198,8 @@
         try { await setPlaylistCurrentIndex(next); } catch {}
         const rel = playlist.items[next];
         if (rel) {
+          // Wake Lock bereits aktiv (wir sind im Viewer), aber sicherstellen
+          acquireWakeLockSync();
           history.replaceState(null, '', '/');
           renderViewer(rel);
         }
