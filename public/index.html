@@ -378,6 +378,20 @@
         mode: localStorage.getItem('playlistMode') === '1'
       };
 
+      function ensurePlaylistStyles() {
+        if (document.getElementById('playlistDragStyles')) return;
+        const style = document.createElement('style');
+        style.id = 'playlistDragStyles';
+        style.textContent = `
+          .playlist-row { transition: transform 0.18s ease, box-shadow 0.18s ease, background 0.18s ease, opacity 0.18s ease; will-change: transform; }
+          .playlist-row.is-active { border-color: color-mix(in srgb, var(--accent-color) 70%, rgba(255,255,255,0.08)); background: linear-gradient(160deg, color-mix(in srgb, var(--accent-color) 20%, rgba(12,12,18,0.95)) 0%, rgba(9,9,12,0.94) 100%); box-shadow: 0 12px 32px -20px rgba(0,0,0,0.55); }
+          .playlist-row.is-dragging-source { opacity: 0; }
+          .playlist-placeholder { border-radius: 0.75rem; border: 1px dashed rgba(99,102,241,0.45); background: rgba(99,102,241,0.08); box-shadow: inset 0 0 0 1px rgba(99,102,241,0.16); height: var(--placeholder-height, 72px); margin: 4px 0; opacity: 0.78; transition: height 0.18s ease, margin 0.18s ease, opacity 0.18s ease; }
+          .playlist-ghost { pointer-events: none; border-radius: 0.75rem; box-shadow: 0 28px 48px rgba(9,9,12,0.35); overflow: hidden; transform-origin: center; }
+        `;
+        document.head.appendChild(style);
+      }
+
       // Reflect fullscreen state on <html> to enable safe-area CSS
       document.addEventListener("fullscreenchange", () => {
         document.documentElement.classList.toggle("is-fs", !!document.fullscreenElement);
@@ -2209,6 +2223,7 @@
 
       function renderPlaylistLibrary() {
         disposeLibraryViewportSizing();
+        ensurePlaylistStyles();
         // Header actions
         ensureModeSwitcher();
         ensureUploadButton();
@@ -2249,6 +2264,78 @@
         `;
 
         const listEl = document.querySelector('#plList');
+        const refreshRowMetadata = () => {
+          const rows = Array.from(listEl.querySelectorAll('[data-row]'));
+          rows.forEach((row, index) => {
+            row.setAttribute('data-row', String(index));
+            row.classList.toggle('is-active', index === playlist.currentIndex);
+            row.querySelectorAll('button[data-act]').forEach((btn) => {
+              btn.setAttribute('data-idx', String(index));
+              const action = btn.getAttribute('data-act');
+              if (action === 'up') {
+                const disabled = index === 0;
+                btn.disabled = disabled;
+                if (disabled) btn.setAttribute('aria-disabled', 'true');
+                else btn.removeAttribute('aria-disabled');
+              } else if (action === 'down') {
+                const disabled = index === rows.length - 1;
+                btn.disabled = disabled;
+                if (disabled) btn.setAttribute('aria-disabled', 'true');
+                else btn.removeAttribute('aria-disabled');
+              }
+            });
+          });
+        };
+
+        const adjustCurrentIndex = (from, to) => {
+          const current = playlist.currentIndex;
+          if (!Number.isInteger(current) || current < 0) return;
+          if (current === from) {
+            playlist.currentIndex = to;
+            return;
+          }
+          if (from < to) {
+            if (current > from && current <= to) playlist.currentIndex = current - 1;
+          } else if (from > to) {
+            if (current < from && current >= to) playlist.currentIndex = current + 1;
+          }
+        };
+
+        const moveRow = (from, to, { animate = true, notifyServer = true } = {}) => {
+          if (from === to) return;
+          const rows = Array.from(listEl.querySelectorAll('[data-row]'));
+          const moving = rows[from];
+          if (!moving) return;
+          const target = rows[to];
+          if (to > from) {
+            const anchor = target ? target.nextElementSibling : null;
+            listEl.insertBefore(moving, anchor);
+          } else {
+            listEl.insertBefore(moving, target || null);
+          }
+          const order = [...playlist.items];
+          const [movedItem] = order.splice(from, 1);
+          order.splice(to, 0, movedItem);
+          adjustCurrentIndex(from, to);
+          playlist.items = order;
+          refreshRowMetadata();
+          if (animate) {
+            moving.animate(
+              [
+                { transform: 'scale(0.97)', boxShadow: '0 0 0 rgba(0,0,0,0)' },
+                { transform: 'scale(1.02)', boxShadow: '0 18px 32px rgba(0,0,0,0.32)' },
+                { transform: 'scale(1)', boxShadow: '0 0 0 rgba(0,0,0,0)' }
+              ],
+              { duration: 260, easing: 'ease-out' }
+            );
+          }
+          if (notifyServer) {
+            setPlaylistOrder(order).catch(() => {
+              fetchPlaylist().catch(() => {});
+            });
+          }
+        };
+
         const makeItem = (rel) => {
           const encoded = encodePathSegments(rel);
           const name = rel.split('/').pop();
@@ -2266,7 +2353,7 @@
           const active = idx === (Number.isInteger(playlist.currentIndex) ? playlist.currentIndex : -1);
           const row = document.createElement('div');
           // Adopt the library list row design: rounded, padded, subtle tinted background
-          row.className = `group flex items-center gap-3 px-3 py-2 rounded-xl border border-neutral-800 bg-neutral-900/60 hover:bg-neutral-800/80 transition-colors ${active ? 'ring-1 ring-[--accent-color]/40' : ''}`;
+          row.className = `playlist-row group flex items-center gap-3 px-3 py-2 rounded-xl border border-neutral-800 bg-neutral-900/60 hover:bg-neutral-800/80 transition-colors${active ? ' is-active' : ''}`;
           row.setAttribute('data-row', String(idx));
           row.innerHTML = `
             <div class="w-6 flex items-center justify-center">
@@ -2301,6 +2388,8 @@
           })();
         });
 
+        refreshRowMetadata();
+
         // Row click: play that item
         listEl.querySelectorAll('[data-row]').forEach((row) => {
           row.addEventListener('click', async (ev) => {
@@ -2327,25 +2416,55 @@
             if (!rel) return;
             if (act === 'remove') {
               await removeFromPlaylist(rel);
-              renderPlaylistLibrary();
             } else if (act === 'up' || act === 'down') {
-              const order = [...playlist.items];
-              const to = act === 'up' ? Math.max(0, idx - 1) : Math.min(order.length - 1, idx + 1);
-              if (to !== idx) {
-                const [m] = order.splice(idx, 1);
-                order.splice(to, 0, m);
-                await setPlaylistOrder(order);
-                renderPlaylistLibrary();
-              }
+              const to = act === 'up' ? Math.max(0, idx - 1) : Math.min(playlist.items.length - 1, idx + 1);
+              if (to !== idx) moveRow(idx, to);
             }
           });
         });
 
         // Drag & Drop (mouse + touch via Pointer Events)
-        (function setupPlaylistDnd(){
+        (function setupPlaylistDnd() {
           const container = listEl;
           let drag = null;
-          function onPointerDown(ev){
+
+          const scheduleGhostTransform = (x, y) => {
+            if (!drag) return;
+            drag.pending = { x, y };
+            if (drag.frame) return;
+            drag.frame = requestAnimationFrame(() => {
+              if (!drag || !drag.pending) return;
+              drag.ghost.style.transform = `translate3d(${drag.pending.x}px, ${drag.pending.y}px, 0) scale(1.02)`;
+              drag.frame = null;
+            });
+          };
+
+          const cleanupListeners = () => {
+            document.removeEventListener('pointermove', onPointerMove);
+            document.removeEventListener('pointerup', onPointerUp);
+            document.removeEventListener('pointercancel', onPointerUp);
+          };
+
+          const autoscrollIfNeeded = (clientY) => {
+            const rect = container.getBoundingClientRect();
+            const threshold = 56;
+            if (clientY < rect.top + threshold) {
+              container.scrollTop -= 14;
+            } else if (clientY > rect.bottom - threshold) {
+              container.scrollTop += 14;
+            }
+          };
+
+          const currentTargetIndex = (clientY) => {
+            const rows = Array.from(container.querySelectorAll('[data-row]')).filter((el) => el.style.display !== 'none');
+            for (let i = 0; i < rows.length; i++) {
+              const r = rows[i].getBoundingClientRect();
+              if (clientY < r.top + r.height / 2) return i;
+            }
+            return rows.length;
+          };
+
+          function onPointerDown(ev) {
             const handle = ev.target.closest && ev.target.closest('[data-drag-handle]');
             if (!handle) return;
             if (ev.button !== 0 && ev.pointerType === 'mouse') return;
@@ -2358,92 +2477,92 @@
 
             const rect = row.getBoundingClientRect();
             const ghost = row.cloneNode(true);
+            ghost.classList.add('playlist-ghost');
             ghost.style.position = 'fixed';
-            ghost.style.left = rect.left + 'px';
-            ghost.style.top = rect.top + 'px';
+            ghost.style.left = '0px';
+            ghost.style.top = '0px';
             ghost.style.width = rect.width + 'px';
+            ghost.style.height = rect.height + 'px';
             ghost.style.zIndex = '1000';
             ghost.style.pointerEvents = 'none';
-            ghost.style.opacity = '0.96';
-            ghost.classList.add('ring', 'ring-[--accent-color]/40');
+            ghost.style.transform = `translate3d(${rect.left}px, ${rect.top}px, 0)`;
+            ghost.style.transition = 'transform 0.08s ease-out';
 
             const placeholder = document.createElement('div');
-            placeholder.style.height = rect.height + 'px';
-            placeholder.className = 'rounded bg-neutral-800/40 border border-[--accent-color]/30';
+            placeholder.className = 'playlist-placeholder';
+            placeholder.style.setProperty('--placeholder-height', `${rect.height}px`);
 
+            row.classList.add('is-dragging-source');
             row.style.display = 'none';
             row.parentElement.insertBefore(placeholder, row.nextSibling);
             document.body.appendChild(ghost);
 
             drag = {
               pointerId: ev.pointerId,
-              row, idx, ghost, placeholder,
-              startY: ev.clientY,
-              baseTop: rect.top,
+              row,
+              idx,
+              ghost,
+              placeholder,
+              offsetX: ev.clientX - rect.left,
+              offsetY: ev.clientY - rect.top,
               list: container,
-              scrolling: false
+              frame: null,
+              pending: null
             };
 
-            document.addEventListener('pointermove', onPointerMove, {passive:false});
-            document.addEventListener('pointerup', onPointerUp, {passive:true});
-            document.addEventListener('pointercancel', onPointerUp, {passive:true});
+            scheduleGhostTransform(rect.left, rect.top);
+
+            document.addEventListener('pointermove', onPointerMove, { passive: false });
+            document.addEventListener('pointerup', onPointerUp, { passive: true });
+            document.addEventListener('pointercancel', onPointerUp, { passive: true });
           }
-          function autoscrollIfNeeded(clientY){
-            const edge = 64;
-            if (clientY < edge) { window.scrollBy(0, -12); }
-            else if (window.innerHeight - clientY < edge) { window.scrollBy(0, 12); }
-          }
-          function currentTargetIndex(centerY){
-            const rows = Array.from(container.querySelectorAll('[data-row]')).filter(el => el.style.display !== 'none');
-            let t = 0;
-            for (const r of rows){
-              const rr = r.getBoundingClientRect();
-              if (centerY > rr.top + rr.height/2) t++;
-            }
-            // account for placeholder already in DOM
-            const placeholderPos = Array.from(container.children).indexOf(drag.placeholder);
-            return Math.max(0, Math.min(rows.length, t));
-          }
-          function onPointerMove(ev){
+
+          function onPointerMove(ev) {
             if (!drag) return;
             ev.preventDefault();
+            const x = ev.clientX - drag.offsetX;
+            const y = ev.clientY - drag.offsetY;
+            scheduleGhostTransform(x, y);
             autoscrollIfNeeded(ev.clientY);
-            const dy = ev.clientY - drag.startY;
-            drag.ghost.style.top = (drag.baseTop + dy) + 'px';
-            const ghostRect = drag.ghost.getBoundingClientRect();
-            const centerY = ghostRect.top + ghostRect.height/2;
-            let target = currentTargetIndex(centerY);
-            const children = Array.from(drag.list.children).filter(el => el !== drag.ghost);
-            const currentPos = children.indexOf(drag.placeholder);
-            if (target !== currentPos){
-              const anchor = drag.list.children[target];
-              if (anchor) drag.list.insertBefore(drag.placeholder, anchor);
-              else drag.list.appendChild(drag.placeholder);
+
+            const targetIndex = currentTargetIndex(ev.clientY);
+            const visibleRows = Array.from(container.querySelectorAll('[data-row]')).filter((el) => el.style.display !== 'none');
+            const anchor = visibleRows[targetIndex] || null;
+            if (anchor) {
+              if (drag.placeholder.nextElementSibling !== anchor) {
+                container.insertBefore(drag.placeholder, anchor);
+              }
+            } else if (container.lastElementChild !== drag.placeholder) {
+              container.appendChild(drag.placeholder);
             }
           }
-          async function onPointerUp(){
-            if (!drag) return;
-            document.removeEventListener('pointermove', onPointerMove);
-            document.removeEventListener('pointerup', onPointerUp);
-            document.removeEventListener('pointercancel', onPointerUp);
-            const { row, ghost, placeholder, idx } = drag;
-            const newPos = Array.from(drag.list.children).indexOf(placeholder);
-            // put row back for a moment to avoid visual gap
-            drag.list.insertBefore(row, placeholder);
-            row.style.display = '';
-            ghost.remove();
-            placeholder.remove();
 
-            // Build new order
-            let to = newPos;
-            if (to < 0) to = idx;
-            const order = [...playlist.items];
-            const [m] = order.splice(idx, 1);
-            order.splice(Math.min(order.length, to), 0, m);
-            try { await setPlaylistOrder(order); } catch {}
-            renderPlaylistLibrary();
+          function onPointerUp(ev) {
+            if (!drag) return;
+            cleanupListeners();
+            if (drag.frame) {
+              cancelAnimationFrame(drag.frame);
+              drag.frame = null;
+            }
+
+            const { row, ghost, placeholder, idx } = drag;
+            const children = Array.from(container.children);
+            const placeholderIndex = children.indexOf(placeholder);
+            placeholder.remove();
+            row.style.display = '';
+            row.classList.remove('is-dragging-source');
+            ghost.remove();
+
+            const maxIndex = Math.max(0, container.querySelectorAll('[data-row]').length - 1);
+            let targetIndex = placeholderIndex;
+            if (targetIndex < 0) targetIndex = idx;
+            targetIndex = Math.max(0, Math.min(maxIndex, targetIndex));
+
+            moveRow(idx, targetIndex, { animate: true, notifyServer: true });
+
             drag = null;
           }
+
           listEl.addEventListener('pointerdown', onPointerDown);
         })();
 
