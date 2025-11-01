@@ -254,6 +254,12 @@
       @media (max-width: 480px) {
         #sortMenu { max-width: 92vw; }
       }
+
+      /* Ensure dropdown is above all other elements */
+      #sortMenu {
+        z-index: 1000 !important; /* Much higher to ensure visibility */
+        position: absolute !important;
+      }
     </style>
   </head>
   <body class="min-h-screen bg-neutral-950 text-neutral-100 antialiased tap-highlight-none">
@@ -1194,13 +1200,14 @@
             <div class="flex items-center justify-between">
               ${isSmallScreen ? `<button id="filterToggle" aria-expanded="${!filterCollapsed}" aria-controls="filterBlock" class="filter-toggle" type="button">${filterCollapsed ? 'Filter anzeigen ▾' : 'Filter ausblenden ▴'}</button>` : ''}
             </div>
-            <div id="filterBlock" class="flex flex-col gap-4 ${filterCollapsed ? 'hidden' : ''}">
-              <section id="filterPanel" class="rounded-xl border border-neutral-800 bg-neutral-900/70 p-3">
-                <div class="flex flex-wrap items-center gap-2">
-                  <div class="relative w-full sm:w-[420px] md:w-[520px] lg:w-[640px] min-w-[220px]">
-                    <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-neutral-400">${SVG_SEARCH}</span>
-                    <input id="search" placeholder="Suche nach Titel…" class="w-full pl-9 pr-10 py-2 rounded-lg bg-neutral-950/70 border border-neutral-800 focus:border-[--accent-color] outline-none" />
-                    <button id="searchClear" class="absolute inset-y-0 right-0 pr-3 flex items-center text-neutral-500 hover:text-neutral-300 transition-colors hidden" aria-label="Suche löschen" title="Suche löschen">
+            <div id="filterBlock" class="flex flex-col gap-3 ${filterCollapsed ? 'hidden' : ''}" style="position: relative; z-index: 100;">
+              <section id="filterPanel" class="rounded-2xl border border-neutral-800/60 bg-gradient-to-br from-neutral-900/90 to-neutral-900/70 backdrop-blur-sm p-4 shadow-lg" style="position: relative; z-index: 100;">
+                <!-- Search Row -->
+                <div class="mb-3">
+                  <div class="relative w-full">
+                    <span class="absolute inset-y-0 left-0 pl-3.5 flex items-center text-neutral-400 pointer-events-none">${SVG_SEARCH}</span>
+                    <input id="search" placeholder="Suche nach Titel…" class="w-full pl-10 pr-10 py-2.5 rounded-xl bg-neutral-950/50 border border-neutral-800/60 focus:border-[--accent-color] focus:ring-2 focus:ring-[--accent-color]/20 outline-none text-neutral-100 placeholder-neutral-500 transition-all" />
+                    <button id="searchClear" class="absolute inset-y-0 right-0 pr-3.5 flex items-center text-neutral-500 hover:text-neutral-300 transition-colors hidden" aria-label="Suche löschen" title="Suche löschen">
                       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <circle cx="12" cy="12" r="10"></circle>
                         <line x1="15" y1="9" x2="9" y2="15"></line>
@@ -1208,34 +1215,45 @@
                       </svg>
                     </button>
                   </div>
+                </div>
 
-                  <div id="viewSwitch" class="inline-flex p-1 rounded-lg border border-neutral-800 bg-neutral-900">
-                    <button type="button" data-view="grid" aria-pressed="${L.view==='grid'}" class="h-9 w-9 grid place-items-center rounded-md ${L.view==='grid' ? 'bg-neutral-800 text-neutral-50' : 'text-neutral-300'}" title="Grid Ansicht">${SVG_GRID}</button>
-                    <button type="button" data-view="list" aria-pressed="${L.view==='list'}" class="h-9 w-9 grid place-items-center rounded-md ${L.view==='list' ? 'bg-neutral-800 text-neutral-50' : 'text-neutral-300'}" title="Listenansicht">${SVG_LIST}</button>
-                  </div>
+                <!-- Controls Row -->
+                <div class="flex flex-wrap items-center gap-2">
+                  <!-- Favorites Filter -->
+                  <button id="filterFav" class="px-3.5 h-9 rounded-lg border transition-all shadow-sm ${favCls} flex items-center gap-2 font-medium text-sm whitespace-nowrap" aria-pressed="${L.onlyFavorites}" title="Nur Favoriten">
+                    <span class="text-amber-400 text-base">★</span>
+                    <span class="hidden sm:inline">Favoriten</span>
+                    ${state.library.favorites && state.library.favorites.size > 0 ? `<span class="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full text-xs font-bold ${L.onlyFavorites ? 'bg-amber-400 text-neutral-900' : 'bg-amber-500/20 text-amber-300'}">${state.library.favorites.size}</span>` : ''}
+                  </button>
 
-                  <div class="flex items-center gap-2 relative">
-                    <div class="relative">
-                      <button id="sortMenuBtn" class="px-3 py-2 rounded-lg bg-neutral-950/70 border border-neutral-800 text-neutral-200 hover:bg-neutral-800 flex items-center gap-2" aria-haspopup="menu" aria-expanded="false" title="Sortieren">
+                  <!-- Sort Controls -->
+                  <div class="inline-flex items-center gap-1.5 p-1 rounded-lg border border-neutral-800/60 bg-neutral-950/50 shadow-sm">
+                    <div class="relative z-50">
+                      <button id="sortMenuBtn" class="px-3 h-9 rounded-md text-neutral-200 hover:bg-neutral-800/70 flex items-center gap-2 transition-colors text-sm font-medium whitespace-nowrap" aria-haspopup="menu" aria-expanded="false" title="Sortieren">
                         <span id="sortLabel"></span>
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="opacity-60">
+                          <polyline points="6 9 12 15 18 9"></polyline>
+                        </svg>
                       </button>
-                      <div id="sortMenu" class="hidden min-w-[170px] rounded-lg border border-neutral-800 bg-neutral-900 shadow-xl z-20 overflow-hidden">
-                        <button class="w-full text-left px-3 py-2 hover:bg-neutral-800 text-neutral-200" data-sort="name">Name</button>
-                        <button class="w-full text-left px-3 py-2 hover:bg-neutral-800 text-neutral-200" data-sort="mtime">Zuletzt geändert</button>
-                        <button class="w-full text-left px-3 py-2 hover:bg-neutral-800 text-neutral-200" data-sort="size">Dateigröße</button>
+                      <div id="sortMenu" class="hidden absolute top-full mt-1 left-0 min-w-[180px] rounded-lg border border-neutral-700 bg-neutral-900/95 backdrop-blur-md shadow-2xl overflow-hidden">
+                        <button class="w-full text-left px-3 py-2.5 hover:bg-neutral-800/90 text-neutral-200 text-sm transition-colors" data-sort="name">Name</button>
+                        <button class="w-full text-left px-3 py-2.5 hover:bg-neutral-800/90 text-neutral-200 text-sm transition-colors" data-sort="mtime">Zuletzt geändert</button>
+                        <button class="w-full text-left px-3 py-2.5 hover:bg-neutral-800/90 text-neutral-200 text-sm transition-colors" data-sort="size">Dateigröße</button>
                       </div>
                     </div>
-                    <button id="orderToggle" class="h-9 w-9 grid place-items-center rounded-lg bg-neutral-950/70 border border-neutral-800 text-neutral-300 hover:bg-neutral-800 ${L.order==='desc' ? 'rotate-180' : ''}" title="Sortierreihenfolge" style="transition: transform .15s ease">${SVG_ORDER}</button>
+                    <div class="w-px h-5 bg-neutral-800/60"></div>
+                    <button id="orderToggle" class="h-9 w-9 grid place-items-center rounded-md text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800/70 transition-all ${L.order==='desc' ? 'rotate-180' : ''}" title="Sortierreihenfolge" style="transition: transform .2s ease, background-color .2s ease, color .2s ease">${SVG_ORDER}</button>
                   </div>
 
-                  <button id="filterFav" class="px-3 py-2 rounded-full ${favCls} flex items-center gap-2" aria-pressed="${L.onlyFavorites}" title="Nur Favoriten">
-                    <span class="text-amber-400">★</span><span class="hidden sm:inline">Favoriten</span>
-                    ${state.library.favorites && state.library.favorites.size > 0 ? `<span class="ml-1 inline-flex items-center justify-center px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-500/90 text-white">${state.library.favorites.size}</span>` : ''}
-                  </button>
+                  <!-- View Switch -->
+                  <div id="viewSwitch" class="sm:ml-auto inline-flex p-1 rounded-lg border border-neutral-800/60 bg-neutral-950/50 shadow-sm">
+                    <button type="button" data-view="grid" aria-pressed="${L.view==='grid'}" class="h-9 w-9 grid place-items-center rounded-md transition-all ${L.view==='grid' ? 'bg-[--accent-color] text-white shadow-sm' : 'text-neutral-400 hover:text-neutral-200'}" title="Grid Ansicht">${SVG_GRID}</button>
+                    <button type="button" data-view="list" aria-pressed="${L.view==='list'}" class="h-9 w-9 grid place-items-center rounded-md transition-all ${L.view==='list' ? 'bg-[--accent-color] text-white shadow-sm' : 'text-neutral-400 hover:text-neutral-200'}" title="Listenansicht">${SVG_LIST}</button>
+                  </div>
                 </div>
               </section>
 
-              <section id="categoryBar" class="shrink-0"></section>
+              <section id="categoryBar" class="shrink-0" style="position: relative; z-index: 50;"></section>
             </div>
             <div class="flex flex-col flex-1 min-h-0 overflow-hidden">
               <section id="virtualWrap" class="relative flex-1 min-h-0"></section>
@@ -1314,6 +1332,7 @@
                 const prevBtn = document.querySelector('#prevPage');
                 const nextBtn = document.querySelector('#nextPage');
                 if (prevBtn) {
+
                   prevBtn.classList.toggle('invisible', state.library.page <= 1);
                   prevBtn.classList.toggle('pointer-events-none', state.library.page <= 1);
                   prevBtn.classList.toggle('select-none', state.library.page <= 1);
@@ -1399,80 +1418,39 @@
 
         // Sort dropdown behavior
         if (sortMenuBtn && sortMenu) {
-          let repositionHandlersAttached = false;
-          function positionSortMenu() {
-            // Switch to fixed positioning and place menu within viewport (below or above button)
-            sortMenu.style.position = 'fixed';
-            sortMenu.style.zIndex = '1000';
-            sortMenu.style.maxWidth = '360px';
-            // Also cap to viewport on narrow screens
-            const vw = window.innerWidth; const vh = window.innerHeight; const margin = 8;
-            const cap = Math.min(360, Math.floor(vw - margin * 2));
-            sortMenu.style.maxWidth = cap + 'px';
-            // Temporarily make visible to measure
-            const prevDisplay = sortMenu.style.display;
-            if (sortMenu.classList.contains('hidden')) sortMenu.classList.remove('hidden');
-            sortMenu.style.display = 'block';
-            const btnRect = sortMenuBtn.getBoundingClientRect();
-            const menuRect = sortMenu.getBoundingClientRect();
-            // Default align-left to the button; clamp within viewport
-            let left = btnRect.left;
-            if (left + menuRect.width + margin > vw) left = Math.max(margin, vw - menuRect.width - margin);
-            if (left < margin) left = margin;
-            let top = btnRect.bottom + 6;
-            let maxH = vh - top - margin;
-            if (maxH < menuRect.height) {
-              // Try opening upwards
-              const altTop = btnRect.top - menuRect.height - 6;
-              if (altTop >= margin) { top = altTop; maxH = vh - top - margin; }
-              else { top = Math.max(margin, altTop); maxH = vh - top - margin; }
-            }
-            sortMenu.style.left = `${Math.round(left)}px`;
-            sortMenu.style.top = `${Math.round(top)}px`;
-            sortMenu.style.maxHeight = `${Math.max(120, Math.floor(maxH))}px`;
-            sortMenu.style.overflowY = 'auto';
-            // Restore display flag if previously hidden (but remain visible since opening)
-            sortMenu.style.display = prevDisplay || '';
-          }
           const closeMenu = () => {
             sortMenu.classList.add('hidden');
             sortMenuBtn.setAttribute('aria-expanded','false');
             document.removeEventListener('click', onDocClick, true);
-            if (repositionHandlersAttached) {
-              window.removeEventListener('resize', handleReposition, true);
-              window.removeEventListener('scroll', handleReposition, true);
-              repositionHandlersAttached = false;
-            }
-            // Clean inline styles so re-render sets defaults
-            sortMenu.style.position = '';
-            sortMenu.style.left = '';
-            sortMenu.style.top = '';
-            sortMenu.style.maxHeight = '';
-            sortMenu.style.overflowY = '';
-            sortMenu.style.zIndex = '';
           };
-          const onDocClick = (ev) => { if (!sortMenu.contains(ev.target) && ev.target !== sortMenuBtn) closeMenu(); };
-          const handleReposition = () => { if (!sortMenu.classList.contains('hidden')) positionSortMenu(); };
+          
+          const onDocClick = (ev) => { 
+            // Check if click is inside menu or on button (including its children)
+            if (sortMenu.contains(ev.target) || sortMenuBtn.contains(ev.target)) return;
+            closeMenu(); 
+          };
+          
           sortMenuBtn.addEventListener('click', (ev)=>{
             ev.preventDefault(); ev.stopPropagation();
             const isOpen = !sortMenu.classList.contains('hidden');
-            if (isOpen) { closeMenu(); }
-            else {
+            if (isOpen) { 
+              closeMenu(); 
+            } else {
               sortMenu.classList.remove('hidden');
               sortMenuBtn.setAttribute('aria-expanded','true');
-              positionSortMenu();
-              if (!repositionHandlersAttached) {
-                window.addEventListener('resize', handleReposition, true);
-                window.addEventListener('scroll', handleReposition, true);
-                repositionHandlersAttached = true;
-              }
-              document.addEventListener('click', onDocClick, true);
+              // Add click listener after a small delay to prevent immediate closing
+              setTimeout(() => {
+                document.addEventListener('click', onDocClick, true);
+              }, 10);
             }
           });
+          
           sortMenu.querySelectorAll('[data-sort]').forEach((btn)=>{
-            btn.addEventListener('click', async ()=>{
+            btn.addEventListener('click', async (ev)=>{
+              ev.stopPropagation(); // Prevent doc click from interfering
               const v = btn.getAttribute('data-sort');
               if (!v) return;
+              closeMenu(); // Close menu first
               if (v !== L.sort) {
                 L.sort = v; localStorage.setItem('libSort', L.sort);
                 L.page = 1;
@@ -1933,8 +1911,6 @@
         fallback.textContent = 'PDF';
         a.appendChild(fallback);
 
-  // (Favoriten-Button nach unten in die Aktionsleiste verlegt)
-
         const overlay = document.createElement('div');
         overlay.className = 'card-overlay';
         overlay.innerHTML = `
@@ -2128,7 +2104,7 @@
           const active = idx === (Number.isInteger(playlist.currentIndex) ? playlist.currentIndex : -1);
           const row = document.createElement('div');
           // Adopt the library list row design: rounded, padded, subtle tinted background
-          row.className = `group flex items-center gap-3 px-3 py-2 rounded-xl border border-neutral-800/40 bg-neutral-900/80 hover:bg-neutral-800/80 transition-colors ${active ? 'ring-1 ring-[--accent-color]/40' : ''}`;
+          row.className = `group flex items-center gap-3 px-3 py-2 rounded-xl border border-neutral-800 bg-neutral-900/60 hover:bg-neutral-800/80 transition-colors ${active ? 'ring-1 ring-[--accent-color]/40' : ''}`;
           row.setAttribute('data-row', String(idx));
           row.innerHTML = `
             <div class="w-6 flex items-center justify-center">
@@ -2144,7 +2120,7 @@
             <div class="flex items-center gap-1 ml-auto">
               <button data-act="up" data-idx="${idx}" class="h-9 w-9 grid place-items-center rounded-full border border-neutral-700 text-neutral-200 bg-neutral-800/70 hover:bg-neutral-700" ${idx===0?'disabled aria-disabled="true"':''} title="Nach oben">${SVG_CHEV_UP}</button>
               <button data-act="down" data-idx="${idx}" class="h-9 w-9 grid place-items-center rounded-full border border-neutral-700 text-neutral-200 bg-neutral-800/70 hover:bg-neutral-700" ${idx>=items.length-1?'disabled aria-disabled="true"':''} title="Nach unten">${SVG_CHEV_DOWN}</button>
-              <button data-act="remove" data-idx="${idx}" class="h-9 w-9 grid place-items-center rounded-full border border-neutral-700 text-neutral-200 bg-neutral-800/70 hover:bg-neutral-700" title="Entfernen">${SVG_TRASH}</button>
+              <button data-act="remove" data-idx="${idx}" class="h-9 w-9 grid place-items-center rounded-full border border-rose-700 text-rose-300 hover:bg-rose-900/20" title="Entfernen">${SVG_TRASH}</button>
             </div>
           `;
           listEl.appendChild(row);
@@ -3344,10 +3320,12 @@
       function updateStatus(extra) {
         const s = document.querySelector('#status');
         const p = state.viewer;
-        const base = `Seiten: ${p.numPages || "?"} • Sek./Seite: ${p.secsPerPage}`;
-        s.textContent = extra ? `${base} • ${extra}` : base;
+        if (!s) return;
+        
+        const baseText = `${p.numPages || 0} Seiten • ${p.secsPerPage}s/Seite`;
+        s.textContent = extra ? `${baseText} • ${extra}` : baseText;
       }
-
+      
       // ===== Fullscreen & Wake Lock =====
       async function toggleFullscreen() {
         const el = document.fullscreenElement;
