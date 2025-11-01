@@ -1673,12 +1673,16 @@
           }
         }
 
-        const btnPlayPause = document.querySelector('#btnPlayPause');
+  const btnPlayPause = document.querySelector('#btnPlayPause');
         btnPlayPause.onclick = togglePlayAndWake;
 
         // Arm gesture activator for wake lock on the viewer container
         armWakeLockFromGestures(container);
         startWakeWatch();
+
+  // Let the pianist adjust scroll position while auto-scroll runs;
+  // resume from that position when released.
+  registerUserScrollControls(container);
 
         const prefs = await getFilePrefsFromBackend(fileName);
         state.viewer.secsPerPage = prefs?.secsPerPage || 45;
@@ -1758,6 +1762,81 @@
           window.removeEventListener('beforeunload', cleanup);
         };
         window.addEventListener('beforeunload', cleanup);
+      }
+
+      // Allow manual scroll override while auto-scroll is running
+      function registerUserScrollControls(container) {
+        const el = container;
+        if (!el) return;
+        const S = state.viewer.autoScroll;
+        S.userAdjusting = false;
+        S.userActiveUntil = 0; // timestamp until which we honor user momentum/settling
+        S.ignoreScrollUntil = 0; // timestamp to ignore programmatic scroll events
+        S._lastScrollTop = el.scrollTop || 0;
+        S._lastScrollTs = performance.now();
+
+        const now = () => performance.now();
+
+        const onPointerDown = () => {
+          if (!S.running) return;
+          S.userAdjusting = true;
+          // While dragging, treat as user-controlled
+          S.userActiveUntil = now() + 2000; // generous window updated on events
+        };
+        const onPointerUp = () => {
+          if (!S.running) { S.userAdjusting = false; return; }
+          // Lock new base position from where to continue
+          S.pos = el.scrollTop || 0;
+          S.lastTs = now();
+          S.userAdjusting = false;
+          // Allow momentum/settling just after release
+          S.userActiveUntil = now() + 600;
+        };
+        const onWheel = () => {
+          if (!S.running) return;
+          // Treat wheel as user adjustment for a short grace period
+          S.userActiveUntil = now() + 1200; // allow stronger inertia
+        };
+        const onScroll = () => {
+          if (!S.running) return;
+          const t = performance.now();
+          if (t < (S.ignoreScrollUntil || 0)) return;
+          // Compute instantaneous velocity to scale grace window
+          const top = el.scrollTop || 0;
+          const dtMs = Math.max(1, t - (S._lastScrollTs || t));
+          const dy = top - (S._lastScrollTop || top);
+          const v = Math.abs(dy) / (dtMs / 1000); // px/sec
+          let grace;
+          if (v > 2500) grace = 2000;
+          else if (v > 1500) grace = 1400;
+          else if (v > 800) grace = 1000;
+          else grace = 600;
+          S.userActiveUntil = t + grace;
+          // Track live user position so we resume from here
+          S.pos = top;
+          S.lastTs = t;
+          S._lastScrollTop = top;
+          S._lastScrollTs = t;
+          // Speed may need recalculation if layout changed
+          S.needsRecalc = true;
+        };
+        const onTouchMove = () => {
+          if (!S.running) return;
+          // Continuous user control
+          S.userActiveUntil = now() + 500;
+        };
+
+        el.addEventListener('pointerdown', onPointerDown, { passive: true });
+        el.addEventListener('pointerup', onPointerUp, { passive: true });
+        el.addEventListener('pointercancel', onPointerUp, { passive: true });
+        // iOS safety: also hook touch events
+        el.addEventListener('touchstart', onPointerDown, { passive: true });
+        el.addEventListener('touchend', onPointerUp, { passive: true });
+        el.addEventListener('touchcancel', onPointerUp, { passive: true });
+        el.addEventListener('touchmove', onTouchMove, { passive: true });
+        // Wheel/momentum
+        el.addEventListener('wheel', onWheel, { passive: true });
+        el.addEventListener('scroll', onScroll, { passive: true });
       }
 
       async function mountPdfVirtual(container, url) {
@@ -2128,6 +2207,15 @@
           refreshPlayPauseUI(); 
           return; 
         }
+        const S = state.viewer.autoScroll;
+        // If the user is actively adjusting (dragging) or momentum/settling is ongoing,
+        // don't override their position; just keep the loop alive and sync base.
+        if (S.userAdjusting || (S.userActiveUntil && ts < S.userActiveUntil)) {
+          S.pos = el.scrollTop || 0;
+          S.lastTs = ts;
+          requestAnimationFrame(tickAutoScroll);
+          return;
+        }
         
         // Geschwindigkeit neu berechnen wenn nötig (z.B. wenn Seiten nachladen)
         if (state.viewer.autoScroll.needsRecalc || state.viewer.autoScroll.speedPxPerSec <= 0.01) {
@@ -2135,16 +2223,16 @@
           state.viewer.autoScroll.needsRecalc = false;
         }
         
-        const dt = (ts - state.viewer.autoScroll.lastTs) / 1000;
-        state.viewer.autoScroll.lastTs = ts;
+  const dt = (ts - S.lastTs) / 1000;
+  S.lastTs = ts;
 
-        const delta = state.viewer.autoScroll.speedPxPerSec * dt;
+  const delta = state.viewer.autoScroll.speedPxPerSec * dt;
         // Falls noch nicht scrollbar, NICHT stoppen – warten bis Content kommt
         const maxScrollTop = Math.max(0, el.scrollHeight - el.clientHeight);
         if (maxScrollTop <= 1) {
           // Kick: kleiner Scrollstoß hält die Schleife „aktiv“
           if (el.scrollTop < 1) {
-            try { el.scrollTop = 1; } catch {}
+            try { S.ignoreScrollUntil = performance.now() + 50; el.scrollTop = 1; } catch {}
           }
           // Nächster Frame: erneut versuchen
           state.viewer.autoScroll.needsRecalc = true;
@@ -2153,8 +2241,9 @@
         }
 
         // Float-Akkumulator verwenden, um Subpixel-Bewegung nicht zu verlieren
-        state.viewer.autoScroll.pos = Math.min(state.viewer.autoScroll.pos + delta, maxScrollTop);
-        el.scrollTop = state.viewer.autoScroll.pos;
+  S.pos = Math.min((S.pos || el.scrollTop || 0) + delta, maxScrollTop);
+  S.ignoreScrollUntil = performance.now() + 50; // ignore immediate scroll event from programmatic set
+  el.scrollTop = S.pos;
 
         // Am Ende angekommen?
         if (el.scrollTop >= maxScrollTop - 1) {
