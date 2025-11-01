@@ -226,6 +226,27 @@
           <path d="M480-160v-80h120l180-240-180-240H160v200H80v-200q0-33 23.5-56.5T160-800h440q19 0 36 8.5t28 23.5l216 288-216 288q-11 15-28 23.5t-36 8.5H480Zm-10-320ZM200-120v-120H80v-80h120v-120h80v120h120v80H280v120h-80Z"/>
         </svg>`;
 
+      // Icons for playlist list UI
+      const SVG_PLAY = `
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true" focusable="false">
+          <path d="M8 5v14l11-7z"></path>
+        </svg>`;
+      const SVG_TRASH = `
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+          <polyline points="3 6 5 6 21 6"></polyline>
+          <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+          <line x1="10" y1="11" x2="10" y2="17"></line>
+          <line x1="14" y1="11" x2="14" y2="17"></line>
+        </svg>`;
+      const SVG_CHEV_UP = `
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+          <polyline points="18 15 12 9 6 15"></polyline>
+        </svg>`;
+      const SVG_CHEV_DOWN = `
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+          <polyline points="6 9 12 15 18 9"></polyline>
+        </svg>`;
+
       // Playlist client state
       const playlist = {
         items: [], // array of rel names
@@ -1628,17 +1649,44 @@
 
         applyAccentTheme(null);
         const total = playlist.items.length;
+
+        // Header/Hero in Spotify-Stil
         appEl.innerHTML = `
-          <section class="mb-4 flex flex-wrap items-center gap-2">
-            <div class="text-sm text-neutral-300">Playlist • ${total} Titel</div>
-            <span class="ml-auto flex items-center gap-2">
-              <button id="btnPlClear" class="px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-800 hover:bg-neutral-800">Leeren</button>
-            </span>
+          <section class="mb-5">
+            <div class="relative overflow-hidden rounded-2xl border border-neutral-800 bg-neutral-900/80" style="background: linear-gradient(135deg, color-mix(in srgb, var(--accent-color) 16%, rgba(17,17,24,0.9)) 0%, rgba(12,12,18,0.88) 65%);">
+              <div class="absolute -top-12 -right-10 h-40 w-40 rounded-full opacity-30" style="background: radial-gradient(circle, var(--accent-color) 0%, transparent 70%);"></div>
+              <div class="p-4 sm:p-6 flex items-center gap-4 sm:gap-6">
+                <div class="h-14 w-14 sm:h-20 sm:w-20 rounded-md grid place-items-center bg-black/20 border border-white/15 text-2xl">🎵</div>
+                <div class="flex-1 min-w-0">
+                  <div class="text-[11px] uppercase tracking-widest text-neutral-300/80">Playlist</div>
+                  <h1 class="text-xl sm:text-2xl font-semibold text-neutral-50 truncate">Deine Auswahl</h1>
+                  <div class="text-sm text-neutral-300/90">${total} Titel</div>
+                </div>
+                <div class="hidden sm:flex items-center gap-2 shrink-0">
+                  <button id="btnPlPlay" class="px-3 py-2 rounded-full bg-emerald-600 text-white hover:bg-emerald-500 flex items-center gap-2">${SVG_PLAY}<span>Abspielen</span></button>
+                  <button id="btnPlClear" class="px-3 py-2 rounded-full border border-neutral-700 text-neutral-200 hover:bg-neutral-800">Leeren</button>
+                </div>
+              </div>
+              <div class="px-4 pb-4 sm:hidden flex items-center gap-2">
+                <button id="btnPlPlaySm" class="px-3 py-2 rounded-full bg-emerald-600 text-white hover:bg-emerald-500 flex items-center gap-2">${SVG_PLAY}<span>Play</span></button>
+                <button id="btnPlClearSm" class="px-3 py-2 rounded-full border border-neutral-700 text-neutral-200 hover:bg-neutral-800">Leeren</button>
+              </div>
+            </div>
           </section>
-          <section id="plGrid" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3"></section>
+          <section id="plListWrap">
+            <div class="rounded-xl border border-neutral-800 bg-neutral-900/70 overflow-hidden">
+              <div class="hidden sm:grid grid-cols-[3rem_4rem_1fr_8rem] items-center px-3 py-2 text-[12px] text-neutral-400 bg-neutral-900/80 border-b border-neutral-800">
+                <div class="text-right pr-2">#</div>
+                <div>Cover</div>
+                <div>Titel</div>
+                <div class="text-right pr-1">Aktionen</div>
+              </div>
+              <div id="plList" class="divide-y divide-neutral-800"></div>
+            </div>
+          </section>
         `;
 
-        const grid = document.querySelector('#plGrid');
+        const listEl = document.querySelector('#plList');
         const makeItem = (rel) => {
           const encoded = encodePathSegments(rel);
           const name = rel.split('/').pop();
@@ -1651,32 +1699,47 @@
           };
         };
         const items = playlist.items.map(makeItem);
-        grid.innerHTML = '';
+        listEl.innerHTML = '';
         items.forEach((item, idx) => {
-          const card = document.createElement('div');
-          card.className = 'card overflow-hidden border border-neutral-800/80 bg-neutral-900/90 rounded-2xl hover:border-neutral-700 hover:bg-neutral-900 transition';
-          card.innerHTML = `
-            <a href="/?file=${item.id}" class="block">
-              <div class="relative w-full h-[180px] sm:h-[220px] bg-neutral-950/95 grid place-items-center overflow-hidden">
-                <img src="${item.thumbnail}" alt="${item.name}" class="thumb max-h-full max-w-full object-contain" loading="lazy" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex'">
-                <div class="text-neutral-500 text-sm hidden items-center justify-center">📄 PDF</div>
-                <div class="absolute top-2 left-2 px-2 py-0.5 rounded bg-black/50 text-xs text-neutral-300 border border-white/10">${idx + 1}</div>
-              </div>
-              <div class="p-3 flex items-center justify-between gap-2">
-                <div class="truncate text-sm">${item.displayName}</div>
-                <div class="flex items-center gap-1">
-                  <button data-act="up" data-idx="${idx}" class="px-2 py-1 rounded border border-neutral-700 text-xs hover:bg-neutral-800" ${idx===0?'disabled':''}>↑</button>
-                  <button data-act="down" data-idx="${idx}" class="px-2 py-1 rounded border border-neutral-700 text-xs hover:bg-neutral-800" ${idx>=items.length-1?'disabled':''}>↓</button>
-                  <button data-act="remove" data-idx="${idx}" class="px-2 py-1 rounded border border-rose-700 text-rose-300 text-xs hover:bg-rose-900/20">Entfernen</button>
-                </div>
-              </div>
-            </a>
+          const active = idx === (Number.isInteger(playlist.currentIndex) ? playlist.currentIndex : -1);
+          const row = document.createElement('div');
+          row.className = `group flex items-center gap-3 px-3 py-2 hover:bg-neutral-800/60 ${active ? 'bg-neutral-800/70 ring-1 ring-[--accent-color]/40' : ''}`;
+          row.setAttribute('data-row', String(idx));
+          row.innerHTML = `
+            <div class="w-8 sm:w-12 text-right pr-2 text-neutral-400 group-hover:text-neutral-200">${idx + 1}</div>
+            <div class="w-10 sm:w-16">
+              <img src="${item.thumbnail}" alt="${item.displayName}" class="w-10 h-10 sm:w-12 sm:h-12 rounded bg-neutral-950 object-contain border border-neutral-800" loading="lazy" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex'">
+              <div class="hidden w-10 h-10 sm:w-12 sm:h-12 rounded bg-neutral-950 text-neutral-500 text-xs grid place-items-center border border-neutral-800">PDF</div>
+            </div>
+            <div class="flex-1 min-w-0">
+              <div class="truncate font-medium">${item.displayName}</div>
+            </div>
+            <div class="flex items-center gap-1 ml-auto">
+              <button data-act="up" data-idx="${idx}" class="h-8 w-8 grid place-items-center rounded-full border border-neutral-700/70 text-neutral-300 hover:bg-neutral-800" ${idx===0?'disabled aria-disabled="true"':''} title="Nach oben">${SVG_CHEV_UP}</button>
+              <button data-act="down" data-idx="${idx}" class="h-8 w-8 grid place-items-center rounded-full border border-neutral-700/70 text-neutral-300 hover:bg-neutral-800" ${idx>=items.length-1?'disabled aria-disabled="true"':''} title="Nach unten">${SVG_CHEV_DOWN}</button>
+              <button data-act="remove" data-idx="${idx}" class="h-8 w-8 grid place-items-center rounded-full border border-rose-800/60 text-rose-300 hover:bg-rose-900/20" title="Entfernen">${SVG_TRASH}</button>
+            </div>
           `;
-          grid.appendChild(card);
+          listEl.appendChild(row);
         });
 
-        // wire actions
-        grid.querySelectorAll('button[data-act]').forEach((btn) => {
+        // Row click: play that item
+        listEl.querySelectorAll('[data-row]').forEach((row) => {
+          row.addEventListener('click', async (ev) => {
+            // If an action button was clicked, ignore row play
+            const target = ev.target;
+            if (target.closest && target.closest('button[data-act]')) return;
+            const idx = Number(row.getAttribute('data-row'));
+            const rel = playlist.items[idx];
+            if (!rel) return;
+            try { await setPlaylistCurrentIndex(idx); } catch {}
+            history.replaceState(null, '', '/');
+            renderViewer(rel);
+          });
+        });
+
+        // Action buttons
+        listEl.querySelectorAll('button[data-act]').forEach((btn) => {
           btn.addEventListener('click', async (ev) => {
             ev.preventDefault(); ev.stopPropagation();
             const act = btn.getAttribute('data-act');
@@ -1700,10 +1763,23 @@
           });
         });
 
-        const btnClear = document.querySelector('#btnPlClear');
-        if (btnClear) btnClear.addEventListener('click', async () => {
-          try { await fetch('/api/playlist/clear', { method: 'POST' }); } catch {}
-        });
+        // Top buttons
+        const playBtn = document.querySelector('#btnPlPlay');
+        const playBtnSm = document.querySelector('#btnPlPlaySm');
+        const doPlayFromStart = async () => {
+          if (!playlist.items.length) return;
+          try { await setPlaylistCurrentIndex(0); } catch {}
+          const rel = playlist.items[0];
+          history.replaceState(null, '', '/');
+          renderViewer(rel);
+        };
+        playBtn?.addEventListener('click', doPlayFromStart);
+        playBtnSm?.addEventListener('click', doPlayFromStart);
+
+        const btnClear = document.querySelector('#btnPlClear') || document.querySelector('#btnPlClearSm');
+        const btnClearSm = document.querySelector('#btnPlClearSm');
+        btnClear?.addEventListener('click', async () => { try { await fetch('/api/playlist/clear', { method: 'POST' }); } catch {} });
+        btnClearSm?.addEventListener('click', async () => { try { await fetch('/api/playlist/clear', { method: 'POST' }); } catch {} });
       }
 
       function openCategoryAssignDialog(item) {
