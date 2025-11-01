@@ -748,21 +748,30 @@ app.get(/^\/vendor\/nosleep\.min\.js$/, async (req, res) => {
 
 /* ---------------- Serve Thumbnails (/thumbnails) ---------------- */
 app.get("/thumbnails/*", async (req, res) => {
+  const sendFallback = () => {
+    try {
+      res.setHeader("Content-Type", "image/jpeg");
+      res.setHeader("Cache-Control", "no-store");
+      res.end(FALLBACK_THUMB_BUFFER);
+    } catch (e) {
+      try { res.status(500).end(); } catch {}
+    }
+  };
   try {
     const requested = toPosixPath(req.params[0] || "");
     if (!requested || !/\.(jpg|jpeg|png)$/i.test(requested)) {
-      return res.status(400).json({ error: "Invalid thumbnail path" });
+      return sendFallback();
     }
 
     const pdfRel = requested.replace(/\.(jpg|jpeg|png)$/i, ".pdf");
     const info = resolvePdfName(pdfRel);
     if (!info) {
-      return res.status(404).json({ error: "PDF not found" });
+      return sendFallback();
     }
 
     const { thumbPath, thumbStat } = await ensureThumbnail(info);
     if (!thumbStat) {
-      return res.status(500).json({ error: "Thumbnail unavailable" });
+      return sendFallback();
     }
 
     const etag = `"${thumbStat.size}-${Math.floor(thumbStat.mtimeMs)}"`;
@@ -782,10 +791,20 @@ app.get("/thumbnails/*", async (req, res) => {
       return res.status(304).end();
     }
 
-    return fs.createReadStream(thumbPath).pipe(res);
+    const stream = fs.createReadStream(thumbPath);
+    stream.on("error", (e) => {
+      console.warn("Thumbnail stream error, sending fallback:", e?.message || e);
+      if (!res.headersSent) {
+        // reset headers for fallback
+        res.setHeader("Content-Type", "image/jpeg");
+        res.setHeader("Cache-Control", "no-store");
+      }
+      res.end(FALLBACK_THUMB_BUFFER);
+    });
+    return stream.pipe(res);
   } catch (error) {
     console.error("Thumbnail serve error:", error);
-    res.status(500).json({ error: "Thumbnail generation failed" });
+    return sendFallback();
   }
 });
 
