@@ -28,6 +28,17 @@
       body {
         background: linear-gradient(145deg, color-mix(in srgb, var(--accent-color) 8%, var(--surface-0)) 0%, var(--surface-0) 55%, var(--surface-1) 100%);
         transition: background 0.4s ease;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      main#app {
+        flex: 1 1 auto;
+        width: 100%;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
       }
       .vh { height: 100vh; height: 100dvh; }
       .no-scrollbar::-webkit-scrollbar { display: none; }
@@ -145,6 +156,39 @@
   /* Ensure favorite star on cards turns yellow when active */
   .music-card .icon-btn.fav.text-yellow-400 { color: #facc15; }
   .music-card .icon-btn.fav.text-neutral-300 { color: #d1d5db; }
+      #libraryPager {
+        background: linear-gradient(180deg, rgba(9,9,12,0.85) 0%, rgba(9,9,12,0.93) 100%);
+        border-top: 1px solid rgba(255,255,255,0.06);
+        box-shadow: 0 -12px 30px -16px rgba(0,0,0,0.7);
+        padding: 1.5rem 0;
+        min-height: 80px; /* Ensure minimum touchable height on iPad */
+        padding-bottom: calc(2rem + env(safe-area-inset-bottom, 0px)); /* Account for iOS safe area */
+      }
+      @media (max-width: 540px) {
+        #libraryPager { 
+          padding: 1.25rem 0;
+          padding-bottom: calc(1.75rem + env(safe-area-inset-bottom, 0px));
+        }
+        .filter-toggle {
+          display: inline-flex;
+        }
+      }
+      .filter-toggle {
+        display: none;
+        align-items: center;
+        gap: 0.35rem;
+        padding: 0.45rem 0.75rem;
+        border-radius: 999px;
+        border: 1px solid rgba(255,255,255,0.12);
+        background: rgba(17,17,23,0.6);
+        color: #e5e7eb;
+        font-size: 0.85rem;
+        transition: background 0.2s ease, border-color 0.2s ease;
+      }
+      .filter-toggle:hover {
+        background: rgba(24,24,32,0.75);
+        border-color: rgba(255,255,255,0.2);
+      }
       .modal-backdrop {
         position: fixed;
         inset: 0;
@@ -547,7 +591,8 @@
           accentSource: null,
           uploadOpen: false,
           uploadLimitMb: 200,
-          uploadSupported: true
+          uploadSupported: true,
+          filterCollapsedSmall: false
         },
         thumbs: {
           cache: new Map(),
@@ -560,6 +605,63 @@
           checkInterval: 10000 // Check every 10s
         }
       };
+
+      let cleanupLibraryViewportSizing = null;
+      function disposeLibraryViewportSizing() {
+        if (cleanupLibraryViewportSizing) {
+          cleanupLibraryViewportSizing();
+          cleanupLibraryViewportSizing = null;
+        }
+      }
+      function ensureLibraryViewportSizing() {
+        disposeLibraryViewportSizing();
+        const wrap = document.querySelector('#virtualWrap');
+        const pager = document.querySelector('#libraryPager');
+        if (!wrap) return;
+        const updateHeight = () => {
+          if (!wrap.isConnected) return;
+          const rect = wrap.getBoundingClientRect();
+          const footerVisible = controlsEl && !controlsEl.classList.contains('hidden');
+          const footerHeight = footerVisible ? controlsEl.getBoundingClientRect().height : 0;
+          
+          // Measure pager height more reliably
+          let pagerHeight = 0;
+          if (pager) {
+            const pagerRect = pager.getBoundingClientRect();
+            pagerHeight = pagerRect.height || 70; // Fallback to min height
+          }
+          
+          const appStyles = window.getComputedStyle(appEl);
+          const paddingBottom = parseFloat(appStyles.paddingBottom || '0') || 0;
+          const paddingTop = parseFloat(appStyles.paddingTop || '0') || 0;
+          
+          // iPad/iOS: Use much larger safety margin to ensure pager is fully visible
+          const safeAreaBottom = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--sab') || '0px') || 0;
+          const safetyMargin = 120; // Very large margin for iPad - ensure full visibility
+          
+          // Calculate available height more conservatively
+          let available = window.innerHeight - rect.top - footerHeight - paddingBottom - pagerHeight - safetyMargin - safeAreaBottom;
+          
+          // Additional check: ensure we leave enough space for the pager (even more space)
+          const minPagerSpace = 120; // Much larger minimum space to reserve for pager visibility
+          const maxWrapHeight = window.innerHeight - rect.top - footerHeight - paddingBottom - minPagerSpace;
+          available = Math.min(available, maxWrapHeight);
+          
+          if (!Number.isFinite(available)) available = 480;
+          if (available <= 0) available = 160;
+          wrap.style.height = `${available}px`;
+        };
+        const resizeEvents = ['resize', 'orientationchange'];
+        resizeEvents.forEach(evt => window.addEventListener(evt, updateHeight));
+        if (window.visualViewport) window.visualViewport.addEventListener('resize', updateHeight);
+        // Delay initial measurement to ensure layout is settled
+        requestAnimationFrame(() => requestAnimationFrame(updateHeight));
+        cleanupLibraryViewportSizing = () => {
+          resizeEvents.forEach(evt => window.removeEventListener(evt, updateHeight));
+          if (window.visualViewport) window.visualViewport.removeEventListener('resize', updateHeight);
+          if (wrap.isConnected) wrap.style.height = '';
+        };
+      }
 
       // ===== Router =====
       (async function init() {
@@ -1083,46 +1185,60 @@
           : "bg-neutral-900 border-neutral-800";
         const totalPages = Math.max(1, Math.ceil(L.total / L.pageSize));
 
+        const isSmallScreen = window.innerWidth <= 540;
+        if (!isSmallScreen) state.ui.filterCollapsedSmall = false;
+        const filterCollapsed = isSmallScreen && state.ui.filterCollapsedSmall;
+
         appEl.innerHTML = `
-          <section class="mb-4 rounded-xl border border-neutral-800 bg-neutral-900/70 p-3">
-            <div class="flex flex-wrap items-center gap-2">
-              <div class="relative w-full sm:w-[420px] md:w-[520px] lg:w-[640px] min-w-[220px]">
-                <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-neutral-400">${SVG_SEARCH}</span>
-                <input id="search" placeholder="Suche nach Titel…" class="w-full pl-9 pr-3 py-2 rounded-lg bg-neutral-950/70 border border-neutral-800 focus:border-[--accent-color] outline-none" />
-              </div>
-
-              <div id="viewSwitch" class="inline-flex p-1 rounded-lg border border-neutral-800 bg-neutral-900">
-                <button type="button" data-view="grid" aria-pressed="${L.view==='grid'}" class="h-9 w-9 grid place-items-center rounded-md ${L.view==='grid' ? 'bg-neutral-800 text-neutral-50' : 'text-neutral-300'}" title="Grid Ansicht">${SVG_GRID}</button>
-                <button type="button" data-view="list" aria-pressed="${L.view==='list'}" class="h-9 w-9 grid place-items-center rounded-md ${L.view==='list' ? 'bg-neutral-800 text-neutral-50' : 'text-neutral-300'}" title="Listenansicht">${SVG_LIST}</button>
-              </div>
-
-              <div class="flex items-center gap-2 relative">
-                <div class="relative">
-                  <button id="sortMenuBtn" class="px-3 py-2 rounded-lg bg-neutral-950/70 border border-neutral-800 text-neutral-200 hover:bg-neutral-800 flex items-center gap-2" aria-haspopup="menu" aria-expanded="false" title="Sortieren">
-                    <span id="sortLabel"></span>
-                  </button>
-                  <div id="sortMenu" class="hidden min-w-[170px] rounded-lg border border-neutral-800 bg-neutral-900 shadow-xl z-20 overflow-hidden">
-                    <button class="w-full text-left px-3 py-2 hover:bg-neutral-800 text-neutral-200" data-sort="name">Name</button>
-                    <button class="w-full text-left px-3 py-2 hover:bg-neutral-800 text-neutral-200" data-sort="mtime">Zuletzt geändert</button>
-                    <button class="w-full text-left px-3 py-2 hover:bg-neutral-800 text-neutral-200" data-sort="size">Dateigröße</button>
-                  </div>
-                </div>
-                <button id="orderToggle" class="h-9 w-9 grid place-items-center rounded-lg bg-neutral-950/70 border border-neutral-800 text-neutral-300 hover:bg-neutral-800 ${L.order==='desc' ? 'rotate-180' : ''}" title="Sortierreihenfolge" style="transition: transform .15s ease">${SVG_ORDER}</button>
-              </div>
-
-              <button id="filterFav" class="px-3 py-2 rounded-full ${favCls} flex items-center gap-2" aria-pressed="${L.onlyFavorites}" title="Nur Favoriten">
-                <span class="text-amber-400">★</span><span class="hidden sm:inline">Favoriten</span>
-              </button>
+          <div class="library-shell flex flex-col gap-4 flex-1 min-h-0 overflow-hidden">
+            <div class="flex items-center justify-between">
+              ${isSmallScreen ? `<button id="filterToggle" aria-expanded="${!filterCollapsed}" aria-controls="filterBlock" class="filter-toggle" type="button">${filterCollapsed ? 'Filter anzeigen ▾' : 'Filter ausblenden ▴'}</button>` : ''}
             </div>
-          </section>
+            <div id="filterBlock" class="flex flex-col gap-4 ${filterCollapsed ? 'hidden' : ''}">
+              <section id="filterPanel" class="rounded-xl border border-neutral-800 bg-neutral-900/70 p-3">
+                <div class="flex flex-wrap items-center gap-2">
+                  <div class="relative w-full sm:w-[420px] md:w-[520px] lg:w-[640px] min-w-[220px]">
+                    <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-neutral-400">${SVG_SEARCH}</span>
+                    <input id="search" placeholder="Suche nach Titel…" class="w-full pl-9 pr-3 py-2 rounded-lg bg-neutral-950/70 border border-neutral-800 focus:border-[--accent-color] outline-none" />
+                  </div>
 
-          <section id="categoryBar" class="mb-4"></section>
-          <section id="virtualWrap" class="relative overflow-auto h-[70vh]"></section>
-          <section class="mt-3 flex items-center justify-between">
-            <button id="prevPage" class="px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-800 ${L.page<=1?"invisible pointer-events-none select-none opacity-0":""}" ${L.page<=1?"aria-disabled=\"true\" tabindex=\"-1\"":""}>« Zurück</button>
-            <div class="text-sm text-neutral-400">Seite <span id="pNow">${L.page}</span> / ${totalPages}</div>
-            <button id="nextPage" class="px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-800 ${L.page>=totalPages?"invisible pointer-events-none select-none opacity-0":""}" ${L.page>=totalPages?"aria-disabled=\"true\" tabindex=\"-1\"":""}>Weiter »</button>
-          </section>`;
+                  <div id="viewSwitch" class="inline-flex p-1 rounded-lg border border-neutral-800 bg-neutral-900">
+                    <button type="button" data-view="grid" aria-pressed="${L.view==='grid'}" class="h-9 w-9 grid place-items-center rounded-md ${L.view==='grid' ? 'bg-neutral-800 text-neutral-50' : 'text-neutral-300'}" title="Grid Ansicht">${SVG_GRID}</button>
+                    <button type="button" data-view="list" aria-pressed="${L.view==='list'}" class="h-9 w-9 grid place-items-center rounded-md ${L.view==='list' ? 'bg-neutral-800 text-neutral-50' : 'text-neutral-300'}" title="Listenansicht">${SVG_LIST}</button>
+                  </div>
+
+                  <div class="flex items-center gap-2 relative">
+                    <div class="relative">
+                      <button id="sortMenuBtn" class="px-3 py-2 rounded-lg bg-neutral-950/70 border border-neutral-800 text-neutral-200 hover:bg-neutral-800 flex items-center gap-2" aria-haspopup="menu" aria-expanded="false" title="Sortieren">
+                        <span id="sortLabel"></span>
+                      </button>
+                      <div id="sortMenu" class="hidden min-w-[170px] rounded-lg border border-neutral-800 bg-neutral-900 shadow-xl z-20 overflow-hidden">
+                        <button class="w-full text-left px-3 py-2 hover:bg-neutral-800 text-neutral-200" data-sort="name">Name</button>
+                        <button class="w-full text-left px-3 py-2 hover:bg-neutral-800 text-neutral-200" data-sort="mtime">Zuletzt geändert</button>
+                        <button class="w-full text-left px-3 py-2 hover:bg-neutral-800 text-neutral-200" data-sort="size">Dateigröße</button>
+                      </div>
+                    </div>
+                    <button id="orderToggle" class="h-9 w-9 grid place-items-center rounded-lg bg-neutral-950/70 border border-neutral-800 text-neutral-300 hover:bg-neutral-800 ${L.order==='desc' ? 'rotate-180' : ''}" title="Sortierreihenfolge" style="transition: transform .15s ease">${SVG_ORDER}</button>
+                  </div>
+
+                  <button id="filterFav" class="px-3 py-2 rounded-full ${favCls} flex items-center gap-2" aria-pressed="${L.onlyFavorites}" title="Nur Favoriten">
+                    <span class="text-amber-400">★</span><span class="hidden sm:inline">Favoriten</span>
+                    ${state.library.favorites && state.library.favorites.size > 0 ? `<span class="ml-1 inline-flex items-center justify-center px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-500/90 text-white">${state.library.favorites.size}</span>` : ''}
+                  </button>
+                </div>
+              </section>
+
+              <section id="categoryBar" class="shrink-0"></section>
+            </div>
+            <div class="flex flex-col flex-1 min-h-0 overflow-hidden">
+              <section id="virtualWrap" class="relative flex-1 min-h-0"></section>
+              <section id="libraryPager" class="flex items-center justify-between pt-3 shrink-0">
+                <button id="prevPage" class="px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-800 ${L.page<=1?"invisible pointer-events-none select-none opacity-0":""}" ${L.page<=1?"aria-disabled=\"true\" tabindex=\"-1\"":""}>« Zurück</button>
+                <div class="text-sm text-neutral-400">Seite <span id="pNow">${L.page}</span> / ${totalPages}</div>
+                <button id="nextPage" class="px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-800 ${L.page>=totalPages?"invisible pointer-events-none select-none opacity-0":""}" ${L.page>=totalPages?"aria-disabled=\"true\" tabindex=\"-1\"":""}>Weiter »</button>
+              </section>
+            </div>
+          </div>`;
 
   renderCategoryBar();
 
@@ -1140,6 +1256,7 @@
   const sortMenu = document.querySelector('#sortMenu');
   const orderBtn = document.querySelector('#orderToggle');
   const viewSwitch = document.querySelector('#viewSwitch');
+  const filterToggleBtn = document.querySelector('#filterToggle');
 
     searchEl.value = L.q;
     const sortLabelEl = document.querySelector('#sortLabel');
@@ -1264,6 +1381,13 @@
           });
         });
 
+        if (filterToggleBtn) {
+          filterToggleBtn.addEventListener('click', () => {
+            state.ui.filterCollapsedSmall = !state.ui.filterCollapsedSmall;
+            renderLibrary();
+          });
+        }
+
         document.querySelector('#filterFav').onclick = async () => {
           L.onlyFavorites = !L.onlyFavorites;
           localStorage.setItem("onlyFav", String(L.onlyFavorites));
@@ -1353,6 +1477,7 @@
         }
 
         requestAnimationFrame(() => {
+          ensureLibraryViewportSizing();
           const wrap = document.querySelector('#virtualWrap');
           if (wrap) mountVirtualizer(true);
           updateLibraryPlaylistButtons();
@@ -1824,6 +1949,7 @@
       }
 
       function renderPlaylistLibrary() {
+        disposeLibraryViewportSizing();
         // Header actions
         ensureModeSwitcher();
         ensureUploadButton();
@@ -2365,6 +2491,7 @@
       
       // ===== Viewer =====
       async function renderViewer(fileName) {
+        disposeLibraryViewportSizing();
         document.body.classList.add('in-viewer');
         setUploadButtonVisible(false);
         state.viewer.wakeDesired = true;
