@@ -956,7 +956,6 @@
               Ansicht: ${L.view === "grid" ? "Grid" : "Liste"}
             </button>
             <button id="filterFav" class="px-3 py-2 rounded-lg ${favCls}" aria-pressed="${L.onlyFavorites}">★ Favoriten</button>
-            <button id="memoryStatus" class="px-2 py-1 text-xs rounded bg-neutral-800 border border-neutral-700 hidden">RAM: --</button>
             <span class="ml-auto text-sm text-neutral-400">Seite ${L.page} / ${totalPages} • ${L.total} Dateien</span>
           </section>
           <section id="categoryBar" class="mb-4 flex flex-wrap items-center gap-2"></section>
@@ -967,9 +966,7 @@
             <button id="nextPage" class="px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-800 ${L.page>=totalPages?"invisible pointer-events-none select-none opacity-0":""}" ${L.page>=totalPages?"aria-disabled=\"true\" tabindex=\"-1\"":""}>Weiter »</button>
           </section>`;
 
-        // Update memory status
-        updateMemoryStatus();
-        renderCategoryBar();
+  renderCategoryBar();
 
         const activeHeaderCategory = state.library.categoryFilter ? categoryHelpers.byId(state.library.categoryFilter) : null;
         if (activeHeaderCategory) {
@@ -1048,36 +1045,7 @@
         };
 
         // Memory status display
-        function updateMemoryStatus() {
-          const btn = document.querySelector('#memoryStatus');
-          if (!btn) return;
-
-          try {
-            if (performance.memory) {
-              const used = Math.round(performance.memory.usedJSHeapSize / 1024 / 1024);
-              const total = Math.round(performance.memory.totalJSHeapSize / 1024 / 1024);
-              const percentage = Math.round((used / total) * 100);
-
-              btn.textContent = `RAM: ${used}/${total}MB (${percentage}%)`;
-              btn.classList.remove('hidden');
-
-              // Color coding based on usage
-              btn.className = btn.className.replace(/bg-\w+-\d+/, '');
-              if (percentage > 80) {
-                btn.classList.add('bg-red-800');
-              } else if (percentage > 60) {
-                btn.classList.add('bg-yellow-800');
-              } else {
-                btn.classList.add('bg-green-800');
-              }
-            } else {
-              btn.textContent = `Cache: ${state.thumbs.cache.size}`;
-              btn.classList.remove('hidden');
-            }
-          } catch (e) {
-            btn.classList.add('hidden');
-          }
-        }
+        
 
         function renderCategoryBar() {
           const host = document.querySelector('#categoryBar');
