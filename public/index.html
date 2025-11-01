@@ -1734,6 +1734,65 @@
         return rel.split('/').pop();
       }
 
+      // Confirmation Dialog
+      function showConfirmDialog({ title, message, confirmText = 'Bestätigen', cancelText = 'Abbrechen', onConfirm, isDangerous = false }) {
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.style.zIndex = '10000';
+        
+        const confirmBtnClass = isDangerous 
+          ? 'px-4 py-2 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-medium transition-colors shadow-sm'
+          : 'px-4 py-2 rounded-lg bg-[--accent-color] hover:opacity-90 text-white font-medium transition-all shadow-sm';
+        
+        backdrop.innerHTML = `
+          <div class="glass-panel w-[440px] max-w-[90vw] p-6 text-neutral-200" role="alertdialog" aria-modal="true">
+            <div class="flex items-start gap-3 mb-4">
+              ${isDangerous ? `
+                <div class="flex-shrink-0 w-10 h-10 rounded-full bg-rose-500/20 flex items-center justify-center">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" class="text-rose-400">
+                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+                    <line x1="12" y1="9" x2="12" y2="13"></line>
+                    <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                  </svg>
+                </div>
+              ` : ''}
+              <div class="flex-1">
+                <h3 class="text-lg font-semibold text-neutral-100 mb-2">${title}</h3>
+                <p class="text-sm text-neutral-400 leading-relaxed">${message}</p>
+              </div>
+            </div>
+            <div class="flex items-center justify-end gap-3 mt-6">
+              <button id="confirmCancel" class="px-4 py-2 rounded-lg border border-neutral-700 text-neutral-300 hover:bg-neutral-800 transition-colors font-medium">
+                ${cancelText}
+              </button>
+              <button id="confirmOk" class="${confirmBtnClass}">
+                ${confirmText}
+              </button>
+            </div>
+          </div>
+        `;
+        
+        document.body.appendChild(backdrop);
+        
+        const close = () => {
+          backdrop.remove();
+        };
+        
+        backdrop.querySelector('#confirmCancel').addEventListener('click', close);
+        backdrop.querySelector('#confirmOk').addEventListener('click', () => {
+          close();
+          if (onConfirm) onConfirm();
+        });
+        backdrop.addEventListener('click', (ev) => {
+          if (ev.target === backdrop) close();
+        });
+        
+        // Focus on confirm button
+        setTimeout(() => {
+          backdrop.querySelector('#confirmOk')?.focus();
+        }, 100);
+      }
+
       let playlistBackdrop = null;
       async function openPlaylistPanel() {
         if (playlistBackdrop?.isConnected) return;
@@ -1747,20 +1806,68 @@
                 <div class="text-xs uppercase tracking-wide text-neutral-500">Playlist</div>
                 <h2 class="text-lg font-semibold text-neutral-100">Aktuelle Auswahl</h2>
               </div>
-              <div class="flex items-center gap-2">
-                <button id="btnPlaylistClear" class="px-2 py-1.5 rounded-full border border-neutral-700 text-neutral-300 hover:bg-neutral-800">Leeren</button>
-                <button id="btnPlaylistClose" class="px-2 py-1 rounded-full border border-neutral-700 text-neutral-400 hover:text-neutral-200">✕</button>
+              <div class="flex items-center gap-2 pointer-events-auto" style="position: relative; z-index: 20;">
+                <button id="btnPlaylistClear" type="button" class="inline-flex items-center gap-1.5 px-3.5 py-1.75 rounded-lg border border-neutral-700 text-neutral-300 hover:bg-neutral-800 hover:text-neutral-100 transition-colors cursor-pointer focus:outline-none focus:ring-2 focus:ring-rose-500/40 focus:border-rose-500">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="opacity-80">
+                    <polyline points="3 6 5 6 21 6"></polyline>
+                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"></path>
+                    <path d="M10 11v6"></path>
+                    <path d="M14 11v6"></path>
+                    <path d="M15 3H9l-1 3h8l-1-3z"></path>
+                  </svg>
+                  <span>Leeren</span>
+                </button>
+                <button id="btnPlaylistClose" type="button" class="inline-flex items-center justify-center w-8 h-8 rounded-full border border-neutral-700 text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800/60 transition-colors cursor-pointer focus:outline-none focus:ring-2 focus:ring-[--accent-color]/40">
+                  <span class="text-lg leading-none">✕</span>
+                </button>
               </div>
             </div>
             <div id="playlistList" class="mt-4 divide-y divide-neutral-800 max-h-[60vh] overflow-y-auto">
             </div>
           </div>`;
         document.body.appendChild(playlistBackdrop);
-        playlistBackdrop.addEventListener('click', (ev) => { if (ev.target === playlistBackdrop) closePlaylistPanel(); });
-        playlistBackdrop.querySelector('#btnPlaylistClose').onclick = closePlaylistPanel;
-        playlistBackdrop.querySelector('#btnPlaylistClear').onclick = async () => {
-          try { await fetch('/api/playlist/clear', { method: 'POST' }); } catch {}
-        };
+        
+        // Close on backdrop click
+        playlistBackdrop.addEventListener('click', (ev) => { 
+          if (ev.target === playlistBackdrop) closePlaylistPanel(); 
+        });
+        
+        // Close button
+        const closeBtn = playlistBackdrop.querySelector('#btnPlaylistClose');
+        if (closeBtn) {
+          closeBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            closePlaylistPanel();
+          });
+        }
+        
+        // Clear button with confirmation
+        const clearBtn = playlistBackdrop.querySelector('#btnPlaylistClear');
+        if (clearBtn) {
+          clearBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const itemCount = playlist.items?.length || 0;
+            if (itemCount === 0) return;
+            
+            showConfirmDialog({
+              title: 'Playlist leeren?',
+              message: `Möchtest du wirklich alle ${itemCount} ${itemCount === 1 ? 'Titel' : 'Titel'} aus der Playlist entfernen? Diese Aktion kann nicht rückgängig gemacht werden.`,
+              confirmText: 'Ja, leeren',
+              cancelText: 'Abbrechen',
+              isDangerous: true,
+              onConfirm: async () => {
+                try { 
+                  await fetch('/api/playlist/clear', { method: 'POST' }); 
+                } catch (err) {
+                  console.error('Fehler beim Leeren der Playlist:', err);
+                }
+              }
+            });
+          });
+        }
+        
         updatePlaylistPanel();
       }
       function closePlaylistPanel() {
@@ -2114,7 +2221,7 @@
         appEl.innerHTML = `
           <section class="mb-5">
             <div class="relative overflow-hidden rounded-2xl border border-neutral-800 bg-neutral-900/80" style="background: linear-gradient(135deg, color-mix(in srgb, var(--accent-color) 16%, rgba(17,17,24,0.9)) 0%, rgba(12,12,18,0.88) 65%);">
-              <div class="absolute -top-12 -right-10 h-40 w-40 rounded-full opacity-30" style="background: radial-gradient(circle, var(--accent-color) 0%, transparent 70%);"></div>
+              <div class="absolute -top-12 -right-10 h-40 w-40 rounded-full opacity-30 pointer-events-none" style="background: radial-gradient(circle, var(--accent-color) 0%, transparent 70%);"></div>
               <div class="p-4 sm:p-6 flex items-center gap-4 sm:gap-6">
                 <div class="h-14 w-14 sm:h-20 sm:w-20 rounded-md grid place-items-center bg-black/20 border border-white/15 text-2xl">🎵</div>
                 <div class="flex-1 min-w-0">
@@ -2353,10 +2460,29 @@
         playBtn?.addEventListener('click', doPlayFromStart);
         playBtnSm?.addEventListener('click', doPlayFromStart);
 
-        const btnClear = document.querySelector('#btnPlClear') || document.querySelector('#btnPlClearSm');
+        const btnClear = document.querySelector('#btnPlClear');
         const btnClearSm = document.querySelector('#btnPlClearSm');
-        btnClear?.addEventListener('click', async () => { try { await fetch('/api/playlist/clear', { method: 'POST' }); } catch {} });
-        btnClearSm?.addEventListener('click', async () => { try { await fetch('/api/playlist/clear', { method: 'POST' }); } catch {} });
+        const handleClearClick = (ev) => {
+          ev.preventDefault();
+          const itemCount = playlist.items?.length || 0;
+          if (!itemCount) return;
+          showConfirmDialog({
+            title: 'Playlist leeren?',
+            message: `Möchtest du wirklich alle ${itemCount} ${itemCount === 1 ? 'Titel' : 'Titel'} aus der Playlist entfernen? Diese Aktion kann nicht rückgängig gemacht werden.`,
+            confirmText: 'Ja, leeren',
+            cancelText: 'Abbrechen',
+            isDangerous: true,
+            onConfirm: async () => {
+              try {
+                await fetch('/api/playlist/clear', { method: 'POST' });
+              } catch (err) {
+                console.error('Fehler beim Leeren der Playlist:', err);
+              }
+            }
+          });
+        };
+        btnClear?.addEventListener('click', handleClearClick);
+        btnClearSm?.addEventListener('click', handleClearClick);
       }
 
       function openCategoryAssignDialog(item) {
