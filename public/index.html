@@ -836,48 +836,173 @@
         }
       }
 
-      /* Sort dropdown: ensure it fits on narrow screens */
-      @media (max-width: 480px) {
-        #sortMenu { max-width: 92vw; }
+      /* ===== Z-INDEX HIERARCHY - CENTRALIZED =====
+         Base layers (0-10): Normal content
+         UI layers (10-30): Panels, cards, filters
+         Interactive (30-50): Dropdowns, tooltips, popovers  
+         Overlays (50-80): Modals, drawers
+         System (80-100): Notifications, critical UI
+      */
+      
+      /* Category Bar - Must be below dropdowns */
+      #categoryBar {
+        position: relative;
+        z-index: 10;
       }
-
-      /* Ensure dropdown is above all other elements */
+      
+      /* Filter Panel - Must be below dropdowns */
+      #filterPanel {
+        position: relative;
+        z-index: 10;
+      }
+      
+      /* Filter Block Container */
+      #filterBlock {
+        position: relative;
+        z-index: 10;
+      }
+      
+      /* ===== SORT DROPDOWN - OPTIMIZED ===== */
+      
+      /* Dropdown positioning container - ABOVE everything else */
+      .sort-dropdown-wrapper {
+        position: relative;
+        z-index: 60 !important; /* Above panels and category bar */
+      }
+      
+      #sortMenuBtn {
+        position: relative;
+        z-index: 1;
+      }
+      
+      /* Dropdown menu - fixed positioning to escape stacking contexts */
       #sortMenu {
-        z-index: 9999 !important; /* Above everything except modals */
-        position: absolute !important;
-        background: #101320;
-        border: 1px solid rgba(148, 163, 184, 0.25);
-        box-shadow: 0 22px 45px rgba(4, 6, 12, 0.55);
+        position: fixed;
+        min-width: 220px;
+        max-width: 280px;
+        z-index: 9999 !important; /* Top of everything */
+        background: linear-gradient(135deg, 
+          rgba(15, 18, 25, 0.98) 0%, 
+          rgba(10, 13, 18, 0.98) 100%);
+        border: 1px solid rgba(99, 102, 241, 0.35);
+        border-radius: 12px;
+        box-shadow: 
+          0 24px 48px -12px rgba(0, 0, 0, 0.8),
+          0 0 0 1px rgba(255, 255, 255, 0.08),
+          0 0 32px -8px rgba(99, 102, 241, 0.4),
+          inset 0 1px 0 rgba(255, 255, 255, 0.05);
+        overflow: hidden;
+        backdrop-filter: blur(24px) saturate(180%) brightness(1.1);
+        -webkit-backdrop-filter: blur(24px) saturate(180%) brightness(1.1);
+        transform-origin: top left;
+        pointer-events: auto; /* Ensure clicks are captured */
+        /* Initial position off-screen until calculated */
+        top: -9999px;
+        left: -9999px;
       }
+      
+      /* Animation when opening - NO translateY to avoid position conflicts */
+      #sortMenu:not(.hidden) {
+        animation: dropdown-in 0.15s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+      }
+      
+      @keyframes dropdown-in {
+        from {
+          opacity: 0;
+          transform: scale(0.95);
+        }
+        to {
+          opacity: 1;
+          transform: scale(1);
+        }
+      }
+      
+      #sortMenu.hidden {
+        display: none !important;
+        pointer-events: none !important;
+      }
+      
+      /* Dropdown backdrop to block clicks below */
+      #sortMenu::after {
+        content: '';
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: -1;
+        pointer-events: none;
+      }
+      
+      /* Menu items */
       #sortMenu button {
         display: flex;
         align-items: center;
         justify-content: space-between;
         width: 100%;
         background: transparent;
-        color: #e5e7eb;
+        color: #d1d5db;
         font-size: 0.875rem;
-        padding: 0.65rem 1rem;
-        transition: background 0.18s ease, color 0.18s ease;
+        font-weight: 500;
+        padding: 0.75rem 1rem;
+        border: none;
+        cursor: pointer;
+        transition: all 0.15s cubic-bezier(0.4, 0.0, 0.2, 1);
+        position: relative;
+        pointer-events: auto; /* Ensure button clicks work */
       }
-      #sortMenu button:hover,
-      #sortMenu button:focus-visible {
-        background: #1b2333;
-        color: #f8fafc;
-        outline: none;
+      
+      #sortMenu button::before {
+        content: '';
+        position: absolute;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 3px;
+        background: var(--accent-color);
+        opacity: 0;
+        transition: opacity 0.15s ease;
       }
+      
+      #sortMenu button:hover {
+        background: rgba(99, 102, 241, 0.12);
+        color: #f3f4f6;
+      }
+      
+      #sortMenu button:active {
+        background: rgba(99, 102, 241, 0.18);
+      }
+      
       #sortMenu button.is-active {
-        background: linear-gradient(135deg, rgba(99, 102, 241, 0.18) 0%, rgba(30, 34, 48, 0.9) 100%);
-        color: #f9fafb;
+        background: linear-gradient(90deg, rgba(99, 102, 241, 0.16) 0%, rgba(99, 102, 241, 0.08) 100%);
+        color: #ffffff;
+        font-weight: 600;
       }
+      
+      #sortMenu button.is-active::before {
+        opacity: 1;
+      }
+      
+      /* Checkmark */
       #sortMenu button .sortMenuCheck {
         opacity: 0;
-        font-size: 0.9rem;
-        color: #c7d2fe;
-        transition: opacity 0.18s ease;
+        font-size: 1rem;
+        color: var(--accent-color);
+        transition: opacity 0.15s ease, transform 0.15s ease;
+        transform: scale(0.8);
       }
+      
       #sortMenu button.is-active .sortMenuCheck {
         opacity: 1;
+        transform: scale(1);
+      }
+      
+      /* Responsive */
+      @media (max-width: 480px) {
+        #sortMenu { 
+          min-width: 200px;
+          max-width: 92vw; 
+        }
       }
     </style>
   </head>
@@ -1928,8 +2053,8 @@
 
         appEl.innerHTML = `
           <div class="library-shell flex flex-col gap-4 flex-1 min-h-0 overflow-hidden">
-            <div id="filterBlock" class="flex flex-col gap-3 mt-4 sm:mt-5" style="position: relative; z-index: 20;">
-              <section id="filterPanel" class="rounded-2xl border border-neutral-800/60 bg-gradient-to-br from-neutral-900/90 to-neutral-900/70 backdrop-blur-sm shadow-lg transition-all duration-300" style="position: relative; z-index: 20;">
+            <div id="filterBlock" class="flex flex-col gap-3 mt-4 sm:mt-5">
+              <section id="filterPanel" class="rounded-2xl border border-neutral-800/60 bg-gradient-to-br from-neutral-900/90 to-neutral-900/70 backdrop-blur-sm shadow-lg transition-all duration-300">
                 <!-- Filter Header with Toggle (entire row is clickable) -->
                 <button id="filterToggle" 
                         aria-expanded="${!filterCollapsed}" 
@@ -1967,15 +2092,17 @@
                     <!-- Controls Row -->
                     <div class="flex flex-wrap items-center gap-2">
                       <!-- Sort Controls -->
+                      <!-- Sort & Order Controls -->
                       <div class="inline-flex items-center gap-1.5 p-1 rounded-lg border border-neutral-800/60 bg-neutral-950/50 shadow-sm">
-                        <div class="relative">
+                        <div class="sort-dropdown-wrapper">
                           <button id="sortMenuBtn" class="px-3 h-9 rounded-md text-neutral-200 hover:bg-neutral-800/70 flex items-center gap-2 transition-colors text-sm font-medium whitespace-nowrap" aria-haspopup="menu" aria-expanded="false" title="Sortieren">
                             <span id="sortLabel"></span>
-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="opacity-60">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="opacity-60 transition-transform duration-200" style="transition: transform 0.2s ease;">
                               <polyline points="6 9 12 15 18 9"></polyline>
                             </svg>
                           </button>
-                          <div id="sortMenu" class="hidden absolute top-full mt-1 left-0 min-w-[200px] rounded-xl overflow-hidden">
+                          <!-- Dropdown positioned absolutely relative to button -->
+                          <div id="sortMenu" class="hidden">
                             <button class="transition-colors" data-sort="name">
                               <span>Name</span>
                               <span class="sortMenuCheck" aria-hidden="true">✓</span>
@@ -2004,7 +2131,7 @@
                 </div>
               </section>
 
-              <section id="categoryBar" class="shrink-0" style="position: relative; z-index: 50;"></section>
+              <section id="categoryBar" class="shrink-0"></section>
               
               <!-- Active Filters Badge (shows when both favorites + category are active) -->
               <div id="activeFiltersBadge" class="hidden mt-2 px-3 py-1.5 rounded-lg bg-gradient-to-r from-amber-500/15 to-blue-500/15 border border-amber-500/30 text-xs text-neutral-300 flex items-center gap-2 w-fit">
@@ -2183,52 +2310,178 @@
           }, 300);
         });
 
-        // Sort dropdown behavior
+        // ===== SORT DROPDOWN - OPTIMIZED BEHAVIOR =====
         if (sortMenuBtn && sortMenu) {
+          let isMenuOpen = false;
+          
+          // Get the wrapper for better positioning
+          const wrapper = sortMenuBtn.closest('.sort-dropdown-wrapper');
+          const menuPlaceholder = document.createElement('span');
+          menuPlaceholder.style.display = 'none';
+          menuPlaceholder.className = 'sort-menu-anchor';
+
+          const detachMenu = () => {
+            if (!wrapper) return;
+            if (sortMenu.parentElement !== document.body) {
+              wrapper.insertBefore(menuPlaceholder, sortMenu);
+              document.body.appendChild(sortMenu);
+            }
+          };
+
+          const restoreMenu = () => {
+            if (menuPlaceholder.parentElement) {
+              menuPlaceholder.parentElement.replaceChild(sortMenu, menuPlaceholder);
+            }
+          };
+          
+          const positionMenu = () => {
+            const btnRect = sortMenuBtn.getBoundingClientRect();
+            const margin = 12;
+            const gap = 4;
+            
+            let top = btnRect.bottom + gap;
+            let left = btnRect.left;
+            
+            sortMenu.style.top = `${top}px`;
+            sortMenu.style.left = `${left}px`;
+            
+            const menuRect = sortMenu.getBoundingClientRect();
+            
+            if (menuRect.right > window.innerWidth - margin) {
+              left = Math.max(margin, window.innerWidth - margin - menuRect.width);
+              sortMenu.style.left = `${left}px`;
+            }
+            
+            if (menuRect.left < margin) {
+              left = margin;
+              sortMenu.style.left = `${left}px`;
+            }
+            
+            if (menuRect.bottom > window.innerHeight - margin) {
+              const aboveTop = btnRect.top - gap - menuRect.height;
+              top = Math.max(margin, Math.min(aboveTop, window.innerHeight - margin - menuRect.height));
+              sortMenu.style.top = `${top}px`;
+            }
+
+            if (top < margin) {
+              top = margin;
+              sortMenu.style.top = `${top}px`;
+            }
+          };
+          
+          const openMenu = () => {
+            if (isMenuOpen) return;
+            isMenuOpen = true;
+            detachMenu();
+            
+            // Remove hidden first to allow proper measurement
+            sortMenu.classList.remove('hidden');
+            
+            // Position after showing (next frame for accurate measurement)
+            requestAnimationFrame(() => {
+              positionMenu();
+            });
+            
+            sortMenuBtn.setAttribute('aria-expanded', 'true');
+            
+            // Rotate chevron icon
+            const chevron = sortMenuBtn.querySelector('svg');
+            if (chevron) chevron.style.transform = 'rotate(180deg)';
+            
+            syncSortMenuState();
+            
+            // Add outside click listener on next tick
+            requestAnimationFrame(() => {
+              document.addEventListener('click', handleOutsideClick, true);
+            });
+          };
+          
           const closeMenu = () => {
+            if (!isMenuOpen) return;
+            isMenuOpen = false;
             sortMenu.classList.add('hidden');
-            sortMenuBtn.setAttribute('aria-expanded','false');
-            document.removeEventListener('click', onDocClick, true);
+            sortMenuBtn.setAttribute('aria-expanded', 'false');
+            sortMenu.style.top = '-9999px';
+            sortMenu.style.left = '-9999px';
+            restoreMenu();
+            
+            // Reset chevron icon
+            const chevron = sortMenuBtn.querySelector('svg');
+            if (chevron) chevron.style.transform = 'rotate(0deg)';
+            
+            document.removeEventListener('click', handleOutsideClick, true);
           };
           
-          const onDocClick = (ev) => { 
-            // Check if click is inside menu or on button (including its children)
-            if (sortMenu.contains(ev.target) || sortMenuBtn.contains(ev.target)) return;
-            closeMenu(); 
+          const handleOutsideClick = (ev) => {
+            // Check if click is inside the menu or button
+            if (sortMenu.contains(ev.target) || sortMenuBtn.contains(ev.target)) {
+              return;
+            }
+            closeMenu();
           };
           
-          sortMenuBtn.addEventListener('click', (ev)=>{
-            ev.preventDefault(); ev.stopPropagation();
-            const isOpen = !sortMenu.classList.contains('hidden');
-            if (isOpen) { 
-              closeMenu(); 
+          // Toggle menu on button click
+          sortMenuBtn.addEventListener('click', (ev) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+            
+            if (isMenuOpen) {
+              closeMenu();
             } else {
-              sortMenu.classList.remove('hidden');
-              sortMenuBtn.setAttribute('aria-expanded','true');
-              syncSortMenuState();
-              // Add click listener after a small delay to prevent immediate closing
-              setTimeout(() => {
-                document.addEventListener('click', onDocClick, true);
-              }, 10);
+              openMenu();
             }
           });
           
-          sortMenu.querySelectorAll('[data-sort]').forEach((btn)=>{
-            btn.addEventListener('click', async (ev)=>{
-              ev.preventDefault(); // Prevent default action
-              ev.stopPropagation(); // Prevent doc click from interfering
-              ev.stopImmediatePropagation(); // Stop all propagation
-              const v = btn.getAttribute('data-sort');
-              if (!v) return;
-              closeMenu(); // Close menu first
-              if (v !== L.sort) {
-                L.sort = v; localStorage.setItem('libSort', L.sort);
+          // Handle menu item clicks
+          sortMenu.querySelectorAll('[data-sort]').forEach((btn) => {
+            btn.addEventListener('click', async (ev) => {
+              ev.preventDefault();
+              ev.stopPropagation();
+              
+              const newSort = btn.getAttribute('data-sort');
+              if (!newSort) return;
+              
+              // Close menu immediately for better UX
+              closeMenu();
+              
+              // Only reload if sort changed
+              if (newSort !== L.sort) {
+                L.sort = newSort;
+                localStorage.setItem('libSort', L.sort);
                 L.page = 1;
                 appEl.innerHTML = '<div class="flex items-center justify-center h-[70vh] text-neutral-400">Lade…</div>';
                 await loadPage();
+                renderLibrary();
               }
-              renderLibrary();
             });
+          });
+          
+          // Reposition menu on scroll (since it's fixed)
+          let scrollTicking = false;
+          window.addEventListener('scroll', () => {
+            if (!isMenuOpen) return;
+            if (!scrollTicking) {
+              window.requestAnimationFrame(() => {
+                positionMenu();
+                scrollTicking = false;
+              });
+              scrollTicking = true;
+            }
+          }, { passive: true });
+          
+          // Reposition menu on resize
+          window.addEventListener('resize', () => {
+            if (isMenuOpen) {
+              positionMenu();
+            }
+          });
+          
+          // Close menu on Escape key
+          document.addEventListener('keydown', (ev) => {
+            if (ev.key === 'Escape' && isMenuOpen) {
+              closeMenu();
+              sortMenuBtn.focus();
+            }
           });
         }
         if (orderBtn) orderBtn.onclick = async () => {
