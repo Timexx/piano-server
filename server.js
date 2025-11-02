@@ -60,6 +60,7 @@ const DATA_DIR = path.join(ROOT, "data");
 const CONFIG_FILE = path.join(DATA_DIR, "config.json");
 const PLAYLIST_FILE = path.join(DATA_DIR, "playlist.json");
 const THUMBS_DIR = path.join(DATA_DIR, "thumbnails"); // New: thumbnail cache directory
+const ANNOTATIONS_DIR = path.join(DATA_DIR, "annotations");
 const CPU_COUNT = Math.max(1, typeof os.cpus === "function" ? os.cpus().length : 1);
 
 const DEFAULT_CATEGORY_COLOR = "#6366F1";
@@ -199,6 +200,135 @@ function sanitizeJumpMarkers(input) {
   });
 
   return result;
+}
+
+function annotationKey(rel) {
+  const normalized = rel.split(path.sep).join("/");
+  return normalized.split("/").map((segment) => encodeURIComponent(segment)).join("__");
+}
+
+function getAnnotationDir(rel) {
+  return path.join(ANNOTATIONS_DIR, annotationKey(rel));
+}
+
+function getAnnotationIndexPath(rel) {
+  return path.join(getAnnotationDir(rel), "index.json");
+}
+
+function getAnnotationBasePath(rel) {
+  return path.join(getAnnotationDir(rel), "base.pdf");
+}
+
+function getAnnotationPagePath(rel, pageNumber) {
+  return path.join(getAnnotationDir(rel), `page-${pageNumber}.png`);
+}
+
+async function ensureAnnotationStore(rel) {
+  const dir = getAnnotationDir(rel);
+  await fs.promises.mkdir(dir, { recursive: true });
+  return dir;
+}
+
+async function loadAnnotationIndex(rel) {
+  const indexPath = getAnnotationIndexPath(rel);
+  try {
+    const raw = await fs.promises.readFile(indexPath, "utf8");
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return { rel, pages: {} };
+    if (!parsed.pages || typeof parsed.pages !== "object") parsed.pages = {};
+    return { rel, pages: parsed.pages };
+  } catch {
+    return { rel, pages: {} };
+  }
+}
+
+async function saveAnnotationIndex(rel, index) {
+  const indexPath = getAnnotationIndexPath(rel);
+  const payload = JSON.stringify({ rel, pages: index.pages || {} }, null, 2);
+  await fs.promises.writeFile(indexPath, payload, "utf8");
+}
+
+async function ensureAnnotationBase(info) {
+  const basePath = getAnnotationBasePath(info.rel);
+  try {
+    await fs.promises.access(basePath, fs.constants.F_OK);
+  } catch {
+    await fs.promises.mkdir(path.dirname(basePath), { recursive: true });
+    await fs.promises.copyFile(info.abs, basePath);
+  }
+  return basePath;
+}
+
+async function rebuildPdfFromAnnotations(info, index) {
+  const basePath = await ensureAnnotationBase(info);
+  const pages = index.pages || {};
+  const pageKeys = Object.keys(pages);
+
+  if (!pageKeys.length) {
+    // No overlays: restore base
+    const tmpPath = `${info.abs}.${Date.now()}.clean.tmp`;
+    await fs.promises.copyFile(basePath, tmpPath);
+    await fs.promises.rename(tmpPath, info.abs);
+    return;
+  }
+
+  const baseBytes = await fs.promises.readFile(basePath);
+  const pdfDoc = await PDFDocument.load(baseBytes, { ignoreEncryption: true });
+  const pageCount = pdfDoc.getPageCount();
+
+  for (const key of pageKeys) {
+    const pageNumber = Number(key);
+    if (!Number.isInteger(pageNumber) || pageNumber < 1 || pageNumber > pageCount) continue;
+    const overlayPath = getAnnotationPagePath(info.rel, pageNumber);
+    let pngBytes;
+    try {
+      pngBytes = await fs.promises.readFile(overlayPath);
+    } catch {
+      continue;
+    }
+    if (!pngBytes.length) continue;
+    let embedded;
+    try {
+      embedded = await pdfDoc.embedPng(pngBytes);
+    } catch (err) {
+      console.warn("Failed to embed annotation image", err?.message || err);
+      continue;
+    }
+    const page = pdfDoc.getPage(pageNumber - 1);
+    const meta = pages[key] || {};
+    const width = Number(meta.pageWidth) || page.getWidth();
+    const height = Number(meta.pageHeight) || page.getHeight();
+    page.drawImage(embedded, { x: 0, y: 0, width, height });
+  }
+
+  const tmpPath = `${info.abs}.${Date.now()}.annot.tmp`;
+  const pdfBytes = await pdfDoc.save({ useObjectStreams: false });
+  await fs.promises.writeFile(tmpPath, pdfBytes);
+  await fs.promises.rename(tmpPath, info.abs);
+}
+
+async function resetAnnotationStore(info) {
+  const basePath = await ensureAnnotationBase(info);
+  const dir = await ensureAnnotationStore(info.rel);
+
+  const entries = await fs.promises.readdir(dir).catch(() => []);
+  for (const entry of entries) {
+    if (entry === "index.json") continue;
+    if (entry === path.basename(basePath)) continue;
+    if (entry.startsWith("page-") && entry.endsWith(".png")) {
+      try {
+        await fs.promises.unlink(path.join(dir, entry));
+      } catch {}
+    }
+  }
+
+  try {
+    await fs.promises.unlink(getAnnotationIndexPath(info.rel));
+  } catch {}
+
+  const tmpPath = `${info.abs}.${Date.now()}.reset.tmp`;
+  await fs.promises.copyFile(basePath, tmpPath);
+  await fs.promises.rename(tmpPath, info.abs);
 }
 
 function slugifyPdfBase(name, fallback = "sheet") {
@@ -1755,61 +1885,56 @@ app.post("/api/annotations/save", async (req, res) => {
   if (!info) {
     return res.status(400).json({ error: "Invalid file name" });
   }
-  if (!Array.isArray(overlays) || !overlays.length) {
+
+  if (!Array.isArray(overlays)) {
     return res.status(400).json({ error: "No overlays provided" });
-  }
-
-  const prepared = overlays
-    .map((item) => {
-      if (!item || typeof item !== "object") return null;
-      const pageNumber = Number(item.pageNumber);
-      if (!Number.isInteger(pageNumber) || pageNumber < 1) return null;
-      const dataUrl = typeof item.dataUrl === "string" ? item.dataUrl.trim() : "";
-      if (!dataUrl.startsWith("data:image/png;base64,")) return null;
-      const base64 = dataUrl.slice("data:image/png;base64,".length);
-      if (!base64) return null;
-      const pageWidth = Number(item.pageWidth);
-      const pageHeight = Number(item.pageHeight);
-      if (!Number.isFinite(pageWidth) || pageWidth <= 0) return null;
-      if (!Number.isFinite(pageHeight) || pageHeight <= 0) return null;
-      return { pageNumber, base64, pageWidth, pageHeight };
-    })
-    .filter(Boolean);
-
-  if (!prepared.length) {
-    return res.status(400).json({ error: "No valid overlays" });
   }
 
   try {
     await withAnnotationLock(info.rel, async () => {
-      const pdfBytes = await fs.promises.readFile(info.abs);
-      const pdfDoc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
-      const pageCount = pdfDoc.getPageCount();
+      await ensureAnnotationStore(info.rel);
+      const index = await loadAnnotationIndex(info.rel);
+      const pages = index.pages;
+      let didUpdate = false;
 
-      for (const overlay of prepared) {
-        if (overlay.pageNumber < 1 || overlay.pageNumber > pageCount) continue;
-        const pngBytes = Buffer.from(overlay.base64, "base64");
-        if (!pngBytes.length) continue;
-        let embeddedImage;
-        try {
-          embeddedImage = await pdfDoc.embedPng(pngBytes);
-        } catch (embedErr) {
-          console.warn("Failed to embed annotation PNG:", embedErr?.message || embedErr);
-          continue;
+      for (const raw of overlays) {
+        if (!raw || typeof raw !== "object") continue;
+        const pageNumber = Number(raw.pageNumber);
+        if (!Number.isInteger(pageNumber) || pageNumber < 1) continue;
+        const dataUrl = typeof raw.dataUrl === "string" ? raw.dataUrl.trim() : "";
+        const hasData = dataUrl.startsWith("data:image/png;base64,") && dataUrl.length > "data:image/png;base64,".length;
+        const pageWidth = Number(raw.pageWidth);
+        const pageHeight = Number(raw.pageHeight);
+        const meta = {};
+        if (Number.isFinite(pageWidth) && pageWidth > 0) meta.pageWidth = pageWidth;
+        if (Number.isFinite(pageHeight) && pageHeight > 0) meta.pageHeight = pageHeight;
+
+        const pagePath = getAnnotationPagePath(info.rel, pageNumber);
+
+        if (hasData) {
+          const base64 = dataUrl.slice("data:image/png;base64,".length);
+          const buffer = Buffer.from(base64, "base64");
+          if (!buffer.length) continue;
+          await fs.promises.writeFile(pagePath, buffer);
+          pages[pageNumber] = { ...pages[pageNumber], ...meta, updatedAt: Date.now() };
+          didUpdate = true;
+        } else {
+          try {
+            await fs.promises.unlink(pagePath);
+          } catch {}
+          if (pages[pageNumber]) {
+            delete pages[pageNumber];
+            didUpdate = true;
+          }
         }
-        const page = pdfDoc.getPage(overlay.pageNumber - 1);
-        page.drawImage(embeddedImage, {
-          x: 0,
-          y: 0,
-          width: overlay.pageWidth,
-          height: overlay.pageHeight,
-        });
       }
 
-      const updatedBytes = await pdfDoc.save({ useObjectStreams: false });
-      const tmpPath = `${info.abs}.${Date.now()}.annot.tmp`;
-      await fs.promises.writeFile(tmpPath, updatedBytes);
-      await fs.promises.rename(tmpPath, info.abs);
+      if (!didUpdate) {
+        return;
+      }
+
+      await saveAnnotationIndex(info.rel, index);
+      await rebuildPdfFromAnnotations(info, index);
     });
 
     const st = await statSafe(info.abs);
@@ -1830,6 +1955,40 @@ app.post("/api/annotations/save", async (req, res) => {
   } catch (err) {
     console.error("Annotation save failed:", err);
     res.status(500).json({ error: "Failed to apply annotations" });
+  }
+});
+
+app.post("/api/annotations/reset", async (req, res) => {
+  const { name } = req.body || {};
+  const info = resolvePdfName(name);
+  if (!info) {
+    return res.status(400).json({ error: "Invalid file name" });
+  }
+
+  try {
+    await withAnnotationLock(info.rel, async () => {
+      await resetAnnotationStore(info);
+      await saveAnnotationIndex(info.rel, { rel: info.rel, pages: {} });
+    });
+
+    const st = await statSafe(info.abs);
+    if (st) {
+      const idx = indexCache.items.findIndex((item) => item && item.name === info.rel);
+      if (idx !== -1) {
+        indexCache.items[idx] = { ...indexCache.items[idx], size: st.size, mtime: st.mtimeMs };
+      }
+    }
+
+    try {
+      await ensureThumbnail({ rel: info.rel, abs: info.abs });
+    } catch (thumbErr) {
+      console.warn("Annotation thumbnail refresh failed:", thumbErr?.message || thumbErr);
+    }
+
+    res.json({ ok: true, mtime: st ? st.mtimeMs : null, size: st ? st.size : null });
+  } catch (err) {
+    console.error("Annotation reset failed:", err);
+    res.status(500).json({ error: "Failed to reset annotations" });
   }
 });
 

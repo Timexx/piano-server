@@ -2033,6 +2033,19 @@
           };
         } catch { return null; }
       }
+
+      async function getAnnotationsFromBackend(name) {
+        try {
+          const res = await fetch(`/api/annotations?name=${encodeURIComponent(name)}`, { cache: "no-store" });
+          if (!res.ok) return [];
+          const data = await res.json();
+          if (!data || typeof data !== "object") return [];
+          if (Array.isArray(data.pages)) return data.pages;
+          return [];
+        } catch {
+          return [];
+        }
+      }
       async function setFileSecsOnBackend(name, secs) {
         try {
           await fetch("/api/prefs/file", {
@@ -4780,8 +4793,15 @@
         updateViewerPlaylistControls();
 
         updateStatus("Lade…");
-  await mountPdfVirtual(container, state.viewer.url);
-  annotations.refreshOverlayActivation();
+        const annotationSnapshots = await getAnnotationsFromBackend(fileName);
+        if (Array.isArray(annotationSnapshots)) {
+          annotationSnapshots.forEach((snapshot) => {
+            if (!snapshot || !Number.isInteger(snapshot.pageNumber)) return;
+            annotations.primeCommittedImage(snapshot.pageNumber, snapshot);
+          });
+    }
+    await mountPdfVirtual(container, state.viewer.url);
+    annotations.refreshOverlayActivation();
         await new Promise((resolve) => requestAnimationFrame(resolve));
         computeSpeed();
         

@@ -231,14 +231,37 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
         overlayCtx: null,
         commitCanvas: null,
         commitCtx: null,
-        committedImage: null,
-        activePointers: new Map(),
-        strokes: [],
-        dirty: false
+  committedImage: null,
+  activePointers: new Map(),
+  strokes: [],
+  dirty: false,
+  overlayDirty: false,
+  commitDirty: false,
+  needsUpload: false,
+  hasCommittedContent: false
       };
       pages.set(pageNumber, entry);
     }
     return entry;
+  }
+
+  function primeCommittedImage(pageNumber, payload) {
+    const entry = ensureEntry(pageNumber);
+    const dataUrl = payload?.dataUrl || null;
+    if (Number.isFinite(payload?.pageWidth)) entry.pageWidth = payload.pageWidth;
+    if (Number.isFinite(payload?.pageHeight)) entry.pageHeight = payload.pageHeight;
+    entry.committedImage = dataUrl;
+    entry.hasCommittedContent = Boolean(dataUrl);
+    entry.needsUpload = false;
+    entry.overlayDirty = false;
+    entry.commitDirty = false;
+    if (entry.commitCanvas && entry.commitCtx) {
+      if (dataUrl) {
+        renderCommittedImage(entry, dataUrl);
+      } else {
+        entry.commitCtx.clearRect(0, 0, entry.commitCanvas.width, entry.commitCanvas.height);
+      }
+    }
   }
 
   function ensureOverlay(entry, frame) {
@@ -295,8 +318,15 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
     entry.strokes.push(stroke);
     entry.activePointers.set(event.pointerId, stroke);
     lastActivePage = entry.pageNumber;
-    paintStroke(entry, stroke);
+    if (stroke.tool === "eraser") {
+      applyStrokeToCommitted(entry, stroke, false);
+      entry.commitDirty = true;
+    } else {
+      paintStroke(entry, stroke);
+      entry.overlayDirty = true;
+    }
     entry.dirty = true;
+    entry.needsUpload = true;
     event.preventDefault();
   }
 
@@ -310,8 +340,15 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
       return;
     }
     stroke.points.push(point);
-    paintStrokeSegment(entry, stroke);
+    if (stroke.tool === "eraser") {
+      applyStrokeToCommitted(entry, stroke, true);
+      entry.commitDirty = true;
+    } else {
+      paintStrokeSegment(entry, stroke);
+      entry.overlayDirty = true;
+    }
     entry.dirty = true;
+    entry.needsUpload = true;
     event.preventDefault();
   }
 
@@ -322,8 +359,11 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
     try { entry.overlay?.releasePointerCapture(event.pointerId); } catch {}
 
     entry.dirty = entry.strokes.length > 0;
-    if (shouldQueue && entry.strokes.length) {
+    if (shouldQueue) {
       queueSave(entry.pageNumber);
+      if (!entry.overlayDirty) {
+        entry.strokes = [];
+      }
     }
     event.preventDefault();
   }
@@ -356,6 +396,45 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
     applyStrokeStyle(ctx, stroke, entry.pixelRatio || 1);
     renderStroke(ctx, entry, stroke.points, true);
     ctx.restore();
+  }
+
+  function applyStrokeToCommitted(entry, stroke, onlyTail = false) {
+    if (!entry.commitCtx || !entry.commitCanvas) return;
+    const ctx = entry.commitCtx;
+    ctx.save();
+    applyStrokeStyle(ctx, stroke, entry.pixelRatio || 1);
+    renderStroke(ctx, entry, stroke.points, onlyTail);
+    ctx.restore();
+  }
+
+  function mergeOverlayIntoCommitted(entry) {
+    if (!entry.overlay || !entry.commitCanvas || !entry.commitCtx || !entry.overlayCtx) return;
+    if (isCanvasEmpty(entry.overlay)) {
+      entry.overlayCtx.clearRect(0, 0, entry.overlay.width, entry.overlay.height);
+      return;
+    }
+    entry.commitCtx.save();
+    entry.commitCtx.globalCompositeOperation = "source-over";
+    entry.commitCtx.drawImage(entry.overlay, 0, 0, entry.commitCanvas.width, entry.commitCanvas.height);
+    entry.commitCtx.restore();
+    entry.overlayCtx.clearRect(0, 0, entry.overlay.width, entry.overlay.height);
+  }
+
+  function isCanvasEmpty(canvas) {
+    if (!canvas) return true;
+    const { width, height } = canvas;
+    if (!width || !height) return true;
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    try {
+      const data = ctx.getImageData(0, 0, width, height).data;
+      for (let i = 3; i < data.length; i += 4) {
+        if (data[i] !== 0) return false;
+      }
+    } catch (err) {
+      console.warn("Canvas empty check failed", err);
+      return false;
+    }
+    return true;
   }
 
   function applyStrokeStyle(ctx, stroke, ratio) {
@@ -405,6 +484,8 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
 
   function queueSave(pageNumber) {
     if (!fileName) return;
+    const entry = pages.get(pageNumber);
+    if (entry) entry.needsUpload = true;
     pendingPages.add(pageNumber);
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = window.setTimeout(() => {
@@ -420,8 +501,45 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
     const items = [];
     pendingPages.forEach((pageNumber) => {
       const entry = pages.get(pageNumber);
-      if (!entry || !entry.overlay || !entry.strokes.length) return;
-      const dataUrl = entry.overlay.toDataURL("image/png");
+      if (!entry) return;
+
+      if (entry.overlayDirty) {
+        mergeOverlayIntoCommitted(entry);
+      }
+
+      let dataUrl = null;
+      if (entry.commitCanvas && entry.needsUpload) {
+        if (!isCanvasEmpty(entry.commitCanvas)) {
+          try {
+            dataUrl = entry.commitCanvas.toDataURL("image/png");
+          } catch (err) {
+            console.warn("Annotation serialization failed", err);
+          }
+        }
+      }
+
+      entry.strokes = [];
+      entry.overlayDirty = false;
+      entry.commitDirty = false;
+
+      if (!entry.needsUpload && !dataUrl) {
+        // Nothing to send
+        entry.needsUpload = false;
+        return;
+      }
+
+      entry.needsUpload = false;
+      if (!dataUrl) {
+        entry.committedImage = null;
+        entry.hasCommittedContent = false;
+        if (entry.commitCtx && entry.commitCanvas) {
+          entry.commitCtx.clearRect(0, 0, entry.commitCanvas.width, entry.commitCanvas.height);
+        }
+      } else {
+        entry.committedImage = dataUrl;
+        entry.hasCommittedContent = true;
+      }
+
       items.push({ entry, payload: {
         pageNumber,
         dataUrl,
@@ -454,9 +572,6 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
         result = await response.json();
       } catch {}
 
-      items.forEach(({ entry, payload }) => {
-        commitSavedOverlay(entry, payload.dataUrl);
-      });
       showStatus("Notizen gespeichert", 1600);
       if (typeof onSaved === "function") {
         onSaved({ mtime: result?.mtime || null, size: result?.size || null });
@@ -479,17 +594,6 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
     entry.overlay.classList.toggle("is-saving", flag);
   }
 
-  function commitSavedOverlay(entry, dataUrl) {
-    entry.committedImage = dataUrl;
-    renderCommittedImage(entry, dataUrl);
-    entry.strokes = [];
-    entry.dirty = false;
-    entry.activePointers.clear();
-    if (entry.overlayCtx && entry.overlay) {
-      entry.overlayCtx.clearRect(0, 0, entry.overlay.width, entry.overlay.height);
-    }
-  }
-
   function renderCommittedImage(entry, dataUrl) {
     if (!entry.commitCanvas || !entry.commitCtx) return;
     entry.commitCtx.clearRect(0, 0, entry.commitCanvas.width, entry.commitCanvas.height);
@@ -499,6 +603,7 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
       if (!entry.commitCtx) return;
       entry.commitCtx.clearRect(0, 0, entry.commitCanvas.width, entry.commitCanvas.height);
       entry.commitCtx.drawImage(img, 0, 0, entry.commitCanvas.width, entry.commitCanvas.height);
+  entry.hasCommittedContent = Boolean(dataUrl);
     };
     img.src = dataUrl;
   }
@@ -531,18 +636,39 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
       return;
     }
     const entry = pages.get(lastActivePage);
-    if (!entry || !entry.strokes.length) {
-      showStatus("Keine neuen Notizen", 1200);
+    if (!entry) {
+      showStatus("Keine Seite gefunden", 1200);
       return;
     }
+
+    let hadContent = false;
+
+    if (entry.overlayCtx && entry.overlay) {
+      entry.overlayCtx.clearRect(0, 0, entry.overlay.width, entry.overlay.height);
+      if (entry.strokes.length) hadContent = true;
+    }
+
+    if (entry.commitCtx && entry.commitCanvas && !isCanvasEmpty(entry.commitCanvas)) {
+      entry.commitCtx.clearRect(0, 0, entry.commitCanvas.width, entry.commitCanvas.height);
+      hadContent = true;
+    }
+
     entry.strokes = [];
     entry.activePointers.clear();
     entry.dirty = false;
-    pendingPages.delete(entry.pageNumber);
-    if (entry.overlayCtx && entry.overlay) {
-      entry.overlayCtx.clearRect(0, 0, entry.overlay.width, entry.overlay.height);
+    entry.overlayDirty = false;
+    entry.commitDirty = false;
+    entry.needsUpload = hadContent;
+    entry.hasCommittedContent = false;
+    entry.committedImage = null;
+
+    if (hadContent) {
+      pendingPages.add(entry.pageNumber);
+      queueSave(entry.pageNumber);
+      showStatus("Seite geleert", 1600);
+    } else {
+      showStatus("Keine Notizen vorhanden", 1200);
     }
-    showStatus("Notizen verworfen", 1200);
   }
 
   function getNormalizedPoint(event, entry) {
@@ -654,6 +780,7 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
     leaveViewer,
     attachPageLayer,
     refreshOverlayActivation,
-    onPageLayerRemoved
+    onPageLayerRemoved,
+    primeCommittedImage
   };
 }
