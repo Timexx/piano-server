@@ -11,8 +11,7 @@ const COLOR_PRESETS = [
 
 const TOOL_CONFIG = {
   pen: { widthMultiplier: 1, alpha: 1 },
-  highlighter: { widthMultiplier: 2.4, alpha: 0.35 },
-  eraser: { widthMultiplier: 3, alpha: 1 }
+  highlighter: { widthMultiplier: 2.4, alpha: 0.35 }
 };
 
 export function createAnnotationManager({ state, updateStatus, fetcher, onSaved }) {
@@ -98,7 +97,7 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
     }
 
     if (controls.undoBtn) {
-      controls.undoBtn.addEventListener("click", () => undoLastStroke());
+      controls.undoBtn.addEventListener("click", () => { void undoLastStroke(); });
     }
 
     if (controls.clearBtn) {
@@ -318,13 +317,8 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
     entry.strokes.push(stroke);
     entry.activePointers.set(event.pointerId, stroke);
     lastActivePage = entry.pageNumber;
-    if (stroke.tool === "eraser") {
-      applyStrokeToCommitted(entry, stroke, false);
-      entry.commitDirty = true;
-    } else {
-      paintStroke(entry, stroke);
-      entry.overlayDirty = true;
-    }
+    paintStroke(entry, stroke);
+    entry.overlayDirty = true;
     entry.dirty = true;
     entry.needsUpload = true;
     event.preventDefault();
@@ -340,13 +334,8 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
       return;
     }
     stroke.points.push(point);
-    if (stroke.tool === "eraser") {
-      applyStrokeToCommitted(entry, stroke, true);
-      entry.commitDirty = true;
-    } else {
-      paintStrokeSegment(entry, stroke);
-      entry.overlayDirty = true;
-    }
+    paintStrokeSegment(entry, stroke);
+    entry.overlayDirty = true;
     entry.dirty = true;
     entry.needsUpload = true;
     event.preventDefault();
@@ -398,15 +387,6 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
     ctx.restore();
   }
 
-  function applyStrokeToCommitted(entry, stroke, onlyTail = false) {
-    if (!entry.commitCtx || !entry.commitCanvas) return;
-    const ctx = entry.commitCtx;
-    ctx.save();
-    applyStrokeStyle(ctx, stroke, entry.pixelRatio || 1);
-    renderStroke(ctx, entry, stroke.points, onlyTail);
-    ctx.restore();
-  }
-
   function mergeOverlayIntoCommitted(entry) {
     if (!entry.overlay || !entry.commitCanvas || !entry.commitCtx || !entry.overlayCtx) return;
     if (isCanvasEmpty(entry.overlay)) {
@@ -438,15 +418,9 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
   }
 
   function applyStrokeStyle(ctx, stroke, ratio) {
-    if (stroke.tool === "eraser") {
-      ctx.globalCompositeOperation = "destination-out";
-      ctx.strokeStyle = "rgba(0,0,0,1)";
-      ctx.globalAlpha = 1;
-    } else {
-      ctx.globalCompositeOperation = "source-over";
-      ctx.strokeStyle = stroke.color;
-      ctx.globalAlpha = stroke.alpha ?? 1;
-    }
+    ctx.globalCompositeOperation = "source-over";
+    ctx.strokeStyle = stroke.color;
+    ctx.globalAlpha = stroke.alpha ?? 1;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
     const multiplier = stroke.widthMultiplier || 1;
@@ -574,7 +548,14 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
 
       showStatus("Notizen gespeichert", 1600);
       if (typeof onSaved === "function") {
-        onSaved({ mtime: result?.mtime || null, size: result?.size || null });
+        const changedPages = Array.from(new Set(items.map(({ payload }) => payload.pageNumber).filter((page) => Number.isInteger(page) && page > 0)));
+        const mtimeValue = Number(result?.mtime);
+        const sizeValue = Number(result?.size);
+        onSaved({
+          mtime: Number.isFinite(mtimeValue) ? mtimeValue : null,
+          size: Number.isFinite(sizeValue) ? sizeValue : null,
+          pages: changedPages
+        });
       }
     } catch (err) {
       console.error("Annotation save failed", err);
@@ -603,12 +584,17 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
       if (!entry.commitCtx) return;
       entry.commitCtx.clearRect(0, 0, entry.commitCanvas.width, entry.commitCanvas.height);
       entry.commitCtx.drawImage(img, 0, 0, entry.commitCanvas.width, entry.commitCanvas.height);
-  entry.hasCommittedContent = Boolean(dataUrl);
+      entry.hasCommittedContent = Boolean(dataUrl);
     };
     img.src = dataUrl;
   }
 
-  function undoLastStroke() {
+  async function undoLastStroke() {
+    if (undoPendingStroke()) return;
+    await undoPreviousVersion();
+  }
+
+  function undoPendingStroke() {
     const pageOrder = lastActivePage ? [lastActivePage, ...Array.from(pages.keys()).filter((n) => n !== lastActivePage).reverse()] : Array.from(pages.keys()).reverse();
     for (const pageNumber of pageOrder) {
       const entry = pages.get(pageNumber);
@@ -625,19 +611,139 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
         }
         showStatus("Notiz entfernt", 1200);
       }
+      return true;
+    }
+    return false;
+  }
+
+  async function undoPreviousVersion() {
+    if (!fileName) {
+      showStatus("Keine Datei ausgewählt", 1400);
       return;
     }
-    showStatus("Keine Notizen zum Rückgängig machen", 1600);
+    if (saving) {
+      showStatus("Bitte warten, Notizen werden gespeichert", 1600);
+      return;
+    }
+
+    showStatus("Vorherige Version laden…");
+    try {
+      const response = await (fetcher || window.fetch)("/api/annotations/undo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: fileName }),
+        cache: "no-store"
+      });
+
+      if (response.status === 409) {
+        showStatus("Keine ältere Version vorhanden", 1600);
+        return;
+      }
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const payload = await response.json();
+      const snapshots = Array.isArray(payload?.pages) ? payload.pages : [];
+      const snapshotMap = new Map();
+      snapshots.forEach((item) => {
+        const pageNumber = Number(item?.pageNumber);
+        if (!Number.isInteger(pageNumber) || pageNumber < 1) return;
+        if (typeof item?.dataUrl !== "string") return;
+        snapshotMap.set(pageNumber, item);
+      });
+
+      const beforePages = Array.from(pages.keys());
+      const changedSet = new Set([...beforePages, ...snapshotMap.keys()]);
+
+      pendingPages.clear();
+      if (saveTimer) {
+        clearTimeout(saveTimer);
+        saveTimer = null;
+      }
+
+      pages.forEach((entry, pageNumber) => {
+        entry.strokes = [];
+        entry.activePointers.clear();
+        entry.dirty = false;
+        entry.overlayDirty = false;
+        entry.commitDirty = false;
+        entry.needsUpload = false;
+        if (entry.overlayCtx && entry.overlay) {
+          entry.overlayCtx.clearRect(0, 0, entry.overlay.width, entry.overlay.height);
+        }
+        const snapshot = snapshotMap.get(pageNumber);
+        if (snapshot) {
+          primeCommittedImage(pageNumber, snapshot);
+        } else {
+          primeCommittedImage(pageNumber, { pageNumber, dataUrl: null });
+        }
+      });
+
+      snapshotMap.forEach((snapshot, pageNumber) => {
+        if (!pages.has(pageNumber)) {
+          primeCommittedImage(pageNumber, snapshot);
+        }
+      });
+
+      lastActivePage = null;
+      showStatus("Vorherige Version geladen", 1600);
+
+      const mtimeValue = Number(payload?.mtime);
+      const sizeValue = Number(payload?.size);
+      const changedPages = Array.from(changedSet).filter((page) => Number.isInteger(page) && page > 0);
+      if (typeof onSaved === "function") {
+        onSaved({
+          mtime: Number.isFinite(mtimeValue) ? mtimeValue : null,
+          size: Number.isFinite(sizeValue) ? sizeValue : null,
+          pages: changedPages
+        });
+      }
+    } catch (err) {
+      console.error("Annotation version undo failed", err);
+      showStatus("Version konnte nicht geladen werden", 2000);
+    }
+  }
+
+  function getMostVisiblePageNumber() {
+    const container = document.querySelector('#viewer');
+    if (!container) return null;
+    const containerRect = container.getBoundingClientRect();
+    let bestPage = null;
+    let bestScore = 0;
+    const pageNodes = container.querySelectorAll('.viewer-page[data-page]');
+    pageNodes.forEach((node) => {
+      const rect = node.getBoundingClientRect();
+      const overlap = Math.max(0, Math.min(rect.bottom, containerRect.bottom) - Math.max(rect.top, containerRect.top));
+      if (overlap > bestScore + 0.5) {
+        const pageNumber = Number(node.dataset.page);
+        if (Number.isInteger(pageNumber) && pageNumber > 0) {
+          bestScore = overlap;
+          bestPage = pageNumber;
+        }
+      }
+    });
+    return bestPage;
   }
 
   function clearCurrentPage() {
-    if (!lastActivePage) {
-      showStatus("Keine Seite ausgewählt", 1400);
+    let targetPage = lastActivePage;
+    if (!targetPage) {
+      targetPage = getMostVisiblePageNumber();
+      if (targetPage) {
+        lastActivePage = targetPage;
+      }
+    }
+
+    if (!targetPage) {
+      showStatus("Keine Seite im Fokus", 1400);
       return;
     }
-    const entry = pages.get(lastActivePage);
+
+    const entry = pages.get(targetPage);
     if (!entry) {
-      showStatus("Keine Seite gefunden", 1200);
+      showStatus("Seite nicht geladen", 1400);
       return;
     }
 
@@ -774,13 +880,19 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
     }
   }
 
-  return {
+  const api = {
     initControls,
     enterViewer,
     leaveViewer,
     attachPageLayer,
     refreshOverlayActivation,
-    onPageLayerRemoved,
-    primeCommittedImage
+    onPageLayerRemoved
   };
+
+  Object.defineProperty(api, "primeCommittedImage", {
+    value: (pageNumber, payload) => primeCommittedImage(pageNumber, payload),
+    enumerable: true
+  });
+
+  return api;
 }

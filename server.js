@@ -61,6 +61,7 @@ const CONFIG_FILE = path.join(DATA_DIR, "config.json");
 const PLAYLIST_FILE = path.join(DATA_DIR, "playlist.json");
 const THUMBS_DIR = path.join(DATA_DIR, "thumbnails"); // New: thumbnail cache directory
 const ANNOTATIONS_DIR = path.join(DATA_DIR, "annotations");
+const MAX_ANNOTATION_VERSIONS = 20;
 const CPU_COUNT = Math.max(1, typeof os.cpus === "function" ? os.cpus().length : 1);
 
 const DEFAULT_CATEGORY_COLOR = "#6366F1";
@@ -221,6 +222,206 @@ function getAnnotationBasePath(rel) {
 
 function getAnnotationPagePath(rel, pageNumber) {
   return path.join(getAnnotationDir(rel), `page-${pageNumber}.png`);
+}
+
+function getAnnotationVersionsDir(rel) {
+  return path.join(getAnnotationDir(rel), "versions");
+}
+
+async function ensureAnnotationVersionsDir(rel) {
+  const dir = getAnnotationVersionsDir(rel);
+  await fs.promises.mkdir(dir, { recursive: true });
+  return dir;
+}
+
+async function listAnnotationSnapshots(rel) {
+  const dir = getAnnotationVersionsDir(rel);
+  let entries = [];
+  try {
+    entries = await fs.promises.readdir(dir, { withFileTypes: true });
+  } catch (err) {
+    if (err && err.code === "ENOENT") return [];
+    throw err;
+  }
+  return entries
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .filter((name) => !name.endsWith("-pending"))
+    .map((name) => {
+      const [ts] = name.split("-");
+      const timestamp = Number(ts) || 0;
+      return {
+        name,
+        dir: path.join(dir, name),
+        timestamp,
+      };
+    })
+    .sort((a, b) => {
+      if (a.timestamp !== b.timestamp) return a.timestamp - b.timestamp;
+      return a.name.localeCompare(b.name);
+    });
+}
+
+async function cleanupAnnotationSnapshots(rel) {
+  const snapshots = await listAnnotationSnapshots(rel);
+  if (snapshots.length <= MAX_ANNOTATION_VERSIONS) return;
+  const overflow = snapshots.slice(0, Math.max(0, snapshots.length - MAX_ANNOTATION_VERSIONS));
+  await Promise.all(
+    overflow.map((entry) =>
+      fs.promises.rm(entry.dir, { recursive: true, force: true }).catch(() => {})
+    )
+  );
+}
+
+async function createAnnotationSnapshot(info, index) {
+  if (!info || !info.rel) return null;
+  const versionsDir = await ensureAnnotationVersionsDir(info.rel);
+  const baseTs = Date.now();
+  let attempt = 0;
+  let token = null;
+  let dir = null;
+
+  while (true) {
+    token = attempt ? `${baseTs}-${attempt}` : `${baseTs}`;
+    dir = path.join(versionsDir, `${token}-pending`);
+    try {
+      await fs.promises.mkdir(dir);
+      break;
+    } catch (err) {
+      if (err && err.code === "EEXIST") {
+        attempt += 1;
+        continue;
+      }
+      throw err;
+    }
+  }
+
+  const snapshot = {
+    rel: info.rel,
+    dir,
+    token,
+    timestamp: Number(token.split("-")[0]) || Date.now(),
+  };
+
+  const pagesObject = index && typeof index === "object" && index.pages && typeof index.pages === "object"
+    ? JSON.parse(JSON.stringify(index.pages))
+    : {};
+  const pageKeys = Object.keys(pagesObject)
+    .map((key) => Number(key))
+    .filter((num) => Number.isFinite(num) && num > 0)
+    .sort((a, b) => a - b);
+
+  const meta = {
+    rel: info.rel,
+    createdAt: Date.now(),
+    pages: pageKeys,
+  };
+
+  await fs.promises.writeFile(path.join(dir, "meta.json"), JSON.stringify(meta, null, 2), "utf8");
+  await fs.promises.writeFile(
+    path.join(dir, "index.json"),
+    JSON.stringify({ rel: info.rel, pages: pagesObject }, null, 2),
+    "utf8"
+  );
+
+  for (const pageNumber of pageKeys) {
+    const src = getAnnotationPagePath(info.rel, pageNumber);
+    const dest = path.join(dir, `page-${pageNumber}.png`);
+    try {
+      await fs.promises.copyFile(src, dest);
+    } catch (err) {
+      if (!err || err.code !== "ENOENT") {
+        console.warn(
+          "Snapshot copy failed for annotation page",
+          info.rel,
+          pageNumber,
+          err?.message || err
+        );
+      }
+    }
+  }
+
+  return snapshot;
+}
+
+async function finalizeAnnotationSnapshot(snapshot) {
+  if (!snapshot || !snapshot.dir) return null;
+  const versionsDir = getAnnotationVersionsDir(snapshot.rel);
+  const target = path.join(versionsDir, snapshot.token);
+  try {
+    await fs.promises.rename(snapshot.dir, target);
+    const finalized = { ...snapshot, dir: target };
+    await cleanupAnnotationSnapshots(snapshot.rel);
+    return finalized;
+  } catch (err) {
+    if (err && err.code === "ENOENT") {
+      return null;
+    }
+    if (err && err.code === "EEXIST") {
+      const uniqueTarget = `${target}-${Date.now()}`;
+      await fs.promises.rename(snapshot.dir, uniqueTarget);
+      const finalized = { ...snapshot, dir: uniqueTarget, token: path.basename(uniqueTarget) };
+      await cleanupAnnotationSnapshots(snapshot.rel);
+      return finalized;
+    }
+    throw err;
+  }
+}
+
+async function discardAnnotationSnapshot(snapshot) {
+  if (!snapshot || !snapshot.dir) return;
+  await fs.promises.rm(snapshot.dir, { recursive: true, force: true }).catch(() => {});
+}
+
+async function getLatestAnnotationSnapshot(rel) {
+  const snapshots = await listAnnotationSnapshots(rel);
+  if (!snapshots.length) return null;
+  return snapshots[snapshots.length - 1];
+}
+
+async function loadSnapshotIndex(snapshot) {
+  if (!snapshot) return { rel: null, pages: {} };
+  try {
+    const raw = await fs.promises.readFile(path.join(snapshot.dir, "index.json"), "utf8");
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return { rel: null, pages: {} };
+    if (!parsed.pages || typeof parsed.pages !== "object") parsed.pages = {};
+    return parsed;
+  } catch {
+    return { rel: null, pages: {} };
+  }
+}
+
+async function serializeAnnotationPages(info, index) {
+  const pages = [];
+  const map = index && typeof index === "object" && index.pages && typeof index.pages === "object"
+    ? index.pages
+    : {};
+  const keys = Object.keys(map)
+    .map((key) => Number(key))
+    .filter((num) => Number.isInteger(num) && num > 0)
+    .sort((a, b) => a - b);
+
+  for (const pageNumber of keys) {
+    const pagePath = getAnnotationPagePath(info.rel, pageNumber);
+    let dataUrl = null;
+    try {
+      const buffer = await fs.promises.readFile(pagePath);
+      if (buffer && buffer.length) {
+        dataUrl = `data:image/png;base64,${buffer.toString("base64")}`;
+      }
+    } catch {}
+    if (!dataUrl) continue;
+    const meta = map[pageNumber] || map[String(pageNumber)] || {};
+    pages.push({
+      pageNumber,
+      dataUrl,
+      pageWidth: Number(meta.pageWidth) || null,
+      pageHeight: Number(meta.pageHeight) || null,
+    });
+  }
+
+  return pages;
 }
 
 async function ensureAnnotationStore(rel) {
@@ -1879,6 +2080,40 @@ app.post("/api/prefs/file", async (req, res) => {
   });
 });
 
+app.get("/api/annotations", async (req, res) => {
+  const name = (req.query.name || "").toString();
+  const info = resolvePdfName(name);
+  if (!info) {
+    return res.status(400).json({ error: "Invalid file name" });
+  }
+
+  try {
+    await ensureAnnotationStore(info.rel);
+    const index = await loadAnnotationIndex(info.rel);
+    const pages = await serializeAnnotationPages(info, index);
+    let historyEntries = [];
+    try {
+      historyEntries = await listAnnotationSnapshots(info.rel);
+    } catch {}
+    const st = await statSafe(info.abs);
+    res.setHeader("Cache-Control", "no-store");
+    res.json({
+      ok: true,
+      name: info.rel,
+      pages,
+      history: {
+        available: historyEntries.length > 0,
+        total: historyEntries.length,
+      },
+      mtime: st ? st.mtimeMs : null,
+      size: st ? st.size : null,
+    });
+  } catch (err) {
+    console.error("Annotation fetch failed:", err);
+    res.status(500).json({ error: "Failed to read annotations" });
+  }
+});
+
 app.post("/api/annotations/save", async (req, res) => {
   const { name, overlays } = req.body || {};
   const info = resolvePdfName(name);
@@ -1896,45 +2131,63 @@ app.post("/api/annotations/save", async (req, res) => {
       const index = await loadAnnotationIndex(info.rel);
       const pages = index.pages;
       let didUpdate = false;
+      let snapshot = null;
 
-      for (const raw of overlays) {
-        if (!raw || typeof raw !== "object") continue;
-        const pageNumber = Number(raw.pageNumber);
-        if (!Number.isInteger(pageNumber) || pageNumber < 1) continue;
-        const dataUrl = typeof raw.dataUrl === "string" ? raw.dataUrl.trim() : "";
-        const hasData = dataUrl.startsWith("data:image/png;base64,") && dataUrl.length > "data:image/png;base64,".length;
-        const pageWidth = Number(raw.pageWidth);
-        const pageHeight = Number(raw.pageHeight);
-        const meta = {};
-        if (Number.isFinite(pageWidth) && pageWidth > 0) meta.pageWidth = pageWidth;
-        if (Number.isFinite(pageHeight) && pageHeight > 0) meta.pageHeight = pageHeight;
+      try {
+        snapshot = await createAnnotationSnapshot(info, index);
+      } catch (snapshotErr) {
+        console.warn(
+          "Failed to capture annotation snapshot before save",
+          info.rel,
+          snapshotErr?.message || snapshotErr
+        );
+      }
 
-        const pagePath = getAnnotationPagePath(info.rel, pageNumber);
+      try {
+        for (const raw of overlays) {
+          if (!raw || typeof raw !== "object") continue;
+          const pageNumber = Number(raw.pageNumber);
+          if (!Number.isInteger(pageNumber) || pageNumber < 1) continue;
+          const dataUrl = typeof raw.dataUrl === "string" ? raw.dataUrl.trim() : "";
+          const hasData = dataUrl.startsWith("data:image/png;base64,") && dataUrl.length > "data:image/png;base64,".length;
+          const pageWidth = Number(raw.pageWidth);
+          const pageHeight = Number(raw.pageHeight);
+          const meta = {};
+          if (Number.isFinite(pageWidth) && pageWidth > 0) meta.pageWidth = pageWidth;
+          if (Number.isFinite(pageHeight) && pageHeight > 0) meta.pageHeight = pageHeight;
 
-        if (hasData) {
-          const base64 = dataUrl.slice("data:image/png;base64,".length);
-          const buffer = Buffer.from(base64, "base64");
-          if (!buffer.length) continue;
-          await fs.promises.writeFile(pagePath, buffer);
-          pages[pageNumber] = { ...pages[pageNumber], ...meta, updatedAt: Date.now() };
-          didUpdate = true;
-        } else {
-          try {
-            await fs.promises.unlink(pagePath);
-          } catch {}
-          if (pages[pageNumber]) {
-            delete pages[pageNumber];
+          const pagePath = getAnnotationPagePath(info.rel, pageNumber);
+
+          if (hasData) {
+            const base64 = dataUrl.slice("data:image/png;base64,".length);
+            const buffer = Buffer.from(base64, "base64");
+            if (!buffer.length) continue;
+            await fs.promises.writeFile(pagePath, buffer);
+            pages[pageNumber] = { ...pages[pageNumber], ...meta, updatedAt: Date.now() };
             didUpdate = true;
+          } else {
+            try {
+              await fs.promises.unlink(pagePath);
+            } catch {}
+            if (pages[pageNumber]) {
+              delete pages[pageNumber];
+              didUpdate = true;
+            }
           }
         }
-      }
 
-      if (!didUpdate) {
-        return;
-      }
+        if (!didUpdate) {
+          await discardAnnotationSnapshot(snapshot);
+          return;
+        }
 
-      await saveAnnotationIndex(info.rel, index);
-      await rebuildPdfFromAnnotations(info, index);
+        await saveAnnotationIndex(info.rel, index);
+        await rebuildPdfFromAnnotations(info, index);
+        await finalizeAnnotationSnapshot(snapshot);
+      } catch (err) {
+        await discardAnnotationSnapshot(snapshot);
+        throw err;
+      }
     });
 
     const st = await statSafe(info.abs);
@@ -1958,6 +2211,98 @@ app.post("/api/annotations/save", async (req, res) => {
   }
 });
 
+app.post("/api/annotations/undo", async (req, res) => {
+  const { name } = req.body || {};
+  const info = resolvePdfName(name);
+  if (!info) {
+    return res.status(400).json({ error: "Invalid file name" });
+  }
+
+  let result = null;
+  try {
+    await withAnnotationLock(info.rel, async () => {
+      await ensureAnnotationStore(info.rel);
+      const snapshot = await getLatestAnnotationSnapshot(info.rel);
+      if (!snapshot) {
+        result = null;
+        return;
+      }
+
+      const snapshotIndex = await loadSnapshotIndex(snapshot);
+      const restorePages = snapshotIndex && typeof snapshotIndex === "object" && snapshotIndex.pages && typeof snapshotIndex.pages === "object"
+        ? snapshotIndex.pages
+        : {};
+      const restoreKeys = Object.keys(restorePages || {}).map((key) => String(key));
+      const restoreSet = new Set(restoreKeys);
+
+      const currentIndex = await loadAnnotationIndex(info.rel);
+      const currentKeys = Object.keys(currentIndex.pages || {}).map((key) => String(key));
+
+      for (const key of currentKeys) {
+        if (!restoreSet.has(key)) {
+          await fs.promises.unlink(getAnnotationPagePath(info.rel, key)).catch(() => {});
+        }
+      }
+
+      for (const key of restoreKeys) {
+        const src = path.join(snapshot.dir, `page-${key}.png`);
+        const dest = getAnnotationPagePath(info.rel, key);
+        try {
+          await fs.promises.copyFile(src, dest);
+        } catch (err) {
+          if (!err || err.code !== "ENOENT") {
+            console.warn("Failed to restore annotation page", info.rel, key, err?.message || err);
+          } else {
+            await fs.promises.unlink(dest).catch(() => {});
+          }
+        }
+      }
+
+      const restoreIndex = { rel: info.rel, pages: restorePages };
+      await saveAnnotationIndex(info.rel, restoreIndex);
+      await rebuildPdfFromAnnotations(info, restoreIndex);
+      const pages = await serializeAnnotationPages(info, restoreIndex);
+      await fs.promises.rm(snapshot.dir, { recursive: true, force: true }).catch(() => {});
+      const remainingHistory = await listAnnotationSnapshots(info.rel);
+      result = {
+        pages,
+        timestamp: snapshot.timestamp || null,
+        historyRemaining: remainingHistory.length,
+      };
+    });
+  } catch (err) {
+    console.error("Annotation undo failed:", err);
+    return res.status(500).json({ error: "Failed to restore annotations" });
+  }
+
+  if (!result) {
+    return res.status(409).json({ error: "Keine vorherige Version vorhanden" });
+  }
+
+  const st = await statSafe(info.abs);
+  if (st) {
+    const idx = indexCache.items.findIndex((item) => item && item.name === info.rel);
+    if (idx !== -1) {
+      indexCache.items[idx] = { ...indexCache.items[idx], size: st.size, mtime: st.mtimeMs };
+    }
+  }
+
+  try {
+    await ensureThumbnail({ rel: info.rel, abs: info.abs });
+  } catch (thumbErr) {
+    console.warn("Annotation thumbnail refresh failed:", thumbErr?.message || thumbErr);
+  }
+
+  res.json({
+    ok: true,
+    restoredAt: result.timestamp,
+    historyRemaining: result.historyRemaining,
+    pages: result.pages,
+    mtime: st ? st.mtimeMs : null,
+    size: st ? st.size : null,
+  });
+});
+
 app.post("/api/annotations/reset", async (req, res) => {
   const { name } = req.body || {};
   const info = resolvePdfName(name);
@@ -1967,8 +2312,33 @@ app.post("/api/annotations/reset", async (req, res) => {
 
   try {
     await withAnnotationLock(info.rel, async () => {
-      await resetAnnotationStore(info);
-      await saveAnnotationIndex(info.rel, { rel: info.rel, pages: {} });
+      await ensureAnnotationStore(info.rel);
+      const currentIndex = await loadAnnotationIndex(info.rel);
+      const hasAnyPage = Object.keys(currentIndex.pages || {}).length > 0;
+      let snapshot = null;
+
+      if (hasAnyPage) {
+        try {
+          snapshot = await createAnnotationSnapshot(info, currentIndex);
+        } catch (snapshotErr) {
+          console.warn(
+            "Failed to capture annotation snapshot before reset",
+            info.rel,
+            snapshotErr?.message || snapshotErr
+          );
+        }
+      }
+
+      try {
+        await resetAnnotationStore(info);
+        await saveAnnotationIndex(info.rel, { rel: info.rel, pages: {} });
+        if (snapshot) {
+          await finalizeAnnotationSnapshot(snapshot);
+        }
+      } catch (err) {
+        await discardAnnotationSnapshot(snapshot);
+        throw err;
+      }
     });
 
     const st = await statSafe(info.abs);

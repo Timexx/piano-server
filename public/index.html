@@ -1288,7 +1288,6 @@
               <div class="annotation-tools-row">
                 <button type="button" class="annotation-tool-btn" data-tool="pen" aria-pressed="true" title="Stift">✏️</button>
                 <button type="button" class="annotation-tool-btn" data-tool="highlighter" aria-pressed="false" title="Textmarker">🖍️</button>
-                <button type="button" class="annotation-tool-btn" data-tool="eraser" aria-pressed="false" title="Radierer">🧽</button>
               </div>
               <div id="annotationColors" class="annotation-colors" role="radiogroup" aria-label="Farben"></div>
               <div class="annotation-size">
@@ -1297,7 +1296,7 @@
                 <span id="annotationSizeValue">3</span>
               </div>
               <div class="annotation-actions">
-                <button id="btnAnnotationUndo" type="button" class="btn btn-secondary btn-icon" title="Letzten Strich rückgängig">
+                <button id="btnAnnotationUndo" type="button" class="btn btn-secondary btn-icon" title="Vorherige Version wiederherstellen">
                   ↺
                 </button>
                 <button id="btnAnnotationClear" type="button" class="btn btn-secondary btn-icon" title="Seite leeren">
@@ -1734,16 +1733,118 @@
 
   window.state = state;
 
+  const pdfRefreshState = {
+    pages: new Set(),
+    timer: null,
+    running: false,
+    token: null,
+    needsDocRefresh: false
+  };
+
+  function queuePdfPageRefresh(pages, bustToken) {
+    if (Array.isArray(pages) && pages.length) {
+      pages.forEach((page) => {
+        const num = Number(page);
+        if (Number.isInteger(num) && num > 0) {
+          pdfRefreshState.pages.add(num);
+        }
+      });
+    } else {
+      pdfRefreshState.needsDocRefresh = true;
+    }
+
+    if (Number.isFinite(bustToken)) {
+      pdfRefreshState.token = bustToken;
+    }
+
+    if (pdfRefreshState.timer) return;
+    pdfRefreshState.timer = window.setTimeout(runPdfPageRefresh, 150);
+  }
+
+  function resetPdfRefreshState() {
+    pdfRefreshState.pages.clear();
+    pdfRefreshState.needsDocRefresh = false;
+    pdfRefreshState.token = null;
+    if (pdfRefreshState.timer) {
+      clearTimeout(pdfRefreshState.timer);
+      pdfRefreshState.timer = null;
+    }
+    pdfRefreshState.running = false;
+  }
+
+  async function runPdfPageRefresh() {
+    if (pdfRefreshState.running) {
+      pdfRefreshState.timer = window.setTimeout(runPdfPageRefresh, 160);
+      return;
+    }
+
+    pdfRefreshState.timer = null;
+
+    const pendingPages = Array.from(pdfRefreshState.pages).sort((a, b) => a - b);
+    const requiresUpdate = pendingPages.length > 0 || pdfRefreshState.needsDocRefresh;
+    if (!requiresUpdate) return;
+
+    const bust = Number.isFinite(pdfRefreshState.token) ? pdfRefreshState.token : Date.now();
+    const fileName = state.viewer.fileName;
+    pdfRefreshState.token = null;
+    pdfRefreshState.needsDocRefresh = false;
+    pdfRefreshState.pages.clear();
+
+    if (!fileName || !window.pdfjsLib) return;
+
+    const url = `/sheets/${encodePathSegments(fileName)}?v=${bust}`;
+    pdfRefreshState.running = true;
+
+    try {
+      const pdf = await pdfjsLib.getDocument({ url }).promise;
+      if (fileName !== state.viewer.fileName) {
+        try { pdf.cleanup?.(); pdf.destroy?.(); } catch {}
+        return;
+      }
+      const previous = state.viewer._pdf;
+      state.viewer._pdf = pdf;
+      state.viewer.url = url;
+      state.viewer.cacheToken = bust;
+
+      const container = document.querySelector('#viewer');
+      if (container && pendingPages.length) {
+        for (const pageNumber of pendingPages) {
+          const placeholder = container.querySelector(`.viewer-page[data-page="${pageNumber}"]`);
+          if (placeholder) {
+            try {
+              await renderOnePageInto(placeholder, pdf, pageNumber);
+            } catch (pageErr) {
+              console.warn('PDF-Seite konnte nicht aktualisiert werden', pageNumber, pageErr);
+            }
+          }
+        }
+      }
+
+      if (previous && previous !== pdf) {
+        try { previous.cleanup?.(); previous.destroy?.(); } catch {}
+      }
+    } catch (err) {
+      console.warn('PDF refresh failed', err);
+    } finally {
+      pdfRefreshState.running = false;
+      if (pdfRefreshState.pages.size || pdfRefreshState.needsDocRefresh) {
+        pdfRefreshState.timer = window.setTimeout(runPdfPageRefresh, 200);
+      }
+    }
+  }
+
     const annotations = createAnnotationManager({
       state,
       updateStatus,
       fetcher: (url, options) => fetch(url, options ?? {}),
       onSaved: (meta) => {
-        if (!meta || !meta.mtime) return;
         if (!state.viewer.fileName) return;
-        const bust = meta.mtime;
+        const pages = Array.isArray(meta?.pages) ? meta.pages : [];
+        const mtimeValue = Number(meta?.mtime);
+        const bust = Number.isFinite(mtimeValue) ? mtimeValue : Date.now();
         state.viewer.url = `/sheets/${encodePathSegments(state.viewer.fileName)}?v=${bust}`;
         state.viewer.cacheToken = bust;
+        queuePdfPageRefresh(pages, bust);
       }
     });
     annotations.initControls();
@@ -4713,6 +4814,7 @@
         state.viewer.fileName = fileName;
         state.viewer.url = null;
   state.viewer.cacheToken = null;
+        resetPdfRefreshState();
         annotations.enterViewer({ fileName });
 
         document.querySelector('#btnBack').onclick = () => {
@@ -4795,11 +4897,18 @@
         updateStatus("Lade…");
         const annotationSnapshots = await getAnnotationsFromBackend(fileName);
         if (Array.isArray(annotationSnapshots)) {
+          const loadCommitted = typeof annotations?.primeCommittedImage === "function"
+            ? annotations.primeCommittedImage
+            : null;
           annotationSnapshots.forEach((snapshot) => {
             if (!snapshot || !Number.isInteger(snapshot.pageNumber)) return;
-            annotations.primeCommittedImage(snapshot.pageNumber, snapshot);
+            if (loadCommitted) {
+              loadCommitted(snapshot.pageNumber, snapshot);
+            } else {
+              console.warn("Annotation manager missing primeCommittedImage, skipping snapshot", snapshot);
+            }
           });
-    }
+        }
     await mountPdfVirtual(container, state.viewer.url);
     annotations.refreshOverlayActivation();
         await new Promise((resolve) => requestAnimationFrame(resolve));
