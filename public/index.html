@@ -88,15 +88,18 @@
         background: color-mix(in srgb, var(--accent-color) 10%, rgba(12,12,15,0.85));
       }
       .category-pill {
-        transition: transform 0.2s ease, box-shadow 0.2s ease;
+        transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        white-space: nowrap;
       }
       .category-pill:hover {
-        transform: translateY(-1px);
-        box-shadow: 0 18px 32px -28px rgba(0, 0, 0, 0.6);
+        transform: translateY(-1px) scale(1.02);
+        box-shadow: 0 4px 12px -4px rgba(0,0,0,0.4);
+      }
+      .category-pill:active {
+        transform: translateY(0) scale(0.98);
       }
       .category-pill.is-selected {
-        outline: 2px solid rgba(250, 250, 255, 0.5);
-        outline-offset: 2px;
+        box-shadow: 0 0 0 2px rgba(250, 250, 255, 0.25);
       }
       .category-chip {
         display: inline-flex;
@@ -261,10 +264,9 @@
         background: linear-gradient(145deg, #050506 0%, #0a0a0b 100%);
       }
       
+      /* Hide header completely in viewer mode for maximum space */
       body.in-viewer header {
-        background: rgba(12, 12, 15, 0.75);
-        backdrop-filter: blur(24px);
-        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+        display: none !important;
       }
       
       #viewerShell {
@@ -1791,6 +1793,16 @@
               </section>
 
               <section id="categoryBar" class="shrink-0" style="position: relative; z-index: 50;"></section>
+              
+              <!-- Active Filters Badge (shows when both favorites + category are active) -->
+              <div id="activeFiltersBadge" class="hidden mt-2 px-3 py-1.5 rounded-lg bg-gradient-to-r from-amber-500/15 to-blue-500/15 border border-amber-500/30 text-xs text-neutral-300 flex items-center gap-2 w-fit">
+                <span class="flex items-center gap-1.5">
+                  <span class="text-amber-400">★</span>
+                  <span>Favoriten</span>
+                </span>
+                <span class="text-neutral-600">+</span>
+                <span id="activeFilterCategoryName" class="flex items-center gap-1.5"></span>
+              </div>
             </div>
             <div class="flex flex-col flex-1 min-h-0 overflow-hidden">
               <section id="virtualWrap" class="relative flex-1 min-h-0"></section>
@@ -2179,11 +2191,31 @@
           const activeId = state.library.categoryFilter;
           const L = state.library;
 
+          // Responsive layout: manage button on right for large screens
           const wrapStart = `
             <div class="relative">
-              <div class="flex items-center gap-2 overflow-x-auto no-scrollbar -mx-2 px-2 py-1">
+              <div class="flex items-center gap-3">
+                <!-- Scrollable chips container -->
+                <div class="flex-1 overflow-x-auto no-scrollbar">
+                  <div class="flex items-center gap-2 py-1">
           `;
           const wrapEnd = `
+                  </div>
+                </div>
+                <!-- Manage button (right side on large screens) -->
+                <div class="hidden sm:block shrink-0">
+                  <button id="btnManageCategories" class="h-9 px-3 flex items-center gap-2 rounded-lg border border-neutral-700/60 bg-neutral-900/40 text-neutral-300 hover:bg-neutral-800/60 hover:text-neutral-100 hover:border-neutral-600 transition-all shadow-sm" title="Kategorien verwalten">
+                    ${SVG_SETTINGS}
+                    <span class="text-xs font-medium">Verwalten</span>
+                  </button>
+                </div>
+              </div>
+              <!-- Mobile manage button -->
+              <div class="sm:hidden mt-2 flex justify-center">
+                <button id="btnManageCategoriesMobile" class="h-9 px-4 flex items-center gap-2 rounded-lg border border-neutral-700/60 bg-neutral-900/40 text-neutral-300 hover:bg-neutral-800/60 hover:text-neutral-100 transition-all shadow-sm" title="Kategorien verwalten">
+                  ${SVG_SETTINGS}
+                  <span class="text-xs font-medium">Kategorien verwalten</span>
+                </button>
               </div>
             </div>
           `;
@@ -2194,79 +2226,130 @@
           // 1. FAVORITEN CHIP (als erstes!)
           const favActive = L.onlyFavorites;
           const favCls = favActive
-            ? "bg-amber-500/25 border-amber-400 text-amber-300"
-            : "bg-amber-500/10 border-amber-500/30 text-amber-400/80";
+            ? "bg-amber-500/25 border-amber-400/60 text-amber-300 shadow-sm"
+            : "bg-amber-500/8 border-amber-500/25 text-amber-400/70 hover:border-amber-500/40 hover:text-amber-400";
           const favCount = state.library.favorites?.size || 0;
-          chips.push(`<button id="filterFavChip" class="category-pill px-3 py-1.5 rounded-full border flex items-center gap-2 text-sm ${favActive ? 'font-semibold' : 'font-medium'} ${favCls}" data-cat="__favorites" title="Nur Favoriten anzeigen">
+          chips.push(`<button id="filterFavChip" class="category-pill px-3 py-1.5 rounded-full border flex items-center gap-2 text-sm ${favActive ? 'font-semibold' : 'font-medium'} ${favCls}" data-cat="__favorites" title="Nur Favoriten anzeigen${activeId ? ' (mit Kategorie kombinierbar)' : ''}">
               <span class="text-base leading-none">★</span>
               <span>Favoriten</span>
-              ${favCount > 0 ? `<span class="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full text-xs font-bold ${favActive ? 'bg-amber-400 text-neutral-900' : 'bg-amber-500/20 text-amber-300'}">${favCount}</span>` : ''}
+              ${favCount > 0 ? `<span class="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full text-xs font-bold ${favActive ? 'bg-amber-400/90 text-neutral-900' : 'bg-amber-500/20 text-amber-300'}">${favCount}</span>` : ''}
             </button>`);
           
-          // 2. "Alle" Chip
+          // Visual separator for better focus
+          chips.push(`<span class="inline-block w-px h-5 bg-neutral-700/40 mx-1" aria-hidden="true"></span>`);
+          
+          // 2. "Alle" Chip (cleaner design) - only active when no favorites AND no category
           const allActive = !activeId && !L.onlyFavorites;
-          chips.push(`<button class="category-pill px-3 py-1.5 rounded-full border flex items-center gap-2 text-sm ${allActive ? 'font-semibold' : 'font-medium'}" data-cat="__all" style="background:${allActive ? 'rgba(148,163,184,0.28)' : 'rgba(148,163,184,0.12)'};border-color:${allActive ? '#94a3b8' : 'rgba(148,163,184,0.35)'};color:${allActive ? '#e5e7eb' : '#94a3b8'};">
+          chips.push(`<button class="category-pill px-3 py-1.5 rounded-full border flex items-center gap-2 text-sm ${allActive ? 'font-semibold shadow-sm' : 'font-medium'}" data-cat="__all" style="background:${allActive ? 'rgba(148,163,184,0.22)' : 'rgba(148,163,184,0.08)'};border-color:${allActive ? 'rgba(148,163,184,0.5)' : 'rgba(148,163,184,0.2)'};color:${allActive ? '#f1f5f9' : '#94a3b8'};">
               <span class="text-base leading-none">◎</span>
               <span>Alle</span>
             </button>`);
 
-          // 3. Kategorie Chips
+          // 3. Kategorie Chips (optimized colors) - can be active WITH favorites
           for (const cat of categories) {
-            const isActive = cat.id === activeId && !L.onlyFavorites;
-            const bg = isActive ? `${cat.color}33` : `${cat.color}1a`;
-            const border = isActive ? cat.color : `${cat.color}40`;
+            const isActive = cat.id === activeId;
+            const bg = isActive ? `${cat.color}28` : `${cat.color}12`;
+            const border = isActive ? `${cat.color}60` : `${cat.color}30`;
             const text = isActive ? '#f8fafc' : cat.color;
             const fontWeight = isActive ? 'font-semibold' : 'font-medium';
-            chips.push(`<button class="category-pill px-3 py-1.5 rounded-full border flex items-center gap-2 text-sm ${fontWeight}" data-cat="${cat.id}" style="background:${bg};border-color:${border};color:${text};">
+            const extraClass = isActive ? 'shadow-sm' : '';
+            chips.push(`<button class="category-pill px-3 py-1.5 rounded-full border flex items-center gap-2 text-sm ${fontWeight} ${extraClass}" data-cat="${cat.id}" style="background:${bg};border-color:${border};color:${text};" title="${cat.name}${L.onlyFavorites ? ' (kombiniert mit Favoriten)' : ''}">
                 <span class="text-base leading-none">${cat.icon || '♪'}</span>
                 <span>${cat.name}</span>
               </button>`);
           }
           
-          // 4. "Ohne" Chip
-          const noneActive = activeId === 'none' && !L.onlyFavorites;
-          chips.push(`<button class="category-pill px-3 py-1.5 rounded-full border flex items-center gap-2 text-sm ${noneActive ? 'font-semibold' : 'font-medium'}" data-cat="none" style="background:${noneActive ? 'rgba(148,163,184,0.28)' : 'rgba(148,163,184,0.12)'};border-color:${noneActive ? '#94a3b8' : 'rgba(148,163,184,0.35)'};color:${noneActive ? '#e5e7eb' : '#94a3b8'};">
+          // Visual separator before "Ohne"
+          if (categories.length > 0) {
+            chips.push(`<span class="inline-block w-px h-5 bg-neutral-700/40 mx-1" aria-hidden="true"></span>`);
+          }
+          
+          // 4. "Ohne" Chip - can be active WITH favorites
+          const noneActive = activeId === 'none';
+          chips.push(`<button class="category-pill px-3 py-1.5 rounded-full border flex items-center gap-2 text-sm ${noneActive ? 'font-semibold shadow-sm' : 'font-medium'}" data-cat="none" style="background:${noneActive ? 'rgba(148,163,184,0.22)' : 'rgba(148,163,184,0.08)'};border-color:${noneActive ? 'rgba(148,163,184,0.5)' : 'rgba(148,163,184,0.2)'};color:${noneActive ? '#f1f5f9' : '#94a3b8'};" title="Ohne Kategorie${L.onlyFavorites ? ' (kombiniert mit Favoriten)' : ''}">
                 <span class="text-base leading-none">◌</span>
                 <span>Ohne</span>
               </button>`);
 
-          const manageBtn = `<button id="btnManageCategories" class="h-9 w-9 grid place-items-center rounded-full border border-neutral-700 text-neutral-200 hover:bg-neutral-800" title="Kategorien verwalten">${SVG_SETTINGS}</button>`;
-
-          host.innerHTML = wrapStart + chips.join('') + manageBtn + wrapEnd;
+          host.innerHTML = wrapStart + chips.join('') + wrapEnd;
 
           host.querySelectorAll('[data-cat]').forEach((btn) => {
             btn.addEventListener('click', async () => {
               const id = btn.getAttribute('data-cat');
               
-              // Handle favorites chip
+              // Handle favorites chip - toggle independently
               if (id === '__favorites') {
                 L.onlyFavorites = !L.onlyFavorites;
                 localStorage.setItem("onlyFav", String(L.onlyFavorites));
                 L.page = 1;
-                L.categoryFilter = null; // Clear category filter when toggling favorites
-                localStorage.removeItem("libCategory");
+                // Don't clear category filter - allow combination!
                 appEl.innerHTML = '<div class="flex items-center justify-center h-[70vh] text-neutral-400">Lade…</div>';
                 await loadPage();
                 renderLibrary();
                 return;
               }
               
-              // Handle other category chips
-              const target = (id === '__all') ? null : (id === state.library.categoryFilter ? null : id);
-              // Clear favorites filter when selecting a category
-              if (L.onlyFavorites && target) {
-                L.onlyFavorites = false;
-                localStorage.setItem("onlyFav", "false");
+              // Handle "Alle" chip - clears both favorites and category
+              if (id === '__all') {
+                const needsUpdate = L.onlyFavorites || L.categoryFilter;
+                if (needsUpdate) {
+                  L.onlyFavorites = false;
+                  localStorage.setItem("onlyFav", "false");
+                  L.categoryFilter = null;
+                  localStorage.removeItem("libCategory");
+                  L.page = 1;
+                  appEl.innerHTML = '<div class="flex items-center justify-center h-[70vh] text-neutral-400">Lade…</div>';
+                  await loadPage();
+                  renderLibrary();
+                }
+                return;
               }
+              
+              // Handle category chips - toggle category, keep favorites
+              const target = (id === state.library.categoryFilter) ? null : id;
               await applyCategoryFilter(target);
             });
           });
 
-          const manage = document.querySelector('#btnManageCategories');
-          if (manage) manage.addEventListener('click', () => openCategoryManager());
+          // Bind both manage buttons (desktop + mobile)
+          const manageDesktop = document.querySelector('#btnManageCategories');
+          const manageMobile = document.querySelector('#btnManageCategoriesMobile');
+          if (manageDesktop) manageDesktop.addEventListener('click', () => openCategoryManager());
+          if (manageMobile) manageMobile.addEventListener('click', () => openCategoryManager());
+
+          // Show combined filter badge if both favorites and category are active
+          updateActiveFiltersBadge();
 
           // Accent (skip synthetic none)
           applyAccentTheme(activeId === 'none' ? null : activeId);
+        }
+        
+        function updateActiveFiltersBadge() {
+          const badge = document.querySelector('#activeFiltersBadge');
+          const categoryNameEl = document.querySelector('#activeFilterCategoryName');
+          if (!badge || !categoryNameEl) return;
+          
+          const L = state.library;
+          const activeId = L.categoryFilter;
+          const bothActive = L.onlyFavorites && activeId;
+          
+          if (bothActive) {
+            // Find category info
+            let categoryDisplay = '';
+            if (activeId === 'none') {
+              categoryDisplay = `<span class="text-neutral-400">◌</span><span>Ohne Kategorie</span>`;
+            } else {
+              const cat = state.categories.find(c => c.id === activeId);
+              if (cat) {
+                categoryDisplay = `<span style="color:${cat.color};">${cat.icon || '♪'}</span><span>${cat.name}</span>`;
+              }
+            }
+            
+            categoryNameEl.innerHTML = categoryDisplay;
+            badge.classList.remove('hidden');
+          } else {
+            badge.classList.add('hidden');
+          }
         }
 
         requestAnimationFrame(() => {
