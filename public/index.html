@@ -2177,9 +2177,10 @@
             try {
               // Avoid setting Content-Type explicitly to let the browser choose;
               // some iOS browsers throw TypeError on manual Content-Type with Blob bodies.
+              const resolvedName = (file.name && file.name.toLowerCase().endsWith('.pdf')) ? file.name : (file.name || 'upload.pdf');
               const headers = new Headers({
-                'X-Upload-Name': (file.name && file.name.toLowerCase().endsWith('.pdf')) ? file.name : (file.name || 'upload.pdf'),
-                'X-Upload-Meta': JSON.stringify(metaPayload),
+                'X-Upload-Name': encodeURIComponent(resolvedName),
+                'X-Upload-Meta': encodeURIComponent(JSON.stringify(metaPayload)),
                 'Accept': 'application/json'
               });
 

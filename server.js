@@ -241,6 +241,17 @@ function generateUniquePdfFilename(baseName) {
   return candidate;
 }
 
+function decodeUploadHeader(value) {
+  if (value === undefined || value === null) return "";
+  const source = Array.isArray(value) ? value.join(",") : String(value);
+  if (!source) return "";
+  try {
+    return decodeURIComponent(source);
+  } catch {
+    return source;
+  }
+}
+
 async function writeFallbackThumbnail(targetPath) {
   await fs.promises.mkdir(path.dirname(targetPath), { recursive: true });
   await fs.promises.writeFile(targetPath, FALLBACK_THUMB_BUFFER);
@@ -1437,18 +1448,18 @@ app.get("/api/sheets", async (req, res) => {
 app.post("/api/upload", async (req, res) => {
   const limitMb = Math.round(MAX_UPLOAD_BYTES / 1024 / 1024);
   const contentType = ((req.headers["content-type"] || "").toString().toLowerCase());
-  const metaHeader = req.headers["x-upload-meta"];
+  const metaHeader = decodeUploadHeader(req.headers["x-upload-meta"]);
   let meta = {};
   if (metaHeader) {
     try {
-      meta = JSON.parse(metaHeader.toString());
+      meta = JSON.parse(metaHeader);
     } catch {
       return res.status(400).json({ error: "Ungültige Upload-Metadaten" });
     }
   }
   if (!meta || typeof meta !== "object") meta = {};
 
-  const headerName = typeof req.headers["x-upload-name"] === "string" ? req.headers["x-upload-name"].trim() : "";
+  const headerName = decodeUploadHeader(req.headers["x-upload-name"]).trim();
   const metaOriginal = typeof meta.originalName === "string" ? meta.originalName.trim() : "";
   const declaredName = headerName || metaOriginal;
 
