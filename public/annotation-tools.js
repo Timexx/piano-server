@@ -29,6 +29,7 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
     root: null,
     toggle: null,
     panel: null,
+    toolbar: null,
     toolButtons: [],
     colorButtons: [],
     sizeInput: null,
@@ -45,16 +46,30 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
   let statusResetTimer = null;
 
   function initControls() {
+    console.log('[Annotation] initControls called, already initialized?', controls.initialized);
     if (controls.initialized) return;
+    
     controls.root = document.getElementById("annotationControls");
+    console.log('[Annotation] controls.root:', controls.root);
     if (!controls.root) return;
 
     controls.toggle = document.getElementById("btnAnnotationToggle");
+    console.log('[Annotation] controls.toggle:', controls.toggle);
+    
     controls.panel = document.getElementById("annotationPanel");
+    console.log('[Annotation] controls.panel:', controls.panel);
+    
+    controls.toolbar = document.getElementById("annotationToolbar");
+    console.log('[Annotation] controls.toolbar:', controls.toolbar);
+    
     controls.sizeInput = document.getElementById("annotationSize");
     controls.sizeValue = document.getElementById("annotationSizeValue");
     controls.undoBtn = document.getElementById("btnAnnotationUndo");
     controls.clearBtn = document.getElementById("btnAnnotationClear");
+
+    if (controls.toolbar) {
+      controls.toolbar.setAttribute("aria-hidden", controls.toolbar.classList.contains("hidden") ? "true" : "false");
+    }
 
     const toolButtons = controls.panel ? Array.from(controls.panel.querySelectorAll(".annotation-tool-btn")) : [];
     controls.toolButtons = toolButtons;
@@ -84,9 +99,13 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
     });
 
     if (controls.toggle) {
+      console.log('[Annotation] Adding click listener to toggle button');
       controls.toggle.addEventListener("click", () => {
+        console.log('[Annotation] Toggle button clicked! Current active:', active);
         setActiveState(!active);
       });
+    } else {
+      console.warn('[Annotation] Toggle button not found!');
     }
 
     if (controls.sizeInput) {
@@ -800,8 +819,10 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
 
   function setActiveState(next, opts = {}) {
     const changed = opts.force ? true : next !== active;
+    console.log('[Annotation] setActiveState called - next:', next, 'current active:', active, 'changed:', changed, 'opts:', opts);
     if (!changed) return;
     active = next;
+    console.log('[Annotation] Active state changed to:', active);
     updateToggleUI();
     refreshOverlayActivation();
     if (!opts.silent) {
@@ -831,13 +852,27 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
 
   function updateToggleUI() {
     if (!controls.toggle) return;
+    
+    console.log('[Annotation] updateToggleUI - active:', active);
+    
     if (active) {
       controls.toggle.classList.add("annotation-toggle-active");
     } else {
       controls.toggle.classList.remove("annotation-toggle-active");
     }
     controls.toggle.setAttribute("aria-pressed", active ? "true" : "false");
-    if (controls.panel) controls.panel.classList.toggle("hidden", !active);
+    
+    // Toolbar visibility - SIMPLE: just toggle is-open class
+    if (controls.toolbar) {
+      console.log('[Annotation] Toolbar element:', controls.toolbar);
+      if (active) {
+        controls.toolbar.classList.add("is-open");
+        console.log('[Annotation] Added is-open class. Toolbar classes:', controls.toolbar.className);
+      } else {
+        controls.toolbar.classList.remove("is-open");
+      }
+      controls.toolbar.setAttribute("aria-hidden", active ? "false" : "true");
+    }
   }
 
   function updateToolButtons() {
