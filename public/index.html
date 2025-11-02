@@ -55,15 +55,36 @@
       /* Controls bar: keep clear of Home indicator */
       #controls { padding-bottom: var(--sab); }
       /* In fullscreen hide header and add top/bottom safe padding to viewer */
-      html.is-fs header { display: none !important; }
-      html.is-fs #viewer { padding-top: var(--sat); padding-bottom: calc(var(--sab) + 12px); }
+      html.is-fs header { 
+        display: none !important; 
+      }
+      
+      html.is-fs #viewerContent {
+        padding: var(--sat) 0 calc(var(--sab) + 80px) 0;
+      }
+      
+      html.is-fs #viewerPdfContainer {
+        border-radius: 0;
+        border: none;
+      }
+      
+      html.is-fs #controls {
+        background: transparent;
+      }
+      
+      html.is-fs .control-panel {
+        background: linear-gradient(135deg, 
+          color-mix(in srgb, var(--accent-color) 10%, rgba(12, 12, 18, 0.98)) 0%, 
+          color-mix(in srgb, var(--accent-color) 5%, rgba(8, 8, 12, 0.98)) 100%);
+        border: 1px solid color-mix(in srgb, var(--accent-color) 30%, rgba(255, 255, 255, 0.12));
+        box-shadow: 
+          0 24px 48px -12px rgba(0, 0, 0, 0.7),
+          0 0 32px -8px color-mix(in srgb, var(--accent-color) 25%, transparent);
+      }
+      
       body[data-accent-active="true"] header {
         border-color: var(--accent-muted) !important;
         background: color-mix(in srgb, var(--accent-color) 10%, rgba(12,12,15,0.85));
-      }
-      body[data-accent-active="true"] #controls {
-        border-color: var(--accent-muted) !important;
-        background: color-mix(in srgb, var(--accent-color) 12%, rgba(12,12,15,0.88));
       }
       .category-pill {
         transition: transform 0.2s ease, box-shadow 0.2s ease;
@@ -234,10 +255,387 @@
         .glass-panel { width: 92vw; }
       }
 
+      /* ===== VIEWER MODE STYLES ===== */
+      body.in-viewer {
+        background: linear-gradient(145deg, #050506 0%, #0a0a0b 100%);
+      }
+      
+      body.in-viewer header {
+        background: rgba(12, 12, 15, 0.75);
+        backdrop-filter: blur(24px);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      }
+      
+      #viewerShell {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        gap: 0;
+      }
+      
+      #viewerContent {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        padding: 0;
+        padding-bottom: 0;
+      }
+      
+      #viewerPdfContainer {
+        flex: 1;
+        min-height: 0;
+        position: relative;
+        border-radius: 0;
+        overflow: hidden;
+        background: transparent;
+        backdrop-filter: none;
+        border: none;
+        box-shadow: none;
+      }
+      
+      #viewer {
+        width: 100%;
+        height: 100%;
+        overflow-y: auto;
+        overflow-x: hidden;
+        scroll-behavior: smooth;
+      }
+      
+      /* PDF Page Styling */
+      #viewer canvas {
+        border-radius: 16px;
+        box-shadow: 
+          0 20px 40px -12px rgba(0, 0, 0, 0.5),
+          0 0 0 1px rgba(255, 255, 255, 0.05);
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+      }
+      
+      #viewer canvas:hover {
+        transform: translateY(-2px);
+        box-shadow: 
+          0 24px 48px -12px rgba(0, 0, 0, 0.6),
+          0 0 0 1px rgba(255, 255, 255, 0.08);
+      }
+      
+      [data-role="page-label"] {
+        font-size: 0.75rem;
+        color: #6b7280;
+        margin-bottom: 0.75rem;
+        font-weight: 500;
+        letter-spacing: 0.025em;
+      }
+      
+      [data-role="skeleton"] {
+        border-radius: 16px;
+        background: linear-gradient(
+          90deg,
+          rgba(255, 255, 255, 0.02) 0%,
+          rgba(255, 255, 255, 0.05) 50%,
+          rgba(255, 255, 255, 0.02) 100%
+        );
+        background-size: 200% 100%;
+        animation: shimmer 2s ease-in-out infinite;
+        border: 1px solid rgba(255, 255, 255, 0.05);
+      }
+      
+      @keyframes shimmer {
+        0% { background-position: -200% 0; }
+        100% { background-position: 200% 0; }
+      }
+      
+      /* Loading State */
+      .viewer-loading {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        min-height: 400px;
+        gap: 1.5rem;
+        padding: 3rem;
+      }
+      
+      .viewer-loading-spinner {
+        width: 48px;
+        height: 48px;
+        border: 3px solid rgba(99, 102, 241, 0.2);
+        border-top-color: var(--accent-color);
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+      }
+      
+      @keyframes spin {
+        to { transform: rotate(360deg); }
+      }
+      
+      .viewer-loading-text {
+        font-size: 0.875rem;
+        color: #9ca3af;
+        font-weight: 500;
+      }
+      
+      /* Smooth transitions */
+      #viewerPdfContainer,
+      .control-panel,
+      .btn {
+        transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+      }
+      
+      /* Focus states for accessibility */
+      .btn:focus-visible {
+        outline: 2px solid var(--accent-color);
+        outline-offset: 2px;
+      }
+      
+      .input-group input:focus {
+        outline: none;
+      }
+      
+      /* Viewer Controls - Glassmorphism Style */
+      #controls {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        z-index: 50;
+        padding: 0;
+        background: transparent;
+        border: none;
+      }
+      
+      #controlsInner {
+        margin: 0 auto;
+        max-width: 1400px;
+        padding: 1rem 1rem calc(1rem + var(--sab));
+      }
+      
+      .control-panel {
+        backdrop-filter: blur(32px);
+        background: linear-gradient(135deg, 
+          color-mix(in srgb, var(--accent-color) 8%, rgba(17, 17, 24, 0.92)) 0%, 
+          color-mix(in srgb, var(--accent-color) 4%, rgba(12, 12, 18, 0.95)) 100%);
+        border: 1px solid color-mix(in srgb, var(--accent-color) 25%, rgba(255, 255, 255, 0.1));
+        border-radius: 24px;
+        padding: 1rem 1.5rem;
+        box-shadow: 
+          0 24px 48px -12px rgba(0, 0, 0, 0.6),
+          0 0 0 1px color-mix(in srgb, var(--accent-color) 15%, rgba(255, 255, 255, 0.03)) inset,
+          0 0 24px -8px color-mix(in srgb, var(--accent-color) 20%, transparent);
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.75rem;
+      }
+      
+      .control-group {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+      
+      .control-divider {
+        width: 1px;
+        height: 28px;
+        background: linear-gradient(to bottom, 
+          rgba(255, 255, 255, 0) 0%,
+          rgba(255, 255, 255, 0.1) 50%,
+          rgba(255, 255, 255, 0) 100%);
+      }
+      
+      /* Button Styles - Consistent Design */
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
+        padding: 0.625rem 1.25rem;
+        border-radius: 12px;
+        font-size: 0.875rem;
+        font-weight: 500;
+        transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        cursor: pointer;
+        border: none;
+        outline: none;
+        white-space: nowrap;
+        position: relative;
+        overflow: hidden;
+      }
+      
+      .btn::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background: radial-gradient(circle at center, rgba(255, 255, 255, 0.1) 0%, transparent 70%);
+        opacity: 0;
+        transition: opacity 0.2s;
+      }
+      
+      .btn:hover::before {
+        opacity: 1;
+      }
+      
+      .btn-secondary {
+        background: rgba(255, 255, 255, 0.06);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        color: #e5e7eb;
+      }
+      
+      .btn-secondary:hover {
+        background: rgba(255, 255, 255, 0.1);
+        border-color: rgba(255, 255, 255, 0.15);
+        transform: translateY(-1px);
+        box-shadow: 0 8px 16px -4px rgba(0, 0, 0, 0.3);
+      }
+      
+      .btn-secondary:active {
+        transform: translateY(0);
+      }
+      
+      .btn-primary {
+        background: linear-gradient(135deg, 
+          var(--accent-color) 0%, 
+          color-mix(in srgb, var(--accent-color) 80%, #000) 100%);
+        border: 1px solid color-mix(in srgb, var(--accent-color) 100%, rgba(255, 255, 255, 0.3));
+        color: white;
+        box-shadow: 0 4px 12px -2px color-mix(in srgb, var(--accent-color) 50%, transparent);
+        opacity: 0;
+        transition: opacity 0.3s ease, transform 0.2s ease, box-shadow 0.2s ease;
+      }
+      
+      .btn-primary.is-ready {
+        opacity: 1;
+      }
+      
+      .btn-primary:hover {
+        background: linear-gradient(135deg, 
+          color-mix(in srgb, var(--accent-color) 90%, #fff) 0%, 
+          var(--accent-color) 100%);
+        transform: translateY(-1px);
+        box-shadow: 0 8px 20px -4px color-mix(in srgb, var(--accent-color) 60%, transparent);
+      }
+      
+      .btn-primary:active {
+        transform: translateY(0);
+      }
+      
+      .btn-icon {
+        padding: 0.625rem;
+        min-width: 2.5rem;
+      }
+      
+      .btn-icon svg {
+        width: 1.25rem;
+        height: 1.25rem;
+      }
+      
+      /* Input Styles */
+      .input-group {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.5rem 0.75rem;
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 12px;
+        transition: all 0.2s;
+      }
+      
+      .input-group:focus-within {
+        background: rgba(255, 255, 255, 0.06);
+        border-color: var(--accent-color);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-color) 15%, transparent);
+      }
+      
+      .input-group label {
+        font-size: 0.75rem;
+        color: #9ca3af;
+        white-space: nowrap;
+        user-select: none;
+      }
+      
+      .input-group input {
+        background: transparent;
+        border: none;
+        color: #e5e7eb;
+        font-size: 0.875rem;
+        font-weight: 500;
+        outline: none;
+        width: 3.5rem;
+        text-align: center;
+      }
+      
+      .input-group input::-webkit-inner-spin-button,
+      .input-group input::-webkit-outer-spin-button {
+        opacity: 0.5;
+      }
+      
+      /* Status Display */
+      .status-display {
+        margin-left: auto;
+        font-size: 0.8rem;
+        color: #9ca3af;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.5rem 0.75rem;
+        background: rgba(255, 255, 255, 0.03);
+        border-radius: 12px;
+      }
+      
+      .status-display::before {
+        content: '';
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: #10b981;
+        box-shadow: 0 0 8px rgba(16, 185, 129, 0.6);
+        animation: pulse 2s ease-in-out infinite;
+      }
+      
+      @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.5; }
+      }
+
       /* Mobile tweaks */
       @media (max-width: 640px) {
-        /* Controls bar wraps nicely on phones */
-        #controls #status { flex-basis: 100%; text-align: right; margin-left: 0; }
+        #viewerContent {
+          padding: 0;
+        }
+        
+        #viewerPdfContainer {
+          border-radius: 0;
+        }
+        
+        #controlsInner {
+          padding: 0.75rem 0.75rem calc(0.75rem + var(--sab));
+        }
+        
+        .control-panel {
+          padding: 0.875rem 1rem;
+          border-radius: 20px;
+        }
+        
+        .btn {
+          padding: 0.5rem 1rem;
+          font-size: 0.8125rem;
+        }
+        
+        .btn-icon {
+          padding: 0.5rem;
+          min-width: 2.25rem;
+        }
+        
+        .status-display {
+          flex-basis: 100%;
+          justify-content: center;
+          margin-left: 0;
+          margin-top: 0.5rem;
+        }
+        
+        .control-divider {
+          display: none;
+        }
       }
 
       /* Ultra-small phones (e.g., 320–380px) */
@@ -248,6 +646,18 @@
         #headerUploadBtn { padding: 0.4rem; }
         #headerUploadBtn span { display: none; }
         #headerUploadBtn svg { width: 18px; height: 18px; }
+        
+        .btn span:not(.sr-only) {
+          display: none;
+        }
+        
+        .btn-icon span {
+          display: none;
+        }
+        
+        .input-group label {
+          font-size: 0.7rem;
+        }
       }
 
       /* Sort dropdown: ensure it fits on narrow screens */
@@ -310,24 +720,56 @@
     <!-- Main app mount point -->
     <main id="app" class="mx-auto max-w-7xl px-4 py-6"></main>
 
-    <!-- Viewer Controls (single Play/Pause with integrated Screen-On) -->
-    <div id="controls" class="fixed bottom-0 inset-x-0 z-40 hidden bg-neutral-900/85 backdrop-blur border-t border-neutral-800">
-      <div class="mx-auto max-w-7xl px-4 py-3 flex flex-wrap items-center gap-3">
-        <button id="btnBack" class="px-3 py-2 rounded-lg bg-neutral-800 hover:bg-neutral-700 border border-neutral-700">← Library</button>
-        <button id="btnFullscreen" class="px-3 py-2 rounded-lg bg-neutral-800 hover:bg-neutral-700 border border-neutral-700">⤢ Fullscreen</button>
+    <!-- Viewer Controls - Modern Glassmorphism Design -->
+    <div id="controls" class="hidden">
+      <div id="controlsInner">
+        <div class="control-panel">
+          <!-- Back & Navigation -->
+          <div class="control-group">
+            <button id="btnBack" class="btn btn-secondary btn-icon" title="Zurück zur Bibliothek" aria-label="Zurück zur Bibliothek">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M19 12H5M12 19l-7-7 7-7"/>
+              </svg>
+              <span class="hidden sm:inline">Library</span>
+            </button>
+          </div>
 
-        <div class="flex items-center gap-2 ml-2">
-          <label for="secsPerPage" class="text-sm text-neutral-300">Sek./Seite</label>
-          <input id="secsPerPage" type="number" min="5" max="600" step="1"
-                 class="w-20 sm:w-24 px-2 py-1 rounded bg-neutral-800 border border-neutral-700" />
+          <div class="control-divider"></div>
+
+          <!-- Playback Controls -->
+          <div class="control-group">
+            <button id="btnPlayPause" class="btn btn-primary" aria-label="Auto-Scroll starten/pausieren">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="18" height="18">
+                <path d="M8 5v14l11-7z"/>
+              </svg>
+              <span>Start</span>
+            </button>
+          </div>
+
+          <!-- Speed Control -->
+          <div class="control-group">
+            <div class="input-group">
+              <label for="secsPerPage">Sek./Seite</label>
+              <input id="secsPerPage" type="number" min="5" max="600" step="1" value="45" />
+            </div>
+          </div>
+
+          <div class="control-divider"></div>
+
+          <!-- View Controls -->
+          <div class="control-group">
+            <button id="btnFullscreen" class="btn btn-secondary btn-icon" title="Vollbild" aria-label="Vollbild">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+              </svg>
+            </button>
+          </div>
+
+          <!-- Status -->
+          <div class="status-display" id="status">
+            <span>Bereit</span>
+          </div>
         </div>
-
-        <!-- ONE Play/Pause button -->
-        <button id="btnPlayPause" class="px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white">
-          ▶︎ Start
-        </button>
-
-        <span id="status" class="ml-auto text-sm text-neutral-400"></span>
       </div>
     </div>
 
@@ -898,6 +1340,16 @@
           root.style.setProperty("--accent-muted", "rgba(99, 102, 241, 0.35)");
           document.body.removeAttribute("data-accent-active");
         }
+      }
+      
+      function applyPlayButtonColor() {
+        const playBtn = document.querySelector('#btnPlayPause');
+        if (!playBtn) return;
+        
+        // Erst Farbe setzen, dann sichtbar machen
+        requestAnimationFrame(() => {
+          playBtn.classList.add('is-ready');
+        });
       }
 
       const DEFAULT_UPLOAD_LIMIT_MB = 200;
@@ -3005,9 +3457,17 @@
         }, 1000);
 
         controlsEl.classList.remove("hidden");
-        headerActionsEl.innerHTML = `<a href="/" class="px-3 py-2 rounded-lg bg-neutral-800 hover:bg-neutral-700 border border-neutral-700">← Library</a>`;
+        
+        headerActionsEl.innerHTML = `
+          <button class="btn btn-secondary" onclick="location.href='/'">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16">
+              <path d="M19 12H5M12 19l-7-7 7-7"/>
+            </svg>
+            <span class="hidden sm:inline">Bibliothek</span>
+          </button>
+        `;
         // Intercept header back to cleanly exit fullscreen first
-        const headerBack = headerActionsEl.querySelector('a[href="/"]');
+        const headerBack = headerActionsEl.querySelector('button');
         if (headerBack) headerBack.addEventListener('click', (ev) => {
           ev.preventDefault();
           const leave = () => { location.href = "/"; };
@@ -3020,10 +3480,18 @@
         });
 
         appEl.innerHTML = `
-          <section>
-            <h1 class="sr-only">Viewer ${fileName}</h1>
-            <div id="viewer" class="vh no-scrollbar overflow-y-auto rounded-xl border border-neutral-800 bg-neutral-900"></div>
-          </section>
+          <div id="viewerShell">
+            <div id="viewerContent">
+              <div id="viewerPdfContainer">
+                <div id="viewer" class="no-scrollbar">
+                  <div class="viewer-loading">
+                    <div class="viewer-loading-spinner"></div>
+                    <div class="viewer-loading-text">PDF wird geladen...</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
         `;
 
         const container = document.querySelector('#viewer');
@@ -3069,7 +3537,13 @@
         const prefs = await getFilePrefsFromBackend(fileName);
         state.viewer.secsPerPage = prefs?.secsPerPage || 45;
         state.viewer.categories = Array.isArray(prefs?.categories) ? prefs.categories : [];
+        
+        // 1. Setze Farbe basierend auf Kategorie oder Fallback
         applyAccentTheme(state.viewer.categories[0]?.id || state.library.categoryFilter);
+        
+        // 2. Prüfe Farbe und mache Play Button sichtbar
+        applyPlayButtonColor();
+        
         const secsInput = document.querySelector('#secsPerPage');
         secsInput.value = state.viewer.secsPerPage;
         secsInput.addEventListener("change", async (e) => {
@@ -3162,33 +3636,69 @@
         const has = playlist.mode && playlist.items.length > 0 && document.body.classList.contains('in-viewer');
         let prev = document.querySelector('#btnPrevTrack');
         let next = document.querySelector('#btnNextTrack');
+        
         if (!has) {
           if (prev) prev.remove();
           if (next) next.remove();
           return;
         }
-        const anchor = document.querySelector('#btnFullscreen');
+        
+        // Find the control group to insert into
+        const controlGroup = document.querySelector('#controls .control-group:first-child');
+        if (!controlGroup) return;
+        
         if (!prev) {
           prev = document.createElement('button');
           prev.id = 'btnPrevTrack';
           prev.type = 'button';
-          prev.className = 'px-3 py-2 rounded-lg bg-neutral-800 hover:bg-neutral-700 border border-neutral-700';
-          prev.textContent = '◀︎ Titel';
+          prev.className = 'btn btn-secondary btn-icon';
+          prev.title = 'Vorheriger Titel';
+          prev.setAttribute('aria-label', 'Vorheriger Titel');
+          prev.innerHTML = `
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="18" height="18">
+              <path d="M6 6h2v12H6V6zm3.5 6l8.5 6V6l-8.5 6z"/>
+            </svg>
+          `;
           prev.addEventListener('click', () => navigatePlaylist(-1));
-          anchor?.after(prev);
+          controlGroup.appendChild(prev);
         }
+        
         if (!next) {
           next = document.createElement('button');
           next.id = 'btnNextTrack';
           next.type = 'button';
-          next.className = 'px-3 py-2 rounded-lg bg-neutral-800 hover:bg-neutral-700 border border-neutral-700';
-          next.textContent = 'Titel ▶︎';
+          next.className = 'btn btn-secondary btn-icon';
+          next.title = 'Nächster Titel';
+          next.setAttribute('aria-label', 'Nächster Titel');
+          next.innerHTML = `
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="18" height="18">
+              <path d="M16 18h2V6h-2v12zM6 18l8.5-6L6 6v12z"/>
+            </svg>
+          `;
           next.addEventListener('click', () => navigatePlaylist(1));
-          if (prev?.nextSibling) prev.after(next); else anchor?.after(next);
+          controlGroup.appendChild(next);
         }
+        
         const idx = getEffectivePlaylistIndex();
         prev.disabled = !(idx > 0);
         next.disabled = !(idx >= 0 && idx < playlist.items.length - 1);
+        
+        // Update visual state for disabled buttons
+        if (prev.disabled) {
+          prev.style.opacity = '0.4';
+          prev.style.cursor = 'not-allowed';
+        } else {
+          prev.style.opacity = '1';
+          prev.style.cursor = 'pointer';
+        }
+        
+        if (next.disabled) {
+          next.style.opacity = '0.4';
+          next.style.cursor = 'not-allowed';
+        } else {
+          next.style.opacity = '1';
+          next.style.cursor = 'pointer';
+        }
       }
       async function navigatePlaylist(delta) {
         const idx = getEffectivePlaylistIndex();
@@ -3699,21 +4209,51 @@
       function refreshPlayPauseUI() {
         const btn = document.querySelector('#btnPlayPause');
         if (!btn) return;
-        if (state.viewer.autoScroll.running) {
-          btn.textContent = "❚❚ Pause";
-        } else if (state.viewer.autoScroll.pending) {
-          btn.textContent = "⏳ Warte…";
+        
+        const isRunning = state.viewer.autoScroll.running;
+        const isPending = state.viewer.autoScroll.pending;
+        
+        if (isPending) {
+          btn.innerHTML = `
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="18" height="18" class="animate-spin">
+              <path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83"/>
+            </svg>
+            <span>Warte…</span>
+          `;
+          btn.disabled = true;
+        } else if (isRunning) {
+          btn.innerHTML = `
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="18" height="18">
+              <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/>
+            </svg>
+            <span>Pause</span>
+          `;
+          btn.disabled = false;
+          btn.setAttribute('aria-label', 'Auto-Scroll pausieren');
         } else {
-          btn.textContent = "▶︎ Start";
+          btn.innerHTML = `
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="18" height="18">
+              <path d="M8 5v14l11-7z"/>
+            </svg>
+            <span>Start</span>
+          `;
+          btn.disabled = false;
+          btn.setAttribute('aria-label', 'Auto-Scroll starten');
         }
       }
+      
       function updateStatus(extra) {
-        const s = document.querySelector('#status');
+        const s = document.querySelector('#status span');
         const p = state.viewer;
         if (!s) return;
         
-        const baseText = `${p.numPages || 0} Seiten • ${p.secsPerPage}s/Seite`;
-        s.textContent = extra ? `${baseText} • ${extra}` : baseText;
+        if (extra) {
+          s.textContent = extra;
+        } else if (p.numPages > 0) {
+          s.textContent = `${p.numPages} ${p.numPages === 1 ? 'Seite' : 'Seiten'} • ${p.secsPerPage}s/Seite`;
+        } else {
+          s.textContent = 'Bereit';
+        }
       }
       
       // ===== Fullscreen & Wake Lock =====
