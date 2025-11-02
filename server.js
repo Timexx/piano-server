@@ -330,8 +330,8 @@ const MEMORY_SETTINGS = {
   maxVendorRetries: 3,       // Limit vendor download retries
   maxStatConcurrency: 32,    // Reduced from 64 for stability
   enableGzipCompression: true,
-  thumbnailSize: 200,        // Thumbnail width in pixels
-  thumbnailQuality: 80,      // JPEG quality for thumbnails
+  thumbnailSize: 600,        // Thumbnail width in pixels
+  thumbnailQuality: 100,      // JPEG quality for thumbnails
   maxThumbnailAge: 7 * 24 * 60 * 60 * 1000 // 7 days thumbnail cache
 };
 

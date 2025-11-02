@@ -472,6 +472,21 @@
     return Math.max(0, Math.min(100, Math.round(num * 1000) / 1000));
   }
 
+  function isPrimaryPointer(event) {
+    if (!event) return false;
+    const { pointerType } = event;
+    if (pointerType === "mouse") {
+      return event.button === 0;
+    }
+    if (pointerType === "touch" || pointerType === "pen") {
+      return event.isPrimary !== false;
+    }
+    if (typeof event.button === "number") {
+      return event.button === 0;
+    }
+    return true;
+  }
+
   function isPoint(point) {
     return Boolean(point && Number.isFinite(point.pageNumber) && Number.isFinite(point.x) && Number.isFinite(point.y));
   }
@@ -552,18 +567,21 @@
   }
 
   function handlePanelPointerDown(event) {
-    if (!uiState.panel || event.button !== 0) return;
+    if (!uiState.panel || !isPrimaryPointer(event)) return;
     event.preventDefault();
     const rect = uiState.panel.getBoundingClientRect();
+    const pointerId = typeof event.pointerId === "number" ? event.pointerId : null;
     uiState.panelDrag = {
-      pointerId: event.pointerId,
+      pointerId,
       offsetX: event.clientX - rect.left,
       offsetY: event.clientY - rect.top,
       latestLeft: rect.left,
       latestTop: rect.top
     };
     uiState.panel.classList.add("is-dragging");
-    uiState.panel.setPointerCapture?.(event.pointerId);
+    if (pointerId !== null) {
+      uiState.panel.setPointerCapture?.(pointerId);
+    }
     window.addEventListener("pointermove", handlePanelPointerMove);
     window.addEventListener("pointerup", handlePanelPointerUp);
     window.addEventListener("pointercancel", handlePanelPointerUp);
@@ -571,7 +589,7 @@
 
   function handlePanelPointerMove(event) {
     const drag = uiState.panelDrag;
-    if (!drag || event.pointerId !== drag.pointerId || !uiState.panel) return;
+    if (!drag || drag.pointerId !== null && event.pointerId !== drag.pointerId || !uiState.panel) return;
     const proposedLeft = event.clientX - drag.offsetX;
     const proposedTop = event.clientY - drag.offsetY;
     const { left, top } = clampPanelPosition(proposedLeft, proposedTop);
@@ -582,12 +600,14 @@
 
   function handlePanelPointerUp(event) {
     const drag = uiState.panelDrag;
-    if (!drag || event.pointerId !== drag.pointerId || !uiState.panel) return;
+    if (!drag || drag.pointerId !== null && event.pointerId !== drag.pointerId || !uiState.panel) return;
     window.removeEventListener("pointermove", handlePanelPointerMove);
     window.removeEventListener("pointerup", handlePanelPointerUp);
-  window.removeEventListener("pointercancel", handlePanelPointerUp);
+    window.removeEventListener("pointercancel", handlePanelPointerUp);
     uiState.panel.classList.remove("is-dragging");
-    uiState.panel.releasePointerCapture?.(event.pointerId);
+    if (drag.pointerId !== null) {
+      uiState.panel.releasePointerCapture?.(drag.pointerId);
+    }
     if (uiState.panel.dataset.positionMode !== "custom") {
       applyPanelPosition(drag.latestLeft, drag.latestTop);
     }
@@ -918,6 +938,7 @@
     if (state.viewer?.editMode) {
       overlay.style.cursor = "grab";
       overlay.addEventListener("pointerdown", (event) => handleMarkerDragStart(event, pair, role, point));
+      overlay.addEventListener("touchstart", (event) => handleMarkerTouchStart(event, pair, role, point), { passive: false });
     }
     
     pageEl.appendChild(overlay);
@@ -948,22 +969,11 @@
     }
   }
 
-  function handleMarkerDragStart(event, pair, role, point) {
-    if (!state.viewer?.editMode) return;
-    if (event.button !== 0) return;
-    
-    // Verhindere Click-Event während Drag
-    event.preventDefault();
-    event.stopPropagation();
-    
-    const overlay = event.currentTarget;
-    const canvas = overlay.closest("[data-page]")?.querySelector("canvas");
-    if (!canvas) return;
-    
+  function startMarkerDragSession({ pointerId, pointerType, pair, role, point, overlay, canvas, usesTouchEvents }) {
     const rect = canvas.getBoundingClientRect();
-    
     uiState.markerDrag = {
-      pointerId: event.pointerId,
+      pointerId,
+      pointerType,
       pair,
       role,
       point,
@@ -972,80 +982,163 @@
       canvasRect: rect,
       initialX: point.x,
       initialY: point.y,
-      startTime: Date.now()
+      currentX: point.x,
+      currentY: point.y,
+      startTime: Date.now(),
+      usesTouchEvents
     };
-    
     overlay.style.cursor = "grabbing";
     overlay.classList.add("is-dragging");
-    overlay.setPointerCapture?.(event.pointerId);
-    
-    window.addEventListener("pointermove", handleMarkerDragMove);
-    window.addEventListener("pointerup", handleMarkerDragEnd);
-    window.addEventListener("pointercancel", handleMarkerDragEnd);
-    
     setPanelHint(`Verschiebe ${ROLE_NAMES[role]} für "${pair.label}"...`, "info");
   }
 
-  function handleMarkerDragMove(event) {
+  function updateMarkerDragPosition(clientX, clientY) {
     const drag = uiState.markerDrag;
-    if (!drag || event.pointerId !== drag.pointerId) return;
-    
-    event.preventDefault();
-    event.stopPropagation();
-    
-    const rect = drag.canvasRect;
-    const x = clampPercent(((event.clientX - rect.left) / rect.width) * 100);
-    const y = clampPercent(((event.clientY - rect.top) / rect.height) * 100);
-    
-    // Live-Update der Overlay-Position
+    if (!drag) return;
+    const rect = drag.canvas.getBoundingClientRect();
+    drag.canvasRect = rect;
+    const x = clampPercent(((clientX - rect.left) / rect.width) * 100);
+    const y = clampPercent(((clientY - rect.top) / rect.height) * 100);
     drag.overlay.style.left = `${x}%`;
     drag.overlay.style.top = `${y}%`;
-    
-    // Temporär im Objekt speichern
     drag.currentX = x;
     drag.currentY = y;
   }
 
-  async function handleMarkerDragEnd(event) {
+  async function finalizeMarkerDrag() {
     const drag = uiState.markerDrag;
-    if (!drag || event.pointerId !== drag.pointerId) return;
-    
+    if (!drag) return;
+    const duration = Date.now() - drag.startTime;
+    const deltaX = Math.abs(drag.currentX - drag.initialX);
+    const deltaY = Math.abs(drag.currentY - drag.initialY);
+    const hasChanged = deltaX > 0.5 || deltaY > 0.5;
+    const isTouchLike = drag.pointerType === "touch" || drag.pointerType === "pen";
+    const tapThreshold = isTouchLike ? 350 : 200;
+
+    if (hasChanged && duration > 100) {
+      drag.point.x = clampPercent(drag.currentX);
+      drag.point.y = clampPercent(drag.currentY);
+      setPanelHint(`${ROLE_NAMES[drag.role]} wird gespeichert...`, "info");
+      renderPanel();
+      await saveJumpMarkers(`${drag.pair.label}: ${ROLE_NAMES[drag.role]} verschoben.`);
+    } else if (duration < tapThreshold) {
+      handleOverlayClick(drag.pair, drag.role);
+    }
+
+    uiState.markerDrag = null;
+  }
+
+  function handleMarkerDragStart(event, pair, role, point) {
+    if (!state.viewer?.editMode || !isPrimaryPointer(event) || uiState.markerDrag) return;
     event.preventDefault();
     event.stopPropagation();
-    
+
+    const overlay = event.currentTarget;
+    const canvas = overlay.closest("[data-page]")?.querySelector("canvas");
+    if (!canvas) return;
+
+    startMarkerDragSession({
+      pointerId: event.pointerId,
+      pointerType: event.pointerType || "mouse",
+      pair,
+      role,
+      point,
+      overlay,
+      canvas,
+      usesTouchEvents: false
+    });
+
+    if (typeof event.pointerId === "number") {
+      overlay.setPointerCapture?.(event.pointerId);
+    }
+
+    window.addEventListener("pointermove", handleMarkerDragMove, { passive: false });
+    window.addEventListener("pointerup", handleMarkerDragEnd);
+    window.addEventListener("pointercancel", handleMarkerDragEnd);
+  }
+
+  function handleMarkerDragMove(event) {
+    const drag = uiState.markerDrag;
+    if (!drag || drag.usesTouchEvents || event.pointerId !== drag.pointerId) return;
+    event.preventDefault();
+    event.stopPropagation();
+    updateMarkerDragPosition(event.clientX, event.clientY);
+  }
+
+  async function handleMarkerDragEnd(event) {
+    const drag = uiState.markerDrag;
+    if (!drag || drag.usesTouchEvents || event.pointerId !== drag.pointerId) return;
+    event.preventDefault();
+    event.stopPropagation();
+
     window.removeEventListener("pointermove", handleMarkerDragMove);
     window.removeEventListener("pointerup", handleMarkerDragEnd);
     window.removeEventListener("pointercancel", handleMarkerDragEnd);
-    
+
     drag.overlay.style.cursor = "grab";
     drag.overlay.classList.remove("is-dragging");
-    drag.overlay.releasePointerCapture?.(event.pointerId);
-    
-    const dragDuration = Date.now() - drag.startTime;
-    const hasChanged = drag.currentX !== undefined && 
-                      (Math.abs(drag.currentX - drag.initialX) > 0.5 || 
-                       Math.abs(drag.currentY - drag.initialY) > 0.5);
-    
-    if (hasChanged && dragDuration > 100) {
-      // Position wirklich geändert → speichern
-      drag.point.x = drag.currentX;
-      drag.point.y = drag.currentY;
-      
-      setPanelHint(`${ROLE_NAMES[drag.role]} wird gespeichert...`, "info");
-      
-      // Panel aktualisieren
-      renderPanel();
-      
-      // Auf Server speichern
-      await saveJumpMarkers(`${drag.pair.label}: ${ROLE_NAMES[drag.role]} verschoben.`);
-    } else {
-      // Kein echtes Drag → als Click behandeln
-      if (dragDuration < 200) {
-        handleOverlayClick(drag.pair, drag.role);
-      }
+    if (typeof event.pointerId === "number") {
+      drag.overlay.releasePointerCapture?.(event.pointerId);
     }
-    
-    uiState.markerDrag = null;
+
+    await finalizeMarkerDrag();
+  }
+
+  function handleMarkerTouchStart(event, pair, role, point) {
+    if (!state.viewer?.editMode || uiState.markerDrag) return;
+    const touch = event.changedTouches && event.changedTouches[0];
+    if (!touch) return;
+    event.preventDefault();
+    event.stopPropagation();
+
+    const overlay = event.currentTarget;
+    const canvas = overlay.closest("[data-page]")?.querySelector("canvas");
+    if (!canvas) return;
+
+    startMarkerDragSession({
+      pointerId: touch.identifier,
+      pointerType: "touch",
+      pair,
+      role,
+      point,
+      overlay,
+      canvas,
+      usesTouchEvents: true
+    });
+
+    window.addEventListener("touchmove", handleMarkerTouchMove, { passive: false });
+    window.addEventListener("touchend", handleMarkerTouchEnd);
+    window.addEventListener("touchcancel", handleMarkerTouchEnd);
+  }
+
+  function handleMarkerTouchMove(event) {
+    const drag = uiState.markerDrag;
+    if (!drag || !drag.usesTouchEvents) return;
+    const touches = event.changedTouches ? Array.from(event.changedTouches) : [];
+    const match = touches.find((touch) => touch.identifier === drag.pointerId);
+    if (!match) return;
+    event.preventDefault();
+    event.stopPropagation();
+    updateMarkerDragPosition(match.clientX, match.clientY);
+  }
+
+  async function handleMarkerTouchEnd(event) {
+    const drag = uiState.markerDrag;
+    if (!drag || !drag.usesTouchEvents) return;
+    const touches = event.changedTouches ? Array.from(event.changedTouches) : [];
+    const match = touches.find((touch) => touch.identifier === drag.pointerId);
+    if (!match) return;
+    event.preventDefault();
+    event.stopPropagation();
+
+    window.removeEventListener("touchmove", handleMarkerTouchMove);
+    window.removeEventListener("touchend", handleMarkerTouchEnd);
+    window.removeEventListener("touchcancel", handleMarkerTouchEnd);
+
+    drag.overlay.style.cursor = "grab";
+    drag.overlay.classList.remove("is-dragging");
+
+    await finalizeMarkerDrag();
   }
 
   function highlightPair(pairId) {
