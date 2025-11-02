@@ -94,6 +94,112 @@ function sanitizeCategoryIcon(icon) {
   return trimmed.slice(0, 2);
 }
 
+function sanitizeJumpMarkers(input) {
+  if (!Array.isArray(input)) return [];
+
+  const clampPercent = (value, fallback) => {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return fallback;
+    const bounded = Math.max(0, Math.min(100, num));
+    return Math.round(bounded * 1000) / 1000;
+  };
+
+  const sanitizePoint = (point, role) => {
+    if (!point || typeof point !== "object") return null;
+    const page = Number(point.pageNumber);
+    if (!Number.isFinite(page) || page < 1) return null;
+    const defaults = role === "target" ? { x: 70, y: 25 } : { x: 30, y: 25 };
+    return {
+      pageNumber: Math.floor(page),
+      x: clampPercent(point.x, defaults.x),
+      y: clampPercent(point.y, defaults.y),
+    };
+  };
+
+  const directPairs = [];
+  const legacyByTag = new Map();
+
+  input.forEach((marker, idx) => {
+    if (!marker || typeof marker !== "object") return;
+
+    if (marker.source || marker.target) {
+      const rawSource = marker.source && typeof marker.source === "object" ? marker.source : null;
+      const rawTarget = marker.target && typeof marker.target === "object" ? marker.target : null;
+      const source = sanitizePoint(rawSource, "source");
+      const target = sanitizePoint(rawTarget, "target");
+      if (!source && !target) return;
+      const id = typeof marker.id === "string" ? marker.id.trim() : "";
+      const label = typeof marker.label === "string" ? marker.label.trim() : "";
+      directPairs.push({ id, label, source: source || null, target: target || null, order: idx });
+      return;
+    }
+
+    const type = String(marker.type || "").toLowerCase();
+    if (type !== "start" && type !== "end") return;
+    const tag = String(marker.tag || "").trim();
+    if (!tag) return;
+
+    const point = sanitizePoint(marker, type === "start" ? "source" : "target");
+    if (!point) return;
+
+    let entry = legacyByTag.get(tag);
+    if (!entry) {
+      entry = { tag, order: idx };
+    } else {
+      entry.order = Math.min(entry.order, idx);
+    }
+    if (type === "start") {
+      entry.start = point;
+    } else {
+      entry.end = point;
+    }
+    legacyByTag.set(tag, entry);
+  });
+
+  const pairs = [...directPairs];
+
+  legacyByTag.forEach((entry, tag) => {
+    const source = entry.start || null;
+    const target = entry.end || null;
+    if (!source && !target) return;
+    pairs.push({
+      id: `legacy-${tag}`,
+      label: "",
+      source,
+      target,
+      order: entry.order,
+    });
+  });
+
+  pairs.sort((a, b) => {
+    const ao = Number.isFinite(a.order) ? a.order : 0;
+    const bo = Number.isFinite(b.order) ? b.order : 0;
+    return ao - bo;
+  });
+
+  const usedIds = new Set();
+  const result = [];
+  pairs.forEach((pair, idx) => {
+    const baseId = pair.id && !usedIds.has(pair.id) ? pair.id : `jump-${idx + 1}`;
+    let id = baseId;
+    let counter = 2;
+    while (usedIds.has(id)) {
+      id = `${baseId}-${counter++}`;
+    }
+    usedIds.add(id);
+
+    const label = pair.label || `Sprung ${result.length + 1}`;
+    result.push({
+      id,
+      label,
+      source: pair.source || null,
+      target: pair.target || null,
+    });
+  });
+
+  return result;
+}
+
 function slugifyPdfBase(name, fallback = "sheet") {
   if (typeof name !== "string") return fallback;
   const normalized = name
@@ -209,7 +315,8 @@ function removeCategoryFromFiles(catId) {
     const filtered = cfg.categories.filter((id) => id !== catId);
     if (filtered.length !== cfg.categories.length) {
       cfg.categories = filtered;
-      if (!filtered.length && !cfg.secsPerPage) {
+      const hasMarkers = Array.isArray(cfg.jumpMarkers) && cfg.jumpMarkers.length > 0;
+      if (!filtered.length && !cfg.secsPerPage && !hasMarkers) {
         delete CONFIG.files[rel];
       }
       refreshIndexCategoriesForFile(rel);
@@ -524,6 +631,10 @@ function loadConfig() {
             entry.categories = value.categories
               .map((id) => (typeof id === "string" ? id.trim() : null))
               .filter((id) => id && validCatIds.has(id));
+          }
+          if (Array.isArray(value.jumpMarkers)) {
+            const markers = sanitizeJumpMarkers(value.jumpMarkers);
+            if (markers.length) entry.jumpMarkers = markers;
           }
           if (Object.keys(entry).length) {
             files[info.rel] = entry;
@@ -1527,11 +1638,12 @@ app.get("/api/prefs/file", async (req, res) => {
       return cat ? { ...cat } : null;
     })
     .filter(Boolean);
-  res.json({ name: info.rel, secsPerPage: entry.secsPerPage || null, categories, categoryIds });
+  const jumpMarkers = Array.isArray(entry.jumpMarkers) ? entry.jumpMarkers : [];
+  res.json({ name: info.rel, secsPerPage: entry.secsPerPage || null, categories, categoryIds, jumpMarkers });
 });
 
 app.post("/api/prefs/file", async (req, res) => {
-  const { name, secsPerPage, categories } = req.body || {};
+  const { name, secsPerPage, categories, jumpMarkers } = req.body || {};
   const info = resolvePdfName(name);
   if (!info) return res.status(400).json({ error: "Invalid file name" });
 
@@ -1550,6 +1662,16 @@ app.post("/api/prefs/file", async (req, res) => {
     const sanitized = sanitizeCategoryIds(Array.isArray(categories) ? categories : []);
     if (sanitized.length) current.categories = sanitized;
     else delete current.categories;
+  }
+
+  // Validate and store jump markers
+  if (jumpMarkers !== undefined) {
+    if (!Array.isArray(jumpMarkers)) {
+      return res.status(400).json({ error: "jumpMarkers must be an array" });
+    }
+    const validated = sanitizeJumpMarkers(jumpMarkers);
+    if (validated.length) current.jumpMarkers = validated;
+    else delete current.jumpMarkers;
   }
 
   // Save original for rollback
@@ -1584,7 +1706,15 @@ app.post("/api/prefs/file", async (req, res) => {
       return cat ? { ...cat } : null;
     })
     .filter(Boolean);
-  res.json({ ok: true, name: info.rel, secsPerPage: latestEntry.secsPerPage || null, categories: categoriesMeta, categoryIds });
+  const latestMarkers = Array.isArray(latestEntry.jumpMarkers) ? latestEntry.jumpMarkers : [];
+  res.json({ 
+    ok: true, 
+    name: info.rel, 
+    secsPerPage: latestEntry.secsPerPage || null, 
+    categories: categoriesMeta, 
+    categoryIds,
+    jumpMarkers: latestMarkers 
+  });
 });
 
 app.get("/api/categories", async (req, res) => {

@@ -11,7 +11,8 @@
     <!-- PDF.js & Fuse.js (local, served by server.js) -->
     <script src="/vendor/pdfjs/pdf.min.js" defer></script>
     <script src="/vendor/fuse.min.js" defer></script>
-    <script src="/vendor/nosleep.min.js" defer></script>
+  <script src="/vendor/nosleep.min.js" defer></script>
+  <script src="/jump-markers.js" defer></script>
 
     <style>
       :root {
@@ -763,6 +764,12 @@
                 <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
               </svg>
             </button>
+            <button id="btnEditMarkers" class="btn btn-secondary btn-icon" title="Sprungmarkierungen bearbeiten" aria-label="Sprungmarkierungen bearbeiten">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+              </svg>
+            </button>
           </div>
 
           <!-- Status -->
@@ -1082,7 +1089,9 @@
           wakeLock: null, noSleep: null, noSleepEnabled: false,
           wakeTimer: null,
           categories: [],
-          layoutObserver: null
+          layoutObserver: null,
+          jumpMarkers: [],
+          editMode: false
         },
         categories: [],
         ui: {
@@ -1104,6 +1113,8 @@
           checkInterval: 10000 // Check every 10s
         }
       };
+
+  window.state = state;
 
       let cleanupLibraryViewportSizing = null;
       function disposeLibraryViewportSizing() {
@@ -1212,7 +1223,8 @@
           return {
             secsPerPage: Number(j.secsPerPage) || null,
             categories: Array.isArray(j.categories) ? j.categories : [],
-            categoryIds: Array.isArray(j.categoryIds) ? j.categoryIds : []
+            categoryIds: Array.isArray(j.categoryIds) ? j.categoryIds : [],
+            jumpMarkers: Array.isArray(j.jumpMarkers) ? j.jumpMarkers : []
           };
         } catch { return null; }
       }
@@ -3537,6 +3549,8 @@
         const prefs = await getFilePrefsFromBackend(fileName);
         state.viewer.secsPerPage = prefs?.secsPerPage || 45;
         state.viewer.categories = Array.isArray(prefs?.categories) ? prefs.categories : [];
+        state.viewer.jumpMarkers = Array.isArray(prefs?.jumpMarkers) ? prefs.jumpMarkers : [];
+        state.viewer.editMode = false;
         
         // 1. Setze Farbe basierend auf Kategorie oder Fallback
         applyAccentTheme(state.viewer.categories[0]?.id || state.library.categoryFilter);
@@ -3574,6 +3588,12 @@
         await mountPdfVirtual(container, state.viewer.url);
         await new Promise((resolve) => requestAnimationFrame(resolve));
         computeSpeed();
+        
+        // Initialize jump markers after PDF is loaded
+        if (typeof window.JumpMarkers !== 'undefined') {
+          window.JumpMarkers.init();
+        }
+        
         if (state.viewer.autoScroll.running || state.viewer.autoScroll.needsRecalc) {
           state.viewer.autoScroll.lastTs = performance.now();
           state.viewer.autoScroll.needsRecalc = false;
@@ -4093,6 +4113,7 @@
         state.viewer.autoScroll.speedPxPerSec = totalSecs > 0 ? totalScrollable / totalSecs : 0;
       }
       async function startAutoScroll() {
+        // Fallback: Standard-Scroll ohne Markierungen
         const viewerEl = document.querySelector('#viewer');
         if (!viewerEl) return;
         if (state.viewer.autoScroll.running || state.viewer.autoScroll.pending) return;
