@@ -703,42 +703,60 @@
         background: linear-gradient(120deg, color-mix(in srgb, var(--accent-color) 16%, rgba(15, 18, 26, 0.9)) 0%, rgba(15, 18, 26, 0.85) 100%);
         border: 1px solid rgba(148, 163, 184, 0.12);
         border-radius: 18px;
-        padding: 0.75rem 0.9rem;
+        padding: 0.65rem 1rem;
         box-shadow: 
           0 18px 40px -18px rgba(0, 0, 0, 0.65),
           0 0 0 1px rgba(255, 255, 255, 0.02) inset;
         display: flex;
-        flex-wrap: wrap;
+        flex-wrap: nowrap;
         gap: 0.75rem;
-        align-items: stretch;
+        align-items: center;
         justify-content: space-between;
       }
       
-      .control-module {
-        background: rgba(255, 255, 255, 0.025);
-        border-radius: 14px;
-        border: 1px solid rgba(255, 255, 255, 0.04);
-        padding: 0.55rem 0.75rem;
+      .control-panel-left {
         display: flex;
-        flex-direction: column;
-        gap: 0.55rem;
-        min-height: 60px;
-        flex: 1 1 200px;
-        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+        align-items: center;
+        gap: 0.75rem;
+        flex-wrap: nowrap;
+      }
+      
+      .control-panel-center {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        flex: 1;
+        justify-content: center;
+        max-width: 600px;
+      }
+      
+      .control-panel-right {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        flex-wrap: nowrap;
+        margin-left: auto;
+      }
+      
+      .control-module {
+        display: flex;
+        flex-direction: row;
+        gap: 0.5rem;
+        align-items: center;
+        padding: 0;
+        background: transparent;
+        border: none;
+        box-shadow: none;
       }
 
       .control-module-title {
-        font-size: 0.68rem;
-        letter-spacing: 0.1em;
-        text-transform: uppercase;
-        color: rgba(203, 213, 225, 0.7);
-        font-weight: 600;
+        display: none;
       }
 
       .control-module-body {
         display: flex;
-        flex-wrap: wrap;
-        gap: 0.35rem;
+        flex-wrap: nowrap;
+        gap: 0.5rem;
         align-items: center;
       }
 
@@ -747,13 +765,13 @@
       }
       
       .control-module.status-module {
-        justify-content: space-between;
+        justify-content: flex-start;
       }
       
       .status-module .control-module-body {
-        padding: 0.15rem 0;
+        padding: 0;
         flex-wrap: nowrap;
-        justify-content: space-between;
+        justify-content: flex-start;
       }
 
       .control-group,
@@ -873,33 +891,33 @@
       }
 
       .zoom-body {
-        width: 100%;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
       }
 
       .zoom-row {
         display: flex;
         align-items: center;
-        gap: 0.4rem;
-        width: 100%;
-        background: rgba(255, 255, 255, 0.04);
-        border: 1px solid rgba(255, 255, 255, 0.07);
-        border-radius: 12px;
-        padding: 0.4rem 0.55rem;
+        gap: 0.5rem;
+        background: transparent;
+        border: none;
+        padding: 0;
       }
 
       .zoom-row .btn-icon {
-        background: transparent;
-        border: 1px solid rgba(255, 255, 255, 0.08);
+        background: rgba(255, 255, 255, 0.06);
+        border: 1px solid rgba(255, 255, 255, 0.1);
         border-radius: 8px;
         color: #e5e7eb;
       }
 
       .zoom-row .btn-icon:hover {
-        background: rgba(255, 255, 255, 0.08);
+        background: rgba(255, 255, 255, 0.1);
       }
 
       #zoomSlider {
-        flex: 1 1 140px;
+        flex: 0 0 120px;
         appearance: none;
         height: 4px;
         border-radius: 999px;
@@ -928,21 +946,22 @@
       }
 
       .zoom-readout {
-        min-width: 46px;
+        min-width: 44px;
         text-align: right;
         font-variant-numeric: tabular-nums;
         font-size: 0.82rem;
         color: #e2e8f0;
-        margin-left: 0.25rem;
+        font-weight: 500;
       }
       
       .control-divider {
         width: 1px;
-        height: 28px;
+        height: 32px;
         background: linear-gradient(to bottom, 
           rgba(255, 255, 255, 0) 0%,
-          rgba(255, 255, 255, 0.1) 50%,
+          rgba(255, 255, 255, 0.12) 50%,
           rgba(255, 255, 255, 0) 100%);
+        flex-shrink: 0;
       }
       
       /* Button Styles - Consistent Design */
@@ -1176,27 +1195,43 @@
         }
         
         #controlsInner {
-          padding: 0.65rem 0.75rem calc(0.65rem + var(--sab));
+          padding: 0.5rem 0.6rem calc(0.5rem + var(--sab));
         }
         
         .control-panel {
-          padding: 0.8rem 0.85rem;
-          border-radius: 18px;
-          flex-direction: column;
-          gap: 0.65rem;
+          padding: 0.5rem 0.75rem;
+          border-radius: 16px;
+          flex-wrap: wrap;
+          gap: 0.5rem;
+          justify-content: center;
+        }
+        
+        .control-panel-left,
+        .control-panel-center,
+        .control-panel-right {
+          flex-wrap: wrap;
+          justify-content: center;
+        }
+        
+        .control-panel-center {
+          max-width: 100%;
+        }
+        
+        .control-panel-right {
+          margin-left: 0;
         }
         
         .control-module {
-          padding: 0.7rem 0.8rem;
+          padding: 0;
         }
         
         #annotationToolbar {
-          margin-bottom: 0.75rem;
+          margin-bottom: 0.5rem;
         }
         
         .annotation-toolbar {
-          padding: 0.85rem 1rem;
-          gap: 0.75rem;
+          padding: 0.65rem 0.85rem;
+          gap: 0.6rem;
         }
         
         .annotation-toolbar-header {
@@ -1208,7 +1243,7 @@
         .annotation-panel {
           display: flex;
           flex-direction: column;
-          gap: 0.65rem;
+          gap: 0.5rem;
         }
 
         .annotation-tools-row,
@@ -1221,18 +1256,22 @@
         }
         
         .btn {
-          padding: 0.48rem 0.9rem;
+          padding: 0.42rem 0.8rem;
           font-size: 0.8rem;
         }
 
         .btn-icon {
-          padding: 0.45rem;
-          min-width: 2.1rem;
+          padding: 0.42rem;
+          min-width: 2rem;
         }
         
         .status-display {
           width: 100%;
           justify-content: center;
+        }
+        
+        .control-divider {
+          display: none;
         }
       }
 
@@ -1530,68 +1569,79 @@
           </div>
         </div>
         <div class="control-panel">
-          <section class="control-module">
-            <div class="control-module-body">
-              <button id="btnBack" class="btn btn-secondary btn-icon" title="Zurück zur Bibliothek" aria-label="Zurück zur Bibliothek">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M19 12H5M12 19l-7-7 7-7"/>
-                </svg>
-              </button>
-              <button id="btnFullscreen" class="btn btn-secondary btn-icon" title="Vollbild" aria-label="Vollbild">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
-                </svg>
-              </button>
-            </div>
-          </section>
-
-          <section class="control-module">
-            <div class="control-module-body">
-              <button id="btnPlayPause" class="btn btn-primary" aria-label="Auto-Scroll starten/pausieren">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="18" height="18">
-                  <path d="M8 5v14l11-7z"/>
-                </svg>
-              </button>
-              <div class="input-group">
-                <input id="secsPerPage" type="number" min="5" max="600" step="1" value="45" />
-              </div>
-            </div>
-          </section>
-
-          <section class="control-module zoom-module">
-            <div class="control-module-body zoom-body">
-              <label for="zoomSlider" class="sr-only">Zoomfaktor</label>
-              <div class="zoom-row">
-                <button id="btnZoomOut" class="btn btn-icon" type="button" title="Zoom verkleinern" aria-label="Zoom verkleinern">
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12" /></svg>
+          <div class="control-panel-left">
+            <section class="control-module">
+              <div class="control-module-body">
+                <button id="btnBack" class="btn btn-secondary btn-icon" title="Zurück zur Bibliothek" aria-label="Zurück zur Bibliothek">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M19 12H5M12 19l-7-7 7-7"/>
+                  </svg>
                 </button>
-                <input id="zoomSlider" type="range" min="60" max="200" step="5" value="100" aria-valuemin="60" aria-valuemax="200" aria-valuenow="100" aria-label="Zoomfaktor in Prozent" />
-                <button id="btnZoomIn" class="btn btn-icon" type="button" title="Zoom vergrößern" aria-label="Zoom vergrößern">
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
-                </button>
-                <span id="zoomDisplay" class="zoom-readout">100%</span>
-                <button id="btnZoomReset" class="btn btn-ghost btn-icon" type="button" title="Zoom zurücksetzen" aria-label="Zoom zurücksetzen">
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a8 8 0 1 1-1.4-9.6" /><polyline points="19 4 19 9 14 9" /></svg>
+                <button id="btnFullscreen" class="btn btn-secondary btn-icon" title="Vollbild" aria-label="Vollbild">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+                  </svg>
                 </button>
               </div>
-            </div>
-          </section>
+            </section>
 
-          <section class="control-module">
+            <div class="control-divider" aria-hidden="true"></div>
 
-            <div class="control-module-body">
-              <button id="btnEditMarkers" class="btn btn-secondary btn-icon hidden sm:inline-flex" title="Sprungmarkierungen bearbeiten" aria-label="Sprungmarkierungen bearbeiten">
-                <svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="currentColor" aria-hidden="true">
-                  <path d="M320-160q-117 0-198.5-81.5T40-440q0-107 70.5-186.5T287-718l-63-66 56-56 160 160-160 160-56-57 59-59q-71 14-117 69t-46 127q0 83 58.5 141.5T320-240h120v80H320Zm200-360v-280h360v280H520Zm0 360v-280h360v280H520Zm80-80h200v-120H600v120Z"/>
-                </svg>
-                <span class="hidden sm:inline">Marker</span>
-              </button>
-              <button id="btnAnnotationToggle" class="btn btn-secondary hidden sm:inline-flex" type="button" aria-pressed="false">
-                <svg xmlns="http://www.w3.org/2000/svg" height="20px" viewBox="0 -960 960 960" width="20px" fill="currentColor"><path d="M200-200h57l391-391-57-57-391 391v57Zm-80 80v-170l528-527q12-11 26.5-17t30.5-6q16 0 31 6t26 18l55 56q12 11 17.5 26t5.5 30q0 16-5.5 30.5T817-647L290-120H120Zm640-584-56-56 56 56Zm-141 85-28-29 57 57-29-28Z"/></svg>
-                <span>Notizen</span>
-              </button>
-            </div>
-          </section>
+            <section class="control-module">
+              <div class="control-module-body">
+                <button id="btnPlayPause" class="btn btn-primary" aria-label="Auto-Scroll starten/pausieren">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="18" height="18">
+                    <path d="M8 5v14l11-7z"/>
+                  </svg>
+                </button>
+                <div class="input-group">
+                  <input id="secsPerPage" type="number" min="5" max="600" step="1" value="45" />
+                </div>
+              </div>
+            </section>
+          </div>
+
+          <div class="control-panel-center">
+            <div class="control-divider" aria-hidden="true"></div>
+
+            <section class="control-module zoom-module">
+              <div class="control-module-body zoom-body">
+                <label for="zoomSlider" class="sr-only">Zoomfaktor</label>
+                <div class="zoom-row">
+                  <button id="btnZoomOut" class="btn btn-icon" type="button" title="Zoom verkleinern" aria-label="Zoom verkleinern">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12" /></svg>
+                  </button>
+                  <input id="zoomSlider" type="range" min="60" max="200" step="5" value="100" aria-valuemin="60" aria-valuemax="200" aria-valuenow="100" aria-label="Zoomfaktor in Prozent" />
+                  <button id="btnZoomIn" class="btn btn-icon" type="button" title="Zoom vergrößern" aria-label="Zoom vergrößern">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
+                  </button>
+                  <span id="zoomDisplay" class="zoom-readout">100%</span>
+                  <button id="btnZoomReset" class="btn btn-ghost btn-icon" type="button" title="Zoom zurücksetzen" aria-label="Zoom zurücksetzen">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a8 8 0 1 1-1.4-9.6" /><polyline points="19 4 19 9 14 9" /></svg>
+                  </button>
+                </div>
+              </div>
+            </section>
+
+            <div class="control-divider" aria-hidden="true"></div>
+          </div>
+
+          <div class="control-panel-right">
+            <section class="control-module">
+              <div class="control-module-body">
+                <button id="btnEditMarkers" class="btn btn-secondary btn-icon hidden sm:inline-flex" title="Sprungmarkierungen bearbeiten" aria-label="Sprungmarkierungen bearbeiten">
+                  <svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="currentColor" aria-hidden="true">
+                    <path d="M320-160q-117 0-198.5-81.5T40-440q0-107 70.5-186.5T287-718l-63-66 56-56 160 160-160 160-56-57 59-59q-71 14-117 69t-46 127q0 83 58.5 141.5T320-240h120v80H320Zm200-360v-280h360v280H520Zm0 360v-280h360v280H520Zm80-80h200v-120H600v120Z"/>
+                  </svg>
+                  <span class="hidden sm:inline">Marker</span>
+                </button>
+                <button id="btnAnnotationToggle" class="btn btn-secondary hidden sm:inline-flex" type="button" aria-pressed="false">
+                  <svg xmlns="http://www.w3.org/2000/svg" height="20px" viewBox="0 -960 960 960" width="20px" fill="currentColor"><path d="M200-200h57l391-391-57-57-391 391v57Zm-80 80v-170l528-527q12-11 26.5-17t30.5-6q16 0 31 6t26 18l55 56q12 11 17.5 26t5.5 30q0 16-5.5 30.5T817-647L290-120H120Zm640-584-56-56 56 56Zm-141 85-28-29 57 57-29-28Z"/></svg>
+                  <span>Notizen</span>
+                </button>
+              </div>
+            </section>
+          </div>
         </div>
       </div>
     </div>
@@ -5903,11 +5953,14 @@
         }
       }
       function stopAutoScroll() {
+        const wasRunning = state.viewer.autoScroll.running;
         state.viewer.autoScroll.running = false;
         state.viewer.autoScroll.pending = false;
         state.viewer.autoScroll.needsRecalc = false;
         state.viewer.autoScroll.token = null;
-        updateStatus("Auto-Scroll: pausiert");
+        if (wasRunning) {
+          updateStatus("Auto-Scroll: pausiert");
+        }
       }
       function tickAutoScroll(ts) {
         if (!state.viewer.autoScroll.running) return;
