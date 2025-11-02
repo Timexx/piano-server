@@ -21,7 +21,8 @@
     viewerEl: null,
     panelDrag: null,
     resizeHandlerBound: false,
-    connectTimer: null
+    connectTimer: null,
+    markerDrag: null
   };
 
   function safeUpdateStatus(message) {
@@ -64,6 +65,14 @@
         transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease, background 0.18s ease, opacity 0.18s ease;
         appearance: none;
         pointer-events: auto;
+        touch-action: none;
+        user-select: none;
+      }
+      .jump-marker-overlay.is-dragging {
+        cursor: grabbing;
+        z-index: 50;
+        box-shadow: 0 24px 60px rgba(15,23,42,0.6);
+        transform: translate(-50%, -50%) scale(1.05);
       }
       .jump-marker-overlay[data-role="source"] {
         background: linear-gradient(135deg, rgba(129,140,248,0.42), rgba(79,70,229,0.36));
@@ -904,6 +913,13 @@
       event.stopPropagation();
       handleOverlayClick(pair, role);
     });
+    
+    // Drag & Drop im Edit-Modus
+    if (state.viewer?.editMode) {
+      overlay.style.cursor = "grab";
+      overlay.addEventListener("pointerdown", (event) => handleMarkerDragStart(event, pair, role, point));
+    }
+    
     pageEl.appendChild(overlay);
     return overlay;
   }
@@ -930,6 +946,106 @@
       highlightPair(pair.id);
       safeUpdateStatus(`${pair.label}: Ziel bei Seite ${pair.target?.pageNumber ?? "?"}`);
     }
+  }
+
+  function handleMarkerDragStart(event, pair, role, point) {
+    if (!state.viewer?.editMode) return;
+    if (event.button !== 0) return;
+    
+    // Verhindere Click-Event während Drag
+    event.preventDefault();
+    event.stopPropagation();
+    
+    const overlay = event.currentTarget;
+    const canvas = overlay.closest("[data-page]")?.querySelector("canvas");
+    if (!canvas) return;
+    
+    const rect = canvas.getBoundingClientRect();
+    
+    uiState.markerDrag = {
+      pointerId: event.pointerId,
+      pair,
+      role,
+      point,
+      overlay,
+      canvas,
+      canvasRect: rect,
+      initialX: point.x,
+      initialY: point.y,
+      startTime: Date.now()
+    };
+    
+    overlay.style.cursor = "grabbing";
+    overlay.classList.add("is-dragging");
+    overlay.setPointerCapture?.(event.pointerId);
+    
+    window.addEventListener("pointermove", handleMarkerDragMove);
+    window.addEventListener("pointerup", handleMarkerDragEnd);
+    window.addEventListener("pointercancel", handleMarkerDragEnd);
+    
+    setPanelHint(`Verschiebe ${ROLE_NAMES[role]} für "${pair.label}"...`, "info");
+  }
+
+  function handleMarkerDragMove(event) {
+    const drag = uiState.markerDrag;
+    if (!drag || event.pointerId !== drag.pointerId) return;
+    
+    event.preventDefault();
+    event.stopPropagation();
+    
+    const rect = drag.canvasRect;
+    const x = clampPercent(((event.clientX - rect.left) / rect.width) * 100);
+    const y = clampPercent(((event.clientY - rect.top) / rect.height) * 100);
+    
+    // Live-Update der Overlay-Position
+    drag.overlay.style.left = `${x}%`;
+    drag.overlay.style.top = `${y}%`;
+    
+    // Temporär im Objekt speichern
+    drag.currentX = x;
+    drag.currentY = y;
+  }
+
+  async function handleMarkerDragEnd(event) {
+    const drag = uiState.markerDrag;
+    if (!drag || event.pointerId !== drag.pointerId) return;
+    
+    event.preventDefault();
+    event.stopPropagation();
+    
+    window.removeEventListener("pointermove", handleMarkerDragMove);
+    window.removeEventListener("pointerup", handleMarkerDragEnd);
+    window.removeEventListener("pointercancel", handleMarkerDragEnd);
+    
+    drag.overlay.style.cursor = "grab";
+    drag.overlay.classList.remove("is-dragging");
+    drag.overlay.releasePointerCapture?.(event.pointerId);
+    
+    const dragDuration = Date.now() - drag.startTime;
+    const hasChanged = drag.currentX !== undefined && 
+                      (Math.abs(drag.currentX - drag.initialX) > 0.5 || 
+                       Math.abs(drag.currentY - drag.initialY) > 0.5);
+    
+    if (hasChanged && dragDuration > 100) {
+      // Position wirklich geändert → speichern
+      drag.point.x = drag.currentX;
+      drag.point.y = drag.currentY;
+      
+      setPanelHint(`${ROLE_NAMES[drag.role]} wird gespeichert...`, "info");
+      
+      // Panel aktualisieren
+      renderPanel();
+      
+      // Auf Server speichern
+      await saveJumpMarkers(`${drag.pair.label}: ${ROLE_NAMES[drag.role]} verschoben.`);
+    } else {
+      // Kein echtes Drag → als Click behandeln
+      if (dragDuration < 200) {
+        handleOverlayClick(drag.pair, drag.role);
+      }
+    }
+    
+    uiState.markerDrag = null;
   }
 
   function highlightPair(pairId) {
