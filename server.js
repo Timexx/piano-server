@@ -7,6 +7,7 @@ const https = require("https");
 const os = require("os");
 const { pipeline } = require("stream/promises");
 const { Transform } = require("stream");
+const { PDFDocument } = require("pdf-lib");
 
 // Optional middlewares (used if installed; otherwise skipped)
 let helmet = null, morgan = null, compression = null;
@@ -368,6 +369,7 @@ fs.mkdirSync(PDFJS_DIR, { recursive: true });
 fs.mkdirSync(THUMBS_DIR, { recursive: true }); // Create thumbnail directory
 
 const MAX_UPLOAD_BYTES = 200 * 1024 * 1024; // 200 MB
+const annotationLocks = new Map();
 class SizeLimiter extends Transform {
   constructor(limitBytes) {
     super();
@@ -883,7 +885,7 @@ if (compression && MEMORY_SETTINGS.enableGzipCompression) {
 
 if (morgan) app.use(morgan("tiny"));
 
-app.use(express.json({ limit: "256kb" }));
+app.use(express.json({ limit: "20mb" }));
 
 // Add memory monitoring middleware
 /* ---------------- Front-end (SPA) ---------------- */
@@ -1024,14 +1026,16 @@ app.use("/sheets", (req, res, next) => {
 app.use(
   "/sheets",
   express.static(SHEETS_DIR, {
-    maxAge: "7d",
+    maxAge: 0,
     etag: true,
     lastModified: true,
     dotfiles: 'deny',
     setHeaders(res, filePath) {
       res.setHeader("X-Content-Type-Options", "nosniff");
       res.setHeader("Accept-Ranges", "bytes");
-      res.setHeader("Cache-Control", "public, max-age=604800");
+      res.setHeader("Cache-Control", "private, max-age=0, must-revalidate");
+      res.setHeader("Pragma", "no-cache");
+      res.setHeader("Expires", "0");
       
       // Add content length for better mobile handling
       try {
@@ -1278,6 +1282,20 @@ function ensureUniqueOrder(items) {
     out.push(rel);
   }
   return out;
+}
+
+function withAnnotationLock(rel, task) {
+  const prev = annotationLocks.get(rel) || Promise.resolve();
+  const next = prev
+    .catch(() => {})
+    .then(() => task())
+    .finally(() => {
+      if (annotationLocks.get(rel) === next) {
+        annotationLocks.delete(rel);
+      }
+    });
+  annotationLocks.set(rel, next);
+  return next;
 }
 
 app.post("/api/playlist/add", async (req, res) => {
@@ -1718,14 +1736,101 @@ app.post("/api/prefs/file", async (req, res) => {
     })
     .filter(Boolean);
   const latestMarkers = Array.isArray(latestEntry.jumpMarkers) ? latestEntry.jumpMarkers : [];
+  const stat = await statSafe(info.abs);
   res.json({ 
     ok: true, 
     name: info.rel, 
     secsPerPage: latestEntry.secsPerPage || null, 
     categories: categoriesMeta, 
     categoryIds,
-    jumpMarkers: latestMarkers 
+    jumpMarkers: latestMarkers,
+    mtime: stat ? stat.mtimeMs : null,
+    size: stat ? stat.size : null
   });
+});
+
+app.post("/api/annotations/save", async (req, res) => {
+  const { name, overlays } = req.body || {};
+  const info = resolvePdfName(name);
+  if (!info) {
+    return res.status(400).json({ error: "Invalid file name" });
+  }
+  if (!Array.isArray(overlays) || !overlays.length) {
+    return res.status(400).json({ error: "No overlays provided" });
+  }
+
+  const prepared = overlays
+    .map((item) => {
+      if (!item || typeof item !== "object") return null;
+      const pageNumber = Number(item.pageNumber);
+      if (!Number.isInteger(pageNumber) || pageNumber < 1) return null;
+      const dataUrl = typeof item.dataUrl === "string" ? item.dataUrl.trim() : "";
+      if (!dataUrl.startsWith("data:image/png;base64,")) return null;
+      const base64 = dataUrl.slice("data:image/png;base64,".length);
+      if (!base64) return null;
+      const pageWidth = Number(item.pageWidth);
+      const pageHeight = Number(item.pageHeight);
+      if (!Number.isFinite(pageWidth) || pageWidth <= 0) return null;
+      if (!Number.isFinite(pageHeight) || pageHeight <= 0) return null;
+      return { pageNumber, base64, pageWidth, pageHeight };
+    })
+    .filter(Boolean);
+
+  if (!prepared.length) {
+    return res.status(400).json({ error: "No valid overlays" });
+  }
+
+  try {
+    await withAnnotationLock(info.rel, async () => {
+      const pdfBytes = await fs.promises.readFile(info.abs);
+      const pdfDoc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
+      const pageCount = pdfDoc.getPageCount();
+
+      for (const overlay of prepared) {
+        if (overlay.pageNumber < 1 || overlay.pageNumber > pageCount) continue;
+        const pngBytes = Buffer.from(overlay.base64, "base64");
+        if (!pngBytes.length) continue;
+        let embeddedImage;
+        try {
+          embeddedImage = await pdfDoc.embedPng(pngBytes);
+        } catch (embedErr) {
+          console.warn("Failed to embed annotation PNG:", embedErr?.message || embedErr);
+          continue;
+        }
+        const page = pdfDoc.getPage(overlay.pageNumber - 1);
+        page.drawImage(embeddedImage, {
+          x: 0,
+          y: 0,
+          width: overlay.pageWidth,
+          height: overlay.pageHeight,
+        });
+      }
+
+      const updatedBytes = await pdfDoc.save({ useObjectStreams: false });
+      const tmpPath = `${info.abs}.${Date.now()}.annot.tmp`;
+      await fs.promises.writeFile(tmpPath, updatedBytes);
+      await fs.promises.rename(tmpPath, info.abs);
+    });
+
+    const st = await statSafe(info.abs);
+    if (st) {
+      const idx = indexCache.items.findIndex((item) => item && item.name === info.rel);
+      if (idx !== -1) {
+        indexCache.items[idx] = { ...indexCache.items[idx], size: st.size, mtime: st.mtimeMs };
+      }
+    }
+
+    try {
+      await ensureThumbnail({ rel: info.rel, abs: info.abs });
+    } catch (thumbErr) {
+      console.warn("Annotation thumbnail refresh failed:", thumbErr?.message || thumbErr);
+    }
+
+    res.json({ ok: true, mtime: st ? st.mtimeMs : null, size: st ? st.size : null });
+  } catch (err) {
+    console.error("Annotation save failed:", err);
+    res.status(500).json({ error: "Failed to apply annotations" });
+  }
 });
 
 app.get("/api/categories", async (req, res) => {

@@ -13,6 +13,7 @@
   "dependencies": {
     "express": "^4.21.1",
     "pdfjs-dist": "2.16.105",
+    "pdf-lib": "^1.17.1",
     "canvas": "^2.11.2",
     "sharp": "^0.33.5"
   },

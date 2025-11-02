@@ -433,6 +433,134 @@
         font-weight: 500;
         letter-spacing: 0.025em;
       }
+
+      .viewer-page {
+        width: 100%;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.75rem;
+      }
+      .viewer-page-stage {
+        position: relative;
+        width: 100%;
+        display: flex;
+        justify-content: center;
+      }
+      .viewer-page-frame {
+        position: relative;
+        width: 100%;
+        max-width: 1400px;
+      }
+      .viewer-page-frame canvas[data-role="pdf-canvas"] {
+        display: block;
+        border-radius: 16px;
+        background: #ffffff;
+        box-shadow: 
+          0 20px 40px -12px rgba(0, 0, 0, 0.5),
+          0 0 0 1px rgba(255, 255, 255, 0.05);
+      }
+      .annotation-layer,
+      .annotation-committed {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+        touch-action: none;
+      }
+      .annotation-layer.is-active {
+        pointer-events: auto;
+        cursor: crosshair;
+      }
+      .annotation-controls {
+        align-items: stretch;
+        gap: 0.5rem;
+      }
+      .annotation-panel {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+      }
+      .annotation-panel.hidden {
+        display: none;
+      }
+      .annotation-tool-btn {
+        position: relative;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 10px;
+        padding: 0.35rem 0.55rem;
+        color: #e5e7eb;
+        font-size: 0.9rem;
+        transition: background 0.2s ease, border-color 0.2s ease;
+      }
+      .annotation-tool-btn[aria-pressed="true"] {
+        background: rgba(99, 102, 241, 0.18);
+        border-color: rgba(99, 102, 241, 0.45);
+        color: #f8fafc;
+      }
+      .annotation-tool-btn:hover {
+        background: rgba(255, 255, 255, 0.08);
+      }
+      .annotation-colors {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+      }
+      .annotation-color-btn {
+        width: 24px;
+        height: 24px;
+        border-radius: 999px;
+        border: 2px solid rgba(255, 255, 255, 0.25);
+        background: var(--annotation-color, #f1f5f9);
+        box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.25) inset;
+        transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+      }
+      .annotation-color-btn:hover {
+        transform: translateY(-1px);
+      }
+      .annotation-color-btn[aria-pressed="true"] {
+        border-color: #ffffff;
+        box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.4);
+      }
+      .annotation-size {
+        display: flex;
+        align-items: center;
+        gap: 0.35rem;
+        font-size: 0.75rem;
+        color: #cbd5f5;
+      }
+      .annotation-size input[type="range"] {
+        width: 110px;
+        accent-color: var(--accent-color);
+      }
+      .annotation-size span {
+        min-width: 1.5rem;
+        font-variant-numeric: tabular-nums;
+        text-align: right;
+      }
+      .annotation-actions {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+      }
+      .annotation-actions .btn {
+        padding: 0.5rem;
+        min-width: 2.4rem;
+      }
+      .annotation-toggle-active {
+        background: linear-gradient(135deg, var(--accent-color) 0%, color-mix(in srgb, var(--accent-color) 80%, #000) 100%) !important;
+        border-color: color-mix(in srgb, var(--accent-color) 80%, rgba(255, 255, 255, 0.35)) !important;
+        color: #ffffff !important;
+      }
+      .annotation-layer.is-saving {
+        cursor: progress;
+      }
+      .annotation-layer.is-disabled {
+        opacity: 0.75;
+      }
       
       [data-role="skeleton"] {
         border-radius: 16px;
@@ -777,6 +905,22 @@
         .control-panel {
           padding: 0.875rem 1rem;
           border-radius: 20px;
+        }
+
+        .annotation-controls {
+          width: 100%;
+          flex-direction: column;
+          align-items: stretch;
+        }
+
+        .annotation-panel {
+          width: 100%;
+          justify-content: flex-start;
+        }
+
+        .annotation-actions {
+          width: 100%;
+          justify-content: flex-start;
         }
         
         .btn {
@@ -1134,15 +1278,49 @@
           </div>
 
           <!-- Status -->
-         <!-- <div class="status-display" id="status">
+          <div class="control-divider"></div>
+
+          <div class="control-group annotation-controls" id="annotationControls">
+            <button id="btnAnnotationToggle" class="btn btn-secondary" type="button" aria-pressed="false">
+              <span>🖊️ Notizen</span>
+            </button>
+            <div id="annotationPanel" class="annotation-panel hidden" aria-label="PDF-Notizen">
+              <div class="annotation-tools-row">
+                <button type="button" class="annotation-tool-btn" data-tool="pen" aria-pressed="true" title="Stift">✏️</button>
+                <button type="button" class="annotation-tool-btn" data-tool="highlighter" aria-pressed="false" title="Textmarker">🖍️</button>
+                <button type="button" class="annotation-tool-btn" data-tool="eraser" aria-pressed="false" title="Radierer">🧽</button>
+              </div>
+              <div id="annotationColors" class="annotation-colors" role="radiogroup" aria-label="Farben"></div>
+              <div class="annotation-size">
+                <label for="annotationSize">Linie</label>
+                <input id="annotationSize" type="range" min="1" max="8" step="1" value="3" />
+                <span id="annotationSizeValue">3</span>
+              </div>
+              <div class="annotation-actions">
+                <button id="btnAnnotationUndo" type="button" class="btn btn-secondary btn-icon" title="Letzten Strich rückgängig">
+                  ↺
+                </button>
+                <button id="btnAnnotationClear" type="button" class="btn btn-secondary btn-icon" title="Seite leeren">
+                  🗑️
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="control-divider"></div>
+
+          <!-- Status -->
+          <div class="status-display" id="status">
             <span>Bereit</span>
-          </div>-->
+          </div>
         </div>
       </div>
     </div>
 
     <!-- App logic embedded as module -->
     <script type="module">
+      import { createAnnotationManager } from "./annotation-tools.js";
+
       // force same-origin worker to avoid blob/CORS issues (Safari/iPad)
       pdfjsLib.GlobalWorkerOptions.workerSrc = "/vendor/pdfjs/pdf.worker.min.js";
 
@@ -1530,7 +1708,8 @@
           zoom: 1,
           zoomTimer: null,
           zoomControlsReady: false,
-          zoomVersion: 0
+          zoomVersion: 0,
+          cacheToken: null
         },
         categories: [],
         ui: {
@@ -1554,6 +1733,21 @@
       };
 
   window.state = state;
+
+    const annotations = createAnnotationManager({
+      state,
+      updateStatus,
+      fetcher: (url, options) => fetch(url, options ?? {}),
+      onSaved: (meta) => {
+        if (!meta || !meta.mtime) return;
+        if (!state.viewer.fileName) return;
+        const bust = meta.mtime;
+        state.viewer.url = `/sheets/${encodePathSegments(state.viewer.fileName)}?v=${bust}`;
+        state.viewer.cacheToken = bust;
+      }
+    });
+    annotations.initControls();
+    window.annotations = annotations;
 
     state.viewer.zoom = loadStoredZoom();
     updateZoomUI();
@@ -1833,7 +2027,9 @@
             secsPerPage: Number(j.secsPerPage) || null,
             categories: Array.isArray(j.categories) ? j.categories : [],
             categoryIds: Array.isArray(j.categoryIds) ? j.categoryIds : [],
-            jumpMarkers: Array.isArray(j.jumpMarkers) ? j.jumpMarkers : []
+            jumpMarkers: Array.isArray(j.jumpMarkers) ? j.jumpMarkers : [],
+            mtime: Number(j.mtime) || null,
+            size: Number(j.size) || null
           };
         } catch { return null; }
       }
@@ -2284,6 +2480,7 @@
 
       // ===== Library UI =====
       function renderLibrary() {
+        annotations.leaveViewer();
         document.body.classList.remove('in-viewer');
         // Ensure fullscreen is exited when returning to library
         if (document.fullscreenElement) {
@@ -2299,6 +2496,10 @@
         
         // Cleanup viewer memory when returning to library
         aggressiveCleanup();
+        if (state.viewer._pdf) {
+          try { state.viewer._pdf.destroy?.(); } catch {}
+          state.viewer._pdf = null;
+        }
         
         controlsEl.classList.add("hidden");
         headerActionsEl.innerHTML = "";
@@ -4497,7 +4698,9 @@
 
         const container = document.querySelector('#viewer');
         state.viewer.fileName = fileName;
-  state.viewer.url = `/sheets/${encodePathSegments(fileName)}`;
+        state.viewer.url = null;
+  state.viewer.cacheToken = null;
+        annotations.enterViewer({ fileName });
 
         document.querySelector('#btnBack').onclick = () => {
           // Cleanup before leaving viewer; exit fullscreen if active
@@ -4535,10 +4738,13 @@
   // resume from that position when released.
   registerUserScrollControls(container);
 
-        const prefs = await getFilePrefsFromBackend(fileName);
-        state.viewer.secsPerPage = prefs?.secsPerPage || 45;
-        state.viewer.categories = Array.isArray(prefs?.categories) ? prefs.categories : [];
-        state.viewer.jumpMarkers = Array.isArray(prefs?.jumpMarkers) ? prefs.jumpMarkers : [];
+    const prefs = await getFilePrefsFromBackend(fileName);
+    state.viewer.secsPerPage = prefs?.secsPerPage || 45;
+    state.viewer.categories = Array.isArray(prefs?.categories) ? prefs.categories : [];
+    state.viewer.jumpMarkers = Array.isArray(prefs?.jumpMarkers) ? prefs.jumpMarkers : [];
+    const bustToken = prefs?.mtime || Date.now();
+    state.viewer.url = `/sheets/${encodePathSegments(fileName)}?v=${bustToken}`;
+  state.viewer.cacheToken = bustToken;
         state.viewer.editMode = false;
         
         // 1. Setze Farbe basierend auf Kategorie oder Fallback
@@ -4574,7 +4780,8 @@
         updateViewerPlaylistControls();
 
         updateStatus("Lade…");
-        await mountPdfVirtual(container, state.viewer.url);
+  await mountPdfVirtual(container, state.viewer.url);
+  annotations.refreshOverlayActivation();
         await new Promise((resolve) => requestAnimationFrame(resolve));
         computeSpeed();
         
@@ -4832,13 +5039,13 @@
         const placeholders = [];
         for (let i = 1; i <= pdf.numPages; i++) {
           const ph = document.createElement("div");
-          ph.className = "w-full flex flex-col items-center";
+          ph.className = "viewer-page w-full flex flex-col items-center";
           ph.style.height = `${pageH}px`; // initial reservation to reduce layout shifts
           ph.style.minHeight = `${pageH}px`;
           ph.dataset.page = String(i);
           const skeletonHeight = Math.max(pageH - 48, 120);
           ph.innerHTML = `<div class="text-xs text-neutral-400 mb-0.5" data-role="page-label">Seite ${i} / ${pdf.numPages}</div>
-                          <div data-role="page-stage" class="relative" style="display:inline-block; width:100%; max-width:1400px;">
+                          <div data-role="page-stage" class="viewer-page-stage relative" style="display:inline-block; width:100%; max-width:1400px;">
                             <div data-role="skeleton" class="w-full bg-black/60 rounded animate-pulse" style="height:${skeletonHeight}px"></div>
                           </div>`;
           wrap.appendChild(ph); placeholders.push(ph);
@@ -4865,8 +5072,9 @@
           for (const en of entries) {
             const ph = en.target;
             if (en.isIntersecting) continue;
-            const canvas = ph.querySelector("canvas");
+            const canvas = ph.querySelector('canvas[data-role="pdf-canvas"]');
             if (!canvas) continue;
+            const pageNumber = Number(ph.dataset.page) || null;
             const rect = ph.getBoundingClientRect();
             const rootRect = container.getBoundingClientRect();
             const far = (rect.bottom < rootRect.top - 1500) || (rect.top > rootRect.bottom + 1500);
@@ -4880,6 +5088,17 @@
                 ctx.canvas.height = 1;
               }
               canvas.remove();
+              const overlayLayer = ph.querySelector('canvas.annotation-layer');
+              if (overlayLayer) {
+                overlayLayer.remove();
+              }
+              const committedLayer = ph.querySelector('canvas.annotation-committed');
+              if (committedLayer) {
+                committedLayer.remove();
+              }
+              if (pageNumber) {
+                annotations.onPageLayerRemoved(pageNumber);
+              }
               const fallbackHeight = Number(ph.dataset.blockHeight) || state.viewer.pageBlockHeight || pageH;
               const label = ph.querySelector('[data-role="page-label"]');
               const measuredAllowance = label ? label.offsetHeight + 16 : 48;
@@ -4943,6 +5162,9 @@
           const label = ph.querySelector('[data-role="page-label"]');
           if (label) label.after(stage); else ph.appendChild(stage);
         }
+        if (!stage.classList.contains('viewer-page-stage')) {
+          stage.classList.add('viewer-page-stage');
+        }
         return stage;
       }
 
@@ -4956,6 +5178,7 @@
         try {
           const page = await pdf.getPage(i);
           const container = ph.parentElement;
+          const originalViewport = page.getViewport({ scale: 1 });
           const baseScale = await computeFitWidthScale(page, container);
           const baseViewport = page.getViewport({ scale: baseScale });
           const baseWidth = Math.max(1, Math.round(baseViewport.width));
@@ -4967,6 +5190,7 @@
           const scaledHeight = Math.max(1, Math.round(baseHeight * zoom));
 
           const canvas = document.createElement('canvas');
+          canvas.dataset.role = 'pdf-canvas';
           canvas.width = Math.max(1, Math.floor(baseWidth * zoom * outputScale));
           canvas.height = Math.max(1, Math.floor(baseHeight * zoom * outputScale));
           canvas.style.width = `${scaledWidth}px`;
@@ -5020,6 +5244,18 @@
           else if (existingCanvas) existingCanvas.replaceWith(canvas);
           else stage.appendChild(canvas);
 
+          annotations.attachPageLayer({
+            pageNumber: i,
+            frame: stage,
+            canvas,
+            pageWidth: originalViewport.width,
+            pageHeight: originalViewport.height,
+            renderWidth: canvas.width,
+            renderHeight: canvas.height,
+            displayWidth: scaledWidth,
+            displayHeight: scaledHeight
+          });
+
           state.viewer.pageStageWidth = scaledWidth;
           state.viewer.pageLabelAllowance = labelAllowance;
           state.viewer.pageScaledHeight = scaledHeight;
@@ -5051,6 +5287,7 @@
           stage.querySelectorAll('canvas').forEach((node) => node.remove());
           stage.querySelectorAll('.jump-marker-overlay').forEach((node) => node.remove());
           stage.innerHTML = '';
+          annotations.onPageLayerRemoved(i);
           const errorBox = document.createElement('div');
           errorBox.dataset.role = 'skeleton';
           errorBox.className = 'w-full bg-red-900/20 border border-red-500 rounded flex items-center justify-center text-red-400';
