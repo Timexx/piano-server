@@ -2,17 +2,26 @@
   const ROLE_ICONS = { source: "↩", target: "★" };
   const ROLE_NAMES = { source: "Absprung", target: "Ziel" };
 
+  const PANEL_POSITION_KEY = "jumpMarkers.panel.position";
+
   const uiState = {
     stylesInjected: false,
     initialized: false,
-    panel: null,
-    panelList: null,
-    panelEmpty: null,
-    panelStatus: null,
-    btnNew: null,
-    btnCancelPlacement: null,
+  panel: null,
+  panelList: null,
+  panelEmpty: null,
+  panelStatus: null,
+  btnNew: null,
+  btnCancelPlacement: null,
+  btnClose: null,
     placement: null,
-    focusedPairId: null
+    focusedPairId: null,
+    editButton: null,
+    toggleEditHandler: null,
+    viewerEl: null,
+    panelDrag: null,
+    resizeHandlerBound: false,
+    connectTimer: null
   };
 
   function safeUpdateStatus(message) {
@@ -123,6 +132,55 @@
         backdrop-filter: blur(18px);
         color: #f1f5f9;
         z-index: 90;
+      }
+      .jump-marker-panel.is-dragging {
+        cursor: grabbing;
+      }
+      .jump-marker-panel-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.5rem;
+      }
+      .jump-marker-panel-title {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        cursor: grab;
+        user-select: none;
+        touch-action: none;
+      }
+      .jump-marker-panel.is-dragging .jump-marker-panel-title {
+        cursor: grabbing;
+      }
+      .jump-marker-panel-drag-indicator {
+        font-size: 1.25rem;
+        line-height: 1;
+        opacity: 0.6;
+      }
+      .jump-marker-panel-close {
+        width: 32px;
+        height: 32px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 9999px;
+        border: 1px solid rgba(148,163,184,0.32);
+        background: rgba(30,41,59,0.78);
+        color: #e2e8f0;
+        cursor: pointer;
+        transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+      }
+      .jump-marker-panel-close:hover,
+      .jump-marker-panel-close:focus-visible {
+        border-color: rgba(96,165,250,0.55);
+        background: rgba(59,130,246,0.55);
+        color: #0f172a;
+        outline: none;
+      }
+      .jump-marker-panel-close span {
+        font-size: 1.35rem;
+        line-height: 1;
       }
       .jump-marker-panel h3 {
         margin: 0;
@@ -432,7 +490,15 @@
     const panel = document.createElement("aside");
     panel.className = "jump-marker-panel";
     panel.innerHTML = `
-      <h3>Sprungmarken</h3>
+      <div class="jump-marker-panel-header">
+        <div class="jump-marker-panel-title" data-role="drag-handle">
+          <h3>Sprungmarken</h3>
+          <span class="jump-marker-panel-drag-indicator" aria-hidden="true">::</span>
+        </div>
+        <button type="button" class="jump-marker-panel-close" data-role="close" title="Sprungmarken schließen" aria-label="Sprungmarken schließen">
+          <span aria-hidden="true">&times;</span>
+        </button>
+      </div>
       <p class="jump-marker-panel-status" data-role="status"></p>
       <div class="jump-marker-actions">
         <button type="button" data-role="new">Neuer Sprung</button>
@@ -448,9 +514,201 @@
     uiState.panelEmpty = panel.querySelector('[data-role="empty"]');
     uiState.btnNew = panel.querySelector('[data-role="new"]');
     uiState.btnCancelPlacement = panel.querySelector('[data-role="cancel"]');
+    uiState.btnClose = panel.querySelector('[data-role="close"]');
 
     uiState.btnNew.addEventListener("click", () => openCreateModal());
     uiState.btnCancelPlacement.addEventListener("click", () => cancelPlacement({ userTriggered: true }));
+    if (uiState.btnClose) {
+      uiState.btnClose.addEventListener("click", () => {
+        if (state.viewer?.editMode) {
+          toggleEditMode();
+        } else {
+          setPanelVisibility(false);
+        }
+      });
+    }
+
+    bindPanelDrag();
+    restorePanelPosition();
+    if (!uiState.resizeHandlerBound) {
+      window.addEventListener("resize", handleWindowResize);
+      uiState.resizeHandlerBound = true;
+    }
+  }
+
+  function bindPanelDrag() {
+    const handle = uiState.panel?.querySelector('[data-role="drag-handle"]');
+    if (!handle) return;
+    handle.addEventListener("pointerdown", handlePanelPointerDown);
+  }
+
+  function handlePanelPointerDown(event) {
+    if (!uiState.panel || event.button !== 0) return;
+    event.preventDefault();
+    const rect = uiState.panel.getBoundingClientRect();
+    uiState.panelDrag = {
+      pointerId: event.pointerId,
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top,
+      latestLeft: rect.left,
+      latestTop: rect.top
+    };
+    uiState.panel.classList.add("is-dragging");
+    uiState.panel.setPointerCapture?.(event.pointerId);
+    window.addEventListener("pointermove", handlePanelPointerMove);
+    window.addEventListener("pointerup", handlePanelPointerUp);
+    window.addEventListener("pointercancel", handlePanelPointerUp);
+  }
+
+  function handlePanelPointerMove(event) {
+    const drag = uiState.panelDrag;
+    if (!drag || event.pointerId !== drag.pointerId || !uiState.panel) return;
+    const proposedLeft = event.clientX - drag.offsetX;
+    const proposedTop = event.clientY - drag.offsetY;
+    const { left, top } = clampPanelPosition(proposedLeft, proposedTop);
+    applyPanelPosition(left, top);
+    drag.latestLeft = left;
+    drag.latestTop = top;
+  }
+
+  function handlePanelPointerUp(event) {
+    const drag = uiState.panelDrag;
+    if (!drag || event.pointerId !== drag.pointerId || !uiState.panel) return;
+    window.removeEventListener("pointermove", handlePanelPointerMove);
+    window.removeEventListener("pointerup", handlePanelPointerUp);
+  window.removeEventListener("pointercancel", handlePanelPointerUp);
+    uiState.panel.classList.remove("is-dragging");
+    uiState.panel.releasePointerCapture?.(event.pointerId);
+    if (uiState.panel.dataset.positionMode !== "custom") {
+      applyPanelPosition(drag.latestLeft, drag.latestTop);
+    }
+    persistPanelPosition(drag.latestLeft, drag.latestTop);
+    uiState.panelDrag = null;
+  }
+
+  function clampPanelPosition(left, top) {
+    if (!uiState.panel) return { left, top };
+    const minMargin = 12;
+    const width = uiState.panel.offsetWidth || uiState.panel.getBoundingClientRect().width || 0;
+    const height = uiState.panel.offsetHeight || uiState.panel.getBoundingClientRect().height || 0;
+    const maxLeft = Math.max(minMargin, window.innerWidth - width - minMargin);
+    const maxTop = Math.max(minMargin, window.innerHeight - height - minMargin);
+    const clampedLeft = Math.min(Math.max(minMargin, left), maxLeft);
+    const clampedTop = Math.min(Math.max(minMargin, top), maxTop);
+    return { left: clampedLeft, top: clampedTop };
+  }
+
+  function applyPanelPosition(left, top) {
+    if (!uiState.panel) return;
+    uiState.panel.style.left = `${Math.round(left)}px`;
+    uiState.panel.style.top = `${Math.round(top)}px`;
+    uiState.panel.style.right = "auto";
+    uiState.panel.style.bottom = "auto";
+    uiState.panel.dataset.positionMode = "custom";
+  }
+
+  function persistPanelPosition(left, top) {
+    if (typeof left !== "number" || typeof top !== "number") return;
+    try {
+      localStorage.setItem(PANEL_POSITION_KEY, JSON.stringify({ left, top }));
+    } catch {}
+  }
+
+  function restorePanelPosition() {
+    if (!uiState.panel) return;
+    let stored = null;
+    try {
+      const raw = localStorage.getItem(PANEL_POSITION_KEY);
+      if (raw) stored = JSON.parse(raw);
+    } catch {
+      stored = null;
+    }
+    if (!stored || typeof stored.left !== "number" || typeof stored.top !== "number") {
+      return;
+    }
+    const previousDisplay = uiState.panel.style.display;
+    const previousVisibility = uiState.panel.style.visibility;
+    const computedDisplay = window.getComputedStyle(uiState.panel).display;
+    const needsTempDisplay = computedDisplay === "none";
+    if (needsTempDisplay) {
+      uiState.panel.style.visibility = "hidden";
+      uiState.panel.style.display = "flex";
+    }
+    const { left, top } = clampPanelPosition(stored.left, stored.top);
+    applyPanelPosition(left, top);
+    if (needsTempDisplay) {
+      uiState.panel.style.display = previousDisplay;
+      uiState.panel.style.visibility = previousVisibility;
+    }
+  }
+
+  function handleWindowResize() {
+    if (!uiState.panel || uiState.panel.dataset.positionMode !== "custom") return;
+    const rect = uiState.panel.getBoundingClientRect();
+    const { left, top } = clampPanelPosition(rect.left, rect.top);
+    applyPanelPosition(left, top);
+    persistPanelPosition(left, top);
+  }
+
+  function bindEditButton(enable = true) {
+    const btn = document.querySelector("#btnEditMarkers");
+    if (uiState.editButton && uiState.editButton !== btn && uiState.toggleEditHandler) {
+      uiState.editButton.removeEventListener("click", uiState.toggleEditHandler);
+    }
+    if (!btn) {
+      uiState.editButton = null;
+      return;
+    }
+    if (!uiState.toggleEditHandler) {
+      uiState.toggleEditHandler = () => toggleEditMode();
+    }
+    if (uiState.editButton !== btn) {
+      uiState.editButton = btn;
+      btn.addEventListener("click", uiState.toggleEditHandler);
+    }
+    applyEditButtonAppearance(btn);
+    btn.disabled = !enable;
+  }
+
+  function applyEditButtonAppearance(btn) {
+    if (!btn) return;
+    const isActive = Boolean(state.viewer?.editMode);
+    btn.setAttribute("aria-pressed", isActive ? "true" : "false");
+    if (isActive) {
+      btn.classList.remove("btn-secondary");
+      btn.classList.add("btn-primary", "is-ready");
+    } else {
+      btn.classList.remove("btn-primary", "is-ready");
+      btn.classList.add("btn-secondary");
+    }
+  }
+
+  function bindViewerElement() {
+    const viewer = getViewer();
+    if (uiState.viewerEl && uiState.viewerEl !== viewer) {
+      uiState.viewerEl.removeEventListener("click", handleViewerClick, true);
+      uiState.viewerEl = null;
+    }
+    if (viewer && uiState.viewerEl !== viewer) {
+      viewer.addEventListener("click", handleViewerClick, true);
+      uiState.viewerEl = viewer;
+    }
+  }
+
+  function connectToViewer() {
+  bindEditButton(true);
+    bindViewerElement();
+    setPanelVisibility(Boolean(state.viewer?.editMode));
+    renderPanel();
+    renderAllMarkers();
+  }
+
+  function tryConnectViewer() {
+    if (!state.viewer?.fileName) return false;
+    const viewer = getViewer();
+    if (!viewer) return false;
+    connectToViewer();
+    return true;
   }
 
   function renderPanel() {
@@ -758,7 +1016,7 @@
           <input id="jumpMarkerRename" name="label" type="text" value="${pair.label}" maxlength="40" autocomplete="off" required>
           <div class="actions">
             <button type="button" class="btn-secondary" data-role="cancel">Abbrechen</button>
-            <button type="submit" class="btn-primary">Speichern</button>
+            <button type="submit" class="btn-primary">OK / Speichern</button>
           </div>
         </form>
       </div>
@@ -870,13 +1128,7 @@
     state.viewer.editMode = !state.viewer.editMode;
     const btn = document.querySelector("#btnEditMarkers");
     if (btn) {
-      if (state.viewer.editMode) {
-        btn.classList.add("bg-emerald-500", "text-white", "border-emerald-400");
-        btn.classList.remove("btn-secondary");
-      } else {
-        btn.classList.remove("bg-emerald-500", "text-white", "border-emerald-400");
-        btn.classList.add("btn-secondary");
-      }
+      applyEditButtonAppearance(btn);
     }
     if (!state.viewer.editMode) {
       cancelPlacement({ keepDraft: true });
@@ -905,30 +1157,31 @@
     ensureStyles();
     ensureStateShape();
     buildPanel();
-    if (uiState.initialized) {
-      renderPanel();
-      renderAllMarkers();
-      return;
+    if (!uiState.initialized) {
+      window.addEventListener("keydown", handleGlobalKeydown);
+      uiState.initialized = true;
     }
-    uiState.initialized = true;
-    const btn = document.querySelector("#btnEditMarkers");
-    if (btn) {
-      btn.disabled = true;
-      btn.addEventListener("click", () => toggleEditMode());
-    }
-    const wait = setInterval(() => {
-      if (state.viewer?.fileName && getViewer()) {
-        clearInterval(wait);
-        if (btn) btn.disabled = false;
-        renderPanel();
-        renderAllMarkers();
+
+    if (!tryConnectViewer()) {
+      bindEditButton(false);
+      if (uiState.connectTimer) {
+        clearInterval(uiState.connectTimer);
+        uiState.connectTimer = null;
       }
-    }, 150);
-    const viewer = getViewer();
-    if (viewer) {
-      viewer.addEventListener("click", handleViewerClick, { capture: true });
+      let attempts = 0;
+      uiState.connectTimer = setInterval(() => {
+        attempts += 1;
+        if (tryConnectViewer() || attempts > 80) {
+          clearInterval(uiState.connectTimer);
+          uiState.connectTimer = null;
+        }
+      }, 150);
+    } else {
+      if (uiState.connectTimer) {
+        clearInterval(uiState.connectTimer);
+        uiState.connectTimer = null;
+      }
     }
-    window.addEventListener("keydown", handleGlobalKeydown);
   }
 
   window.JumpMarkers = {
