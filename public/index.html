@@ -83,10 +83,16 @@
           0 0 32px -8px color-mix(in srgb, var(--accent-color) 25%, transparent);
       }
       
-      body[data-accent-active="true"] header {
+      /* Active accent color effect on header */
+      body[data-accent-active="true"] #mainHeader > div {
         border-color: var(--accent-muted) !important;
-        background: color-mix(in srgb, var(--accent-color) 10%, rgba(12,12,15,0.85));
+        background: linear-gradient(to bottom,
+          color-mix(in srgb, var(--accent-color) 12%, rgba(12,12,15,0.95)),
+          color-mix(in srgb, var(--accent-color) 8%, rgba(12,12,15,0.90)),
+          color-mix(in srgb, var(--accent-color) 6%, rgba(12,12,15,0.85))
+        ) !important;
       }
+      
       .category-pill {
         transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
         white-space: nowrap;
@@ -101,6 +107,18 @@
       .category-pill.is-selected {
         box-shadow: 0 0 0 2px rgba(250, 250, 255, 0.25);
       }
+      
+      /* Manage Categories Button */
+      #btnManageCategories {
+        min-width: 36px; /* Ensure icon-only button is square on mobile */
+      }
+      
+      #btnManageCategories svg {
+        width: 18px;
+        height: 18px;
+        flex-shrink: 0;
+      }
+      
       .category-chip {
         display: inline-flex;
         align-items: center;
@@ -225,37 +243,120 @@
         z-index: 80;
         padding: 1.25rem;
       }
+      /* ===== HEADER STYLES - Modern & Elegant ===== */
+      #mainHeader {
+        will-change: transform;
+        transition: transform 300ms cubic-bezier(0.4, 0.0, 0.2, 1);
+      }
+      
+      #mainHeader.header-hidden {
+        transform: translateY(-100%) !important;
+      }
+      
+      #headerSpacer {
+        height: 64px; /* Default desktop height */
+        transition: height 200ms cubic-bezier(0.4, 0.0, 0.2, 1), margin 200ms cubic-bezier(0.4, 0.0, 0.2, 1);
+        flex-shrink: 0;
+        overflow: hidden;
+      }
+      
+      /* Safari-specific fixes */
+      @supports (-webkit-touch-callout: none) {
+        #mainHeader {
+          -webkit-transform: translateZ(0);
+          transform: translateZ(0);
+        }
+        
+        #headerSpacer {
+          -webkit-backface-visibility: hidden;
+          backface-visibility: hidden;
+        }
+        
+        #app {
+          -webkit-font-smoothing: antialiased;
+        }
+      }
+      
       #headerUploadBtn {
         display: inline-flex !important;
         align-items: center;
         gap: 0.5rem;
-        padding: 0.5rem 1rem;
+        padding: 0.5rem 1.125rem;
         font-size: 0.875rem;
-        font-weight: 500;
-        color: #e5e7eb;
-        background: rgba(99, 102, 241, 0.15);
-        border: 1px solid rgba(99, 102, 241, 0.3);
-        border-radius: 0.5rem;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+        color: #ffffff;
+        background: linear-gradient(135deg, rgba(99, 102, 241, 0.16) 0%, rgba(99, 102, 241, 0.12) 100%);
+        border: 1px solid rgba(99, 102, 241, 0.35);
+        border-radius: 0.625rem;
         cursor: pointer;
-        transition: all 0.2s ease;
+        transition: all 0.25s cubic-bezier(0.4, 0.0, 0.2, 1);
         white-space: nowrap;
+        box-shadow: 0 2px 8px -2px rgba(99, 102, 241, 0.2);
       }
       #headerUploadBtn:hover {
-        color: #ffffff;
-        background: rgba(99, 102, 241, 0.25);
-        border-color: rgba(99, 102, 241, 0.5);
-        transform: translateY(-1px);
+        background: linear-gradient(135deg, rgba(99, 102, 241, 0.28) 0%, rgba(99, 102, 241, 0.22) 100%);
+        border-color: rgba(99, 102, 241, 0.55);
+        transform: translateY(-1px) scale(1.02);
+        box-shadow: 
+          0 4px 12px -2px rgba(99, 102, 241, 0.35),
+          0 0 0 1px rgba(99, 102, 241, 0.2);
+      }
+      #headerUploadBtn:active {
+        transform: translateY(0) scale(0.98);
       }
       #headerUploadBtn svg {
         width: 16px;
         height: 16px;
-        opacity: 0.85;
+        opacity: 0.9;
         flex-shrink: 0;
       }
       #headerUploadBtn:hover svg {
         opacity: 1;
       }
+      
+      /* Enhanced Mode Switcher */
+      #headerModeSwitch {
+        background: rgba(255, 255, 255, 0.03) !important;
+        border: 1px solid rgba(255, 255, 255, 0.08) !important;
+        border-radius: 0.75rem !important;
+        padding: 0.25rem !important;
+        box-shadow: 
+          inset 0 1px 2px rgba(0, 0, 0, 0.2),
+          0 2px 8px -2px rgba(0, 0, 0, 0.15);
+      }
+      
+      #headerModeSwitch button {
+        font-weight: 600 !important;
+        letter-spacing: -0.01em;
+        border-radius: 0.5rem !important;
+        padding: 0.5rem 1rem !important;
+        transition: all 0.25s cubic-bezier(0.4, 0.0, 0.2, 1) !important;
+      }
+      
+      #headerModeSwitch button:hover:not([aria-pressed="true"]) {
+        background: rgba(255, 255, 255, 0.05) !important;
+      }
+      
+      #headerModeSwitch button[aria-pressed="true"] {
+        box-shadow: 
+          0 2px 8px -2px rgba(99, 102, 241, 0.4),
+          0 0 0 1px rgba(99, 102, 241, 0.2) !important;
+      }
       @media (max-width: 768px) {
+        #app {
+          padding-top: 0.5rem !important; /* 8px on tablets - tighter */
+        }
+        
+        /* Smaller header on tablets */
+        #mainHeader .mx-auto {
+          height: 56px;
+        }
+        
+        #headerSpacer {
+          height: 56px !important;
+        }
+        
         .glass-panel { width: 92vw; }
       }
 
@@ -265,7 +366,11 @@
       }
       
       /* Hide header completely in viewer mode for maximum space */
-      body.in-viewer header {
+      body.in-viewer #mainHeader {
+        display: none !important;
+      }
+      
+      body.in-viewer #headerSpacer {
         display: none !important;
       }
       
@@ -607,6 +712,37 @@
 
       /* Mobile tweaks */
       @media (max-width: 640px) {
+        #app {
+          padding-top: 0.375rem !important; /* 6px on mobile - very tight */
+        }
+        
+        /* Smaller header on mobile */
+        #mainHeader .mx-auto {
+          height: 52px;
+        }
+        
+        #headerSpacer {
+          height: 52px !important;
+        }
+        
+        #mainHeader .mx-auto {
+          padding-left: 1rem;
+          padding-right: 1rem;
+        }
+        
+        #mainHeader a span:last-child {
+          font-size: 1rem;
+        }
+        
+        #headerModeSwitch button {
+          padding: 0.375rem 0.75rem !important;
+          font-size: 0.8125rem !important;
+        }
+        
+        #headerModeSwitch button span span:last-child {
+          display: none; /* Hide text on mobile, keep icons */
+        }
+        
         #viewerContent {
           padding: 0;
         }
@@ -648,12 +784,44 @@
 
       /* Ultra-small phones (e.g., 320–380px) */
       @media (max-width: 380px) {
-        .site-title-text { display: none; }
-        #header-actions { gap: 0.25rem; }
-        #headerModeSwitch button { padding: 0.25rem 0.5rem; font-size: 0.85rem; }
-        #headerUploadBtn { padding: 0.4rem; }
-        #headerUploadBtn span { display: none; }
-        #headerUploadBtn svg { width: 18px; height: 18px; }
+        /* Compact header for tiny screens */
+        #mainHeader .mx-auto {
+          height: 48px !important;
+        }
+        
+        #headerSpacer {
+          height: 48px !important;
+        }
+        
+        #app {
+          padding-top: 0.25rem !important; /* 4px - minimal spacing */
+        }
+        
+        #mainHeader a span:last-child { 
+          display: none; /* Hide "Piano Sheets" text, keep emoji */
+        }
+        
+        #header-actions { 
+          gap: 0.375rem; 
+        }
+        
+        #headerModeSwitch button { 
+          padding: 0.375rem 0.625rem !important; 
+          font-size: 0.8125rem !important; 
+        }
+        
+        #headerUploadBtn { 
+          padding: 0.5rem !important; 
+        }
+        
+        #headerUploadBtn span { 
+          display: none; 
+        }
+        
+        #headerUploadBtn svg { 
+          width: 18px; 
+          height: 18px; 
+        }
         
         .btn span:not(.sr-only) {
           display: none;
@@ -714,19 +882,33 @@
     </style>
   </head>
   <body class="min-h-screen bg-neutral-950 text-neutral-100 antialiased tap-highlight-none">
-    <!-- Header -->
-    <header class="sticky top-0 z-30 bg-neutral-950/80 backdrop-blur border-b border-neutral-800">
-      <div class="mx-auto max-w-7xl px-4 min-h-14 h-auto py-2 flex flex-wrap items-center justify-between gap-2 sm:gap-3">
-        <a href="/" aria-label="Piano Sheets" class="text-base sm:text-lg font-semibold tracking-tight truncate max-w-[58vw] shrink-0 flex items-center gap-2">
-          <span class="text-lg">🎼</span>
-          <span class="site-title-text">Piano Sheets</span>
-        </a>
-        <div id="header-actions" class="flex flex-wrap items-center justify-end gap-2 shrink-0"></div>
+    <!-- Header - Modern Glassmorphism with Auto-Hide -->
+    <header id="mainHeader" class="fixed top-0 left-0 right-0 z-40 transition-transform duration-300 ease-out" style="transform: translateY(0);">
+      <div class="relative bg-gradient-to-b from-neutral-950/95 via-neutral-950/90 to-neutral-950/85 backdrop-blur-xl border-b border-white/[0.08] shadow-lg shadow-black/20">
+        <!-- Subtle gradient overlay for depth -->
+        <div class="absolute inset-0 bg-gradient-to-r from-transparent via-[--accent-color]/5 to-transparent pointer-events-none"></div>
+        
+        <div class="relative mx-auto max-w-7xl px-4 sm:px-6 h-16 flex items-center justify-between gap-3">
+          <!-- Logo with elegant styling -->
+          <a href="/" aria-label="Piano Sheets" class="group flex items-center gap-2.5 shrink-0 transition-all duration-200 hover:scale-[1.02]">
+            <span class="text-2xl transition-transform duration-300 group-hover:rotate-12">🎼</span>
+            <span class="text-lg font-bold tracking-tight bg-gradient-to-br from-white to-neutral-300 bg-clip-text text-transparent">
+              Piano Sheets
+            </span>
+          </a>
+          
+          <!-- Actions container -->
+          <div id="header-actions" class="flex items-center gap-2 shrink-0"></div>
+        </div>
       </div>
     </header>
+    
+    <!-- Spacer to prevent content jump (collapsed when header hidden) -->
+    <!-- Height set by CSS media queries and adjusted by JS -->
+    <div id="headerSpacer"></div>
 
     <!-- Main app mount point -->
-    <main id="app" class="mx-auto max-w-7xl px-4 py-6"></main>
+    <main id="app" class="mx-auto max-w-7xl px-4 sm:px-6 pt-3 pb-6"></main>
 
     <!-- Viewer Controls - Modern Glassmorphism Design -->
     <div id="controls" class="hidden">
@@ -797,6 +979,36 @@
       const controlsEl = document.querySelector('#controls');
       const headerActionsEl = document.querySelector('#header-actions');
   let uploadBtn = null;
+
+      // ===== Initialize responsive header spacer =====
+      const initHeaderSpacer = () => {
+        const headerSpacer = document.getElementById('headerSpacer');
+        if (!headerSpacer) return;
+        
+        const getHeaderHeight = () => {
+          if (window.innerWidth <= 380) return 48;
+          if (window.innerWidth <= 640) return 52;
+          if (window.innerWidth <= 768) return 56;
+          return 64;
+        };
+        
+        // Set initial height
+        headerSpacer.style.height = getHeaderHeight() + 'px';
+        
+        // Update on resize
+        let resizeTimeout;
+        window.addEventListener('resize', () => {
+          clearTimeout(resizeTimeout);
+          resizeTimeout = setTimeout(() => {
+            if (!headerSpacer.classList.contains('hidden')) {
+              headerSpacer.style.height = getHeaderHeight() + 'px';
+            }
+          }, 150);
+        });
+      };
+      
+      // Initialize on load
+      initHeaderSpacer();
 
       // Icons for playlist toggle (add/remove)
       const SVG_PLAYLIST_ADD = `
@@ -2062,6 +2274,9 @@
         const COLLAPSE_DISTANCE = 80; // Distance to fully collapse
         
         const virtualWrap = document.querySelector('#virtualWrap');
+        const mainHeader = document.getElementById('mainHeader');
+        const headerSpacer = document.getElementById('headerSpacer');
+        let headerHidden = false;
         
         // Wait for virtualizer to mount, then attach scroll listener
         requestAnimationFrame(() => {
@@ -2084,6 +2299,40 @@
                 const currentScrollY = scroller.scrollTop;
                 const scrollDelta = currentScrollY - lastScrollY;
                 
+                // ===== HEADER AUTO-HIDE LOGIC =====
+                const HEADER_HIDE_THRESHOLD = 100; // Hide header after scrolling down 100px
+                
+                // Get current header height (responsive)
+                const getHeaderHeight = () => {
+                  if (window.innerWidth <= 380) return 48; // Ultra-small phones
+                  if (window.innerWidth <= 640) return 52; // Mobile
+                  if (window.innerWidth <= 768) return 56; // Tablet
+                  return 64; // Desktop
+                };
+                
+                // Hide header when scrolling down
+                if (scrollDelta > 5 && currentScrollY > HEADER_HIDE_THRESHOLD && !headerHidden && mainHeader) {
+                  headerHidden = true;
+                  mainHeader.classList.add('header-hidden');
+                  // IMMEDIATELY collapse spacer to reclaim space
+                  if (headerSpacer) {
+                    headerSpacer.style.height = '0px';
+                    headerSpacer.style.marginBottom = '0px';
+                  }
+                }
+                // Show header when scrolling up or near top
+                else if ((scrollDelta < -5 || currentScrollY < 50) && headerHidden && mainHeader) {
+                  headerHidden = false;
+                  mainHeader.classList.remove('header-hidden');
+                  // IMMEDIATELY restore spacer with responsive height
+                  if (headerSpacer) {
+                    const headerHeight = getHeaderHeight();
+                    headerSpacer.style.height = headerHeight + 'px';
+                    headerSpacer.style.marginBottom = '';
+                  }
+                }
+                
+                // ===== FILTER COLLAPSE LOGIC (unchanged) =====
                 // Scrolling down - progressively collapse
                 if (scrollDelta > 0 && currentScrollY > SCROLL_THRESHOLD) {
                   if (!isCollapsing && !state.ui.filterCollapsed) {
@@ -2191,10 +2440,10 @@
           const activeId = state.library.categoryFilter;
           const L = state.library;
 
-          // Responsive layout: manage button on right for large screens
+          // Responsive layout: manage button on right for all screens (icon on mobile)
           const wrapStart = `
             <div class="relative">
-              <div class="flex items-center gap-3">
+              <div class="flex items-center gap-2 sm:gap-3">
                 <!-- Scrollable chips container -->
                 <div class="flex-1 overflow-x-auto no-scrollbar">
                   <div class="flex items-center gap-2 py-1">
@@ -2202,20 +2451,13 @@
           const wrapEnd = `
                   </div>
                 </div>
-                <!-- Manage button (right side on large screens) -->
-                <div class="hidden sm:block shrink-0">
-                  <button id="btnManageCategories" class="h-9 px-3 flex items-center gap-2 rounded-lg border border-neutral-700/60 bg-neutral-900/40 text-neutral-300 hover:bg-neutral-800/60 hover:text-neutral-100 hover:border-neutral-600 transition-all shadow-sm" title="Kategorien verwalten">
+                <!-- Manage button (always on right, icon-only on mobile) -->
+                <div class="shrink-0">
+                  <button id="btnManageCategories" class="h-9 flex items-center gap-2 rounded-lg border border-neutral-700/60 bg-neutral-900/40 text-neutral-300 hover:bg-neutral-800/60 hover:text-neutral-100 hover:border-neutral-600 transition-all shadow-sm px-2 sm:px-3" title="Kategorien verwalten">
                     ${SVG_SETTINGS}
-                    <span class="text-xs font-medium">Verwalten</span>
+                    <span class="hidden sm:inline text-xs font-medium">Verwalten</span>
                   </button>
                 </div>
-              </div>
-              <!-- Mobile manage button -->
-              <div class="sm:hidden mt-2 flex justify-center">
-                <button id="btnManageCategoriesMobile" class="h-9 px-4 flex items-center gap-2 rounded-lg border border-neutral-700/60 bg-neutral-900/40 text-neutral-300 hover:bg-neutral-800/60 hover:text-neutral-100 transition-all shadow-sm" title="Kategorien verwalten">
-                  ${SVG_SETTINGS}
-                  <span class="text-xs font-medium">Kategorien verwalten</span>
-                </button>
               </div>
             </div>
           `;
@@ -2311,11 +2553,9 @@
             });
           });
 
-          // Bind both manage buttons (desktop + mobile)
-          const manageDesktop = document.querySelector('#btnManageCategories');
-          const manageMobile = document.querySelector('#btnManageCategoriesMobile');
-          if (manageDesktop) manageDesktop.addEventListener('click', () => openCategoryManager());
-          if (manageMobile) manageMobile.addEventListener('click', () => openCategoryManager());
+          // Bind manage button
+          const manageBtn = document.querySelector('#btnManageCategories');
+          if (manageBtn) manageBtn.addEventListener('click', () => openCategoryManager());
 
           // Show combined filter badge if both favorites and category are active
           updateActiveFiltersBadge();
