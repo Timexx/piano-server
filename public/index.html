@@ -1083,7 +1083,8 @@
           pageSize: "80",
           page: 1,
           items: [],
-          categoryFilter: localStorage.getItem("libCategory") || null
+          categoryFilter: localStorage.getItem("libCategory") || null,
+          scrollListener: null
         },
         viewer: {
           fileName: null, url: null, numPages: 0,
@@ -1706,9 +1707,6 @@
         const L = state.library;
         applyAccentTheme(L.categoryFilter);
         const allMode = L.pageSize === "all";
-        const favCls = L.onlyFavorites
-          ? "bg-amber-500/20 border-amber-400 text-amber-300"
-          : "bg-neutral-900 border-neutral-800";
         const totalPages = Math.max(1, Math.ceil(L.total / L.pageSize));
 
         const isSmallScreen = window.innerWidth <= 540;
@@ -1737,7 +1735,7 @@
                 </button>
                 
                 <!-- Filter Content (collapsible) -->
-                <div id="filterContent" class="transition-all duration-300 ${filterCollapsed ? 'overflow-hidden max-h-0 opacity-0' : 'overflow-visible max-h-[500px] opacity-100'}">
+                <div id="filterContent" class="${filterCollapsed ? 'overflow-hidden opacity-0' : 'overflow-visible opacity-100'}" style="max-height: ${filterCollapsed ? '0' : '500px'}; transform: translateY(0); will-change: max-height, opacity, transform;">
                   <div class="p-4 space-y-3">
                     <!-- Search Row -->
                     <div class="relative w-full">
@@ -1754,13 +1752,6 @@
 
                     <!-- Controls Row -->
                     <div class="flex flex-wrap items-center gap-2">
-                      <!-- Favorites Filter -->
-                      <button id="filterFav" class="px-3.5 h-9 rounded-lg border transition-all shadow-sm ${favCls} flex items-center gap-2 font-medium text-sm whitespace-nowrap" aria-pressed="${L.onlyFavorites}" title="Nur Favoriten">
-                        <span class="text-amber-400 text-base">★</span>
-                        <span class="hidden sm:inline">Favoriten</span>
-                        ${state.library.favorites && state.library.favorites.size > 0 ? `<span class="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full text-xs font-bold ${L.onlyFavorites ? 'bg-amber-400 text-neutral-900' : 'bg-amber-500/20 text-amber-300'}">${state.library.favorites.size}</span>` : ''}
-                      </button>
-
                       <!-- Sort Controls -->
                       <div class="inline-flex items-center gap-1.5 p-1 rounded-lg border border-neutral-800/60 bg-neutral-950/50 shadow-sm">
                         <div class="relative">
@@ -2043,14 +2034,123 @@
           });
         }
 
-        document.querySelector('#filterFav').onclick = async () => {
-          L.onlyFavorites = !L.onlyFavorites;
-          localStorage.setItem("onlyFav", String(L.onlyFavorites));
-          L.page = 1;
-          appEl.innerHTML = '<div class="flex items-center justify-center h-[70vh] text-neutral-400">Lade…</div>';
-          await loadPage();
-          renderLibrary();
-        };
+        // Progressive auto-collapse filter on scroll (Spotify-style)
+        // Remove old listener if exists
+        if (state.library.scrollListener) {
+          const oldScroller = document.querySelector('#virtualWrap .relative.w-full.h-full.overflow-auto');
+          if (oldScroller) {
+            oldScroller.removeEventListener('scroll', state.library.scrollListener);
+          }
+          state.library.scrollListener = null;
+        }
+        
+        let lastScrollY = 0;
+        let isCollapsing = false;
+        const SCROLL_THRESHOLD = 20; // Start collapsing after minimal scroll
+        const COLLAPSE_DISTANCE = 80; // Distance to fully collapse
+        
+        const virtualWrap = document.querySelector('#virtualWrap');
+        
+        // Wait for virtualizer to mount, then attach scroll listener
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            const scroller = virtualWrap?.querySelector('.relative.w-full.h-full.overflow-auto');
+            const filterContent = document.querySelector('#filterContent');
+            const filterPanel = document.querySelector('#filterPanel');
+            
+            if (scroller && filterContent && filterPanel) {
+              // Get initial full height
+              let fullHeight = 0;
+              if (!state.ui.filterCollapsed) {
+                filterContent.style.maxHeight = 'none';
+                filterContent.style.opacity = '1';
+                fullHeight = filterContent.scrollHeight;
+                filterContent.style.maxHeight = fullHeight + 'px';
+              }
+              
+              const handleScroll = () => {
+                const currentScrollY = scroller.scrollTop;
+                const scrollDelta = currentScrollY - lastScrollY;
+                
+                // Scrolling down - progressively collapse
+                if (scrollDelta > 0 && currentScrollY > SCROLL_THRESHOLD) {
+                  if (!isCollapsing && !state.ui.filterCollapsed) {
+                    isCollapsing = true;
+                    // Ensure we have the full height
+                    if (fullHeight === 0) {
+                      filterContent.style.maxHeight = 'none';
+                      fullHeight = filterContent.scrollHeight;
+                    }
+                  }
+                  
+                  if (isCollapsing && !state.ui.filterCollapsed) {
+                    // Calculate collapse progress (0 to 1)
+                    const scrollProgress = Math.min((currentScrollY - SCROLL_THRESHOLD) / COLLAPSE_DISTANCE, 1);
+                    const currentHeight = fullHeight * (1 - scrollProgress);
+                    const currentOpacity = 1 - (scrollProgress * 0.6); // Fade to 40% opacity
+                    
+                    // Apply smooth transform with NO transition (immediate response)
+                    filterContent.style.transition = 'none';
+                    filterContent.style.maxHeight = Math.max(0, currentHeight) + 'px';
+                    filterContent.style.opacity = String(Math.max(0.4, currentOpacity));
+                    filterContent.style.overflow = 'hidden';
+                    filterContent.style.transform = `translateY(${-scrollProgress * 8}px)`; // Slide up slightly
+                    
+                    // Fully collapsed?
+                    if (scrollProgress >= 1) {
+                      state.ui.filterCollapsed = true;
+                      localStorage.setItem('filterCollapsed', 'true');
+                      filterContent.style.maxHeight = '0';
+                      filterContent.style.opacity = '0';
+                      
+                      // Update toggle button icon
+                      const toggleBtn = document.querySelector('#filterToggle');
+                      if (toggleBtn) {
+                        const iconContainer = toggleBtn.querySelector('div:last-child');
+                        if (iconContainer) {
+                          iconContainer.innerHTML = SVG_CHEVRON_DOWN;
+                        }
+                        toggleBtn.setAttribute('aria-expanded', 'false');
+                        toggleBtn.title = 'Filter anzeigen';
+                      }
+                      isCollapsing = false;
+                    }
+                  }
+                }
+                // Scrolling up - expand if collapsed or near top
+                else if (scrollDelta < 0 && currentScrollY < SCROLL_THRESHOLD * 2 && state.ui.filterCollapsed) {
+                  state.ui.filterCollapsed = false;
+                  localStorage.setItem('filterCollapsed', 'false');
+                  isCollapsing = false;
+                  
+                  // Smooth expand animation
+                  filterContent.style.transition = 'max-height 350ms cubic-bezier(0.4, 0.0, 0.2, 1), opacity 350ms cubic-bezier(0.4, 0.0, 0.2, 1), transform 350ms cubic-bezier(0.4, 0.0, 0.2, 1)';
+                  filterContent.style.maxHeight = fullHeight + 'px';
+                  filterContent.style.opacity = '1';
+                  filterContent.style.transform = 'translateY(0)';
+                  filterContent.style.overflow = 'visible';
+                  
+                  // Update toggle button icon
+                  const toggleBtn = document.querySelector('#filterToggle');
+                  if (toggleBtn) {
+                    const iconContainer = toggleBtn.querySelector('div:last-child');
+                    if (iconContainer) {
+                      iconContainer.innerHTML = SVG_CHEVRON_UP;
+                    }
+                    toggleBtn.setAttribute('aria-expanded', 'true');
+                    toggleBtn.title = 'Filter ausblenden';
+                  }
+                }
+                
+                lastScrollY = currentScrollY;
+              };
+              
+              scroller.addEventListener('scroll', handleScroll, { passive: true });
+              state.library.scrollListener = handleScroll;
+            }
+          });
+        });
+
         document.querySelector('#prevPage').onclick = async () => {
           if (L.page > 1) {
             L.page--;
@@ -2077,6 +2177,7 @@
           if (!host) return;
           const categories = state.categories || [];
           const activeId = state.library.categoryFilter;
+          const L = state.library;
 
           const wrapStart = `
             <div class="relative">
@@ -2087,16 +2188,31 @@
             </div>
           `;
 
-          // Build chips (start with "Alle")
+          // Build chips - START MIT FAVORITEN
           const chips = [];
-          const allActive = !activeId;
+          
+          // 1. FAVORITEN CHIP (als erstes!)
+          const favActive = L.onlyFavorites;
+          const favCls = favActive
+            ? "bg-amber-500/25 border-amber-400 text-amber-300"
+            : "bg-amber-500/10 border-amber-500/30 text-amber-400/80";
+          const favCount = state.library.favorites?.size || 0;
+          chips.push(`<button id="filterFavChip" class="category-pill px-3 py-1.5 rounded-full border flex items-center gap-2 text-sm ${favActive ? 'font-semibold' : 'font-medium'} ${favCls}" data-cat="__favorites" title="Nur Favoriten anzeigen">
+              <span class="text-base leading-none">★</span>
+              <span>Favoriten</span>
+              ${favCount > 0 ? `<span class="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full text-xs font-bold ${favActive ? 'bg-amber-400 text-neutral-900' : 'bg-amber-500/20 text-amber-300'}">${favCount}</span>` : ''}
+            </button>`);
+          
+          // 2. "Alle" Chip
+          const allActive = !activeId && !L.onlyFavorites;
           chips.push(`<button class="category-pill px-3 py-1.5 rounded-full border flex items-center gap-2 text-sm ${allActive ? 'font-semibold' : 'font-medium'}" data-cat="__all" style="background:${allActive ? 'rgba(148,163,184,0.28)' : 'rgba(148,163,184,0.12)'};border-color:${allActive ? '#94a3b8' : 'rgba(148,163,184,0.35)'};color:${allActive ? '#e5e7eb' : '#94a3b8'};">
               <span class="text-base leading-none">◎</span>
               <span>Alle</span>
             </button>`);
 
+          // 3. Kategorie Chips
           for (const cat of categories) {
-            const isActive = cat.id === activeId;
+            const isActive = cat.id === activeId && !L.onlyFavorites;
             const bg = isActive ? `${cat.color}33` : `${cat.color}1a`;
             const border = isActive ? cat.color : `${cat.color}40`;
             const text = isActive ? '#f8fafc' : cat.color;
@@ -2106,7 +2222,9 @@
                 <span>${cat.name}</span>
               </button>`);
           }
-          const noneActive = activeId === 'none';
+          
+          // 4. "Ohne" Chip
+          const noneActive = activeId === 'none' && !L.onlyFavorites;
           chips.push(`<button class="category-pill px-3 py-1.5 rounded-full border flex items-center gap-2 text-sm ${noneActive ? 'font-semibold' : 'font-medium'}" data-cat="none" style="background:${noneActive ? 'rgba(148,163,184,0.28)' : 'rgba(148,163,184,0.12)'};border-color:${noneActive ? '#94a3b8' : 'rgba(148,163,184,0.35)'};color:${noneActive ? '#e5e7eb' : '#94a3b8'};">
                 <span class="text-base leading-none">◌</span>
                 <span>Ohne</span>
@@ -2119,7 +2237,27 @@
           host.querySelectorAll('[data-cat]').forEach((btn) => {
             btn.addEventListener('click', async () => {
               const id = btn.getAttribute('data-cat');
+              
+              // Handle favorites chip
+              if (id === '__favorites') {
+                L.onlyFavorites = !L.onlyFavorites;
+                localStorage.setItem("onlyFav", String(L.onlyFavorites));
+                L.page = 1;
+                L.categoryFilter = null; // Clear category filter when toggling favorites
+                localStorage.removeItem("libCategory");
+                appEl.innerHTML = '<div class="flex items-center justify-center h-[70vh] text-neutral-400">Lade…</div>';
+                await loadPage();
+                renderLibrary();
+                return;
+              }
+              
+              // Handle other category chips
               const target = (id === '__all') ? null : (id === state.library.categoryFilter ? null : id);
+              // Clear favorites filter when selecting a category
+              if (L.onlyFavorites && target) {
+                L.onlyFavorites = false;
+                localStorage.setItem("onlyFav", "false");
+              }
               await applyCategoryFilter(target);
             });
           });
