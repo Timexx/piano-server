@@ -459,6 +459,12 @@
     return document.querySelector(`[data-page="${pageNumber}"]`);
   }
 
+  function getPageStage(pageNumber) {
+    const root = getPageElement(pageNumber);
+    if (!root) return null;
+    return root.querySelector('[data-role="page-stage"]') || root;
+  }
+
   function getPageNumberFromElement(el) {
     const pageEl = el?.closest("[data-page]");
     if (!pageEl) return null;
@@ -906,10 +912,10 @@
 
   function createOverlay(pair, role, point) {
     if (!isPoint(point)) return null;
-    const pageEl = getPageElement(point.pageNumber);
-    if (!pageEl) return null;
-    if (window.getComputedStyle(pageEl).position === "static") {
-      pageEl.style.position = "relative";
+    const stageEl = getPageStage(point.pageNumber);
+    if (!stageEl) return null;
+    if (window.getComputedStyle(stageEl).position === "static") {
+      stageEl.style.position = "relative";
     }
     const overlay = document.createElement("button");
     overlay.type = "button";
@@ -940,8 +946,7 @@
       overlay.addEventListener("pointerdown", (event) => handleMarkerDragStart(event, pair, role, point));
       overlay.addEventListener("touchstart", (event) => handleMarkerTouchStart(event, pair, role, point), { passive: false });
     }
-    
-    pageEl.appendChild(overlay);
+    stageEl.appendChild(overlay);
     return overlay;
   }
 
@@ -1033,8 +1038,9 @@
     event.preventDefault();
     event.stopPropagation();
 
-    const overlay = event.currentTarget;
-    const canvas = overlay.closest("[data-page]")?.querySelector("canvas");
+  const overlay = event.currentTarget;
+  const stage = overlay.closest('[data-role="page-stage"]');
+  const canvas = stage?.querySelector("canvas") || overlay.closest("[data-page]")?.querySelector("canvas");
     if (!canvas) return;
 
     startMarkerDragSession({
@@ -1091,8 +1097,9 @@
     event.preventDefault();
     event.stopPropagation();
 
-    const overlay = event.currentTarget;
-    const canvas = overlay.closest("[data-page]")?.querySelector("canvas");
+  const overlay = event.currentTarget;
+  const stage = overlay.closest('[data-role="page-stage"]');
+  const canvas = stage?.querySelector("canvas") || overlay.closest("[data-page]")?.querySelector("canvas");
     if (!canvas) return;
 
     startMarkerDragSession({
@@ -1154,7 +1161,12 @@
     const viewer = getViewer();
     const pageEl = getPageElement(point.pageNumber);
     if (!viewer || !pageEl) return;
-    const target = pageEl.offsetTop + (pageEl.offsetHeight * (point.y / 100)) - viewer.clientHeight * 0.25;
+    const stageEl = pageEl.querySelector('[data-role="page-stage"]') || pageEl;
+    const stageRect = stageEl.getBoundingClientRect();
+    const viewerRect = viewer.getBoundingClientRect();
+    const height = stageRect.height || pageEl.offsetHeight;
+    const stageTopWithinViewer = stageRect.top - viewerRect.top + viewer.scrollTop;
+    const target = stageTopWithinViewer + (height * (point.y / 100)) - viewer.clientHeight * 0.25;
     viewer.scrollTo({ top: Math.max(0, target), behavior: "smooth" });
   }
 
