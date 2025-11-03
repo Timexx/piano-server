@@ -2229,7 +2229,19 @@
         viewer: {
           fileName: null, url: null, numPages: 0,
           secsPerPage: 45,
-          autoScroll: { running: false, lastTs: 0, speedPxPerSec: 0, needsRecalc: false, pending: false, token: null, pos: 0 },
+          autoScroll: {
+            running: false,
+            pending: false,
+            lastTs: 0,
+            speedPxPerSec: 0,
+            needsRecalc: false,
+            token: null,
+            pos: 0,
+            rafId: null,
+            userAdjusting: false,
+            userActiveUntil: 0,
+            ignoreScrollUntil: 0
+          },
           wakeDesired: false,
           wakeLock: null, noSleep: null, noSleepEnabled: false,
           wakeTimer: null,
@@ -5999,16 +6011,27 @@
           state.viewer.layoutObserver.disconnect();
           state.viewer.layoutObserver = null;
         }
+        if (state.viewer.autoScroll.rafId !== null) {
+          cancelAnimationFrame(state.viewer.autoScroll.rafId);
+          state.viewer.autoScroll.rafId = null;
+        }
         state.viewer.autoScroll.running = false;
+        state.viewer.autoScroll.pending = false;
         state.viewer.autoScroll.speedPxPerSec = 0;
         state.viewer.autoScroll.lastTs = 0;
         state.viewer.autoScroll.needsRecalc = false;
-  state.viewer.autoScroll.pending = false;
-  state.viewer.autoScroll.token = null;
-    state.viewer.pageBlockHeight = null;
-    state.viewer.pageStageWidth = null;
-    state.viewer.pageLabelAllowance = null;
-    state.viewer.pageScaledHeight = null;
+        state.viewer.autoScroll.token = null;
+        state.viewer.autoScroll.pos = 0;
+        state.viewer.autoScroll.userAdjusting = false;
+        state.viewer.autoScroll.userActiveUntil = 0;
+        state.viewer.autoScroll.ignoreScrollUntil = 0;
+        state.viewer.pageBlockHeight = null;
+        state.viewer.pageStageWidth = null;
+        state.viewer.pageLabelAllowance = null;
+        state.viewer.pageScaledHeight = null;
+        state.viewer.commitSecsPerPageInput = null;
+        state.viewer.persistedSecsPerPage = null;
+        state.viewer.secsPerPageDirty = false;
         
         // Clear any existing memory before starting
         aggressiveCleanup();
@@ -6095,25 +6118,27 @@
           }
         }
 
-  const btnPlayPause = document.querySelector('#btnPlayPause');
+        const btnPlayPause = document.querySelector('#btnPlayPause');
         btnPlayPause.onclick = togglePlayAndWake;
 
         // Arm gesture activator for wake lock on the viewer container
         armWakeLockFromGestures(container);
         startWakeWatch();
 
-  // Let the pianist adjust scroll position while auto-scroll runs;
-  // resume from that position when released.
-  registerUserScrollControls(container);
+        // Let the pianist adjust scroll position while auto-scroll runs;
+        // resume from that position when released.
+        registerUserScrollControls(container);
 
-    const prefs = await getFilePrefsFromBackend(fileName);
-    state.viewer.secsPerPage = prefs?.secsPerPage || 45;
-    state.viewer.categories = Array.isArray(prefs?.categories) ? prefs.categories : [];
-    state.viewer.jumpMarkers = Array.isArray(prefs?.jumpMarkers) ? prefs.jumpMarkers : [];
-    const bustToken = prefs?.mtime || Date.now();
-    state.viewer.url = `/sheets/${encodePathSegments(fileName)}?v=${bustToken}`;
-  state.viewer.cacheToken = bustToken;
+        const prefs = await getFilePrefsFromBackend(fileName);
+        state.viewer.secsPerPage = prefs?.secsPerPage || 45;
+        state.viewer.categories = Array.isArray(prefs?.categories) ? prefs.categories : [];
+        state.viewer.jumpMarkers = Array.isArray(prefs?.jumpMarkers) ? prefs.jumpMarkers : [];
+        const bustToken = prefs?.mtime || Date.now();
+        state.viewer.url = `/sheets/${encodePathSegments(fileName)}?v=${bustToken}`;
+        state.viewer.cacheToken = bustToken;
         state.viewer.editMode = false;
+        state.viewer.persistedSecsPerPage = state.viewer.secsPerPage;
+        state.viewer.secsPerPageDirty = false;
         
         // 1. Setze Farbe basierend auf Kategorie oder Fallback
         applyAccentTheme(state.viewer.categories[0]?.id || state.library.categoryFilter);
@@ -6122,21 +6147,75 @@
         applyPlayButtonColor();
         
         const secsInput = document.querySelector('#secsPerPage');
-        secsInput.value = state.viewer.secsPerPage;
-        secsInput.addEventListener("change", async (e) => {
-          const v = Math.max(5, Math.min(600, Number(e.target.value || 45)));
-          state.viewer.secsPerPage = v;
-          await setFileSecsOnBackend(fileName, v);
-          updateStatus();
-          if (state.viewer.autoScroll.running) {
-            computeSpeed();
-            state.viewer.autoScroll.lastTs = performance.now();
-            state.viewer.autoScroll.needsRecalc = state.viewer.autoScroll.speedPxPerSec <= 0.01;
-          } else if (state.viewer.autoScroll.needsRecalc) {
-            computeSpeed();
-            state.viewer.autoScroll.needsRecalc = state.viewer.autoScroll.speedPxPerSec <= 0.01;
-          }
-        });
+        if (secsInput) {
+          const parseSecsPerPageValue = (raw) => {
+            if (typeof raw === "number" && Number.isFinite(raw)) return raw;
+            const str = String(raw ?? "").replace(",", ".").trim();
+            if (!str) return null;
+            const num = Number(str);
+            return Number.isFinite(num) ? num : null;
+          };
+          const updateSecsPerPage = (raw, options = {}) => {
+            const { allowBelowMin = false, clampInput = false } = options;
+            const parsed = parseSecsPerPageValue(raw);
+            if (parsed === null) return null;
+            if (!allowBelowMin && parsed < 5) return null;
+            const clamped = Math.max(5, Math.min(600, parsed));
+            const prev = state.viewer.secsPerPage;
+            if (prev !== clamped) {
+              state.viewer.secsPerPage = clamped;
+              computeSpeed();
+              state.viewer.autoScroll.needsRecalc = true;
+              if (state.viewer.autoScroll.running) {
+                state.viewer.autoScroll.lastTs = performance.now();
+              }
+            } else if (!state.viewer.autoScroll.running) {
+              state.viewer.autoScroll.needsRecalc = state.viewer.autoScroll.speedPxPerSec <= 0.01;
+            }
+            if (clampInput && secsInput.value !== String(clamped)) {
+              secsInput.value = String(clamped);
+            }
+            state.viewer.secsPerPageDirty = state.viewer.secsPerPage !== state.viewer.persistedSecsPerPage;
+            return { value: state.viewer.secsPerPage, changed: prev !== clamped };
+          };
+          const persistSecsPerPage = async () => {
+            if (!state.viewer.secsPerPageDirty) return;
+            try {
+              await setFileSecsOnBackend(fileName, state.viewer.secsPerPage);
+              state.viewer.persistedSecsPerPage = state.viewer.secsPerPage;
+              state.viewer.secsPerPageDirty = false;
+              updateStatus();
+            } catch (err) {
+              console.warn("Failed to persist secsPerPage", err);
+            }
+          };
+          secsInput.value = String(state.viewer.secsPerPage);
+          secsInput.addEventListener("input", (e) => {
+            updateSecsPerPage(e.target.value, { allowBelowMin: false });
+          });
+          secsInput.addEventListener("change", async () => {
+            const res = updateSecsPerPage(secsInput.value, { allowBelowMin: true, clampInput: true });
+            if (!res) {
+              secsInput.value = String(state.viewer.secsPerPage);
+              return;
+            }
+            await persistSecsPerPage();
+          });
+          state.viewer.commitSecsPerPageInput = async (opts = {}) => {
+            const { persist = false, allowBelowMin = true, clampInput = true } = opts;
+            const res = updateSecsPerPage(secsInput.value, { allowBelowMin, clampInput });
+            if (!res) {
+              secsInput.value = String(state.viewer.secsPerPage);
+              return state.viewer.secsPerPage;
+            }
+            if (persist) {
+              await persistSecsPerPage();
+            }
+            return state.viewer.secsPerPage;
+          };
+        } else {
+          state.viewer.commitSecsPerPageInput = async () => state.viewer.secsPerPage;
+        }
 
         window.addEventListener("keydown", (e) => {
           if (e.code === "Space") { e.preventDefault(); btnPlayPause.click(); }
@@ -6814,95 +6893,150 @@
         state.viewer.autoScroll.speedPxPerSec = totalSecs > 0 ? totalScrollable / totalSecs : 0;
       }
       async function startAutoScroll() {
-        // Fallback: Standard-Scroll ohne Markierungen
         const viewerEl = document.querySelector('#viewer');
         if (!viewerEl) return;
         if (state.viewer.autoScroll.running || state.viewer.autoScroll.pending) return;
 
-        // Scrolling SOFORT starten, ohne auf Content zu warten
-        state.viewer.autoScroll.running = true;
-        state.viewer.autoScroll.lastTs = performance.now();
-        state.viewer.autoScroll.needsRecalc = true;
-        // Akkumulator initialisieren, um Subpixel-Verluste zu vermeiden (iOS)
-        state.viewer.autoScroll.pos = viewerEl.scrollTop || 0;
+        const S = state.viewer.autoScroll;
+        if (S.rafId !== null) {
+          cancelAnimationFrame(S.rafId);
+          S.rafId = null;
+        }
+        S.pending = true;
+        S.running = true;
+        S.needsRecalc = true;
+        S.userAdjusting = false;
+        S.userActiveUntil = 0;
+        S.ignoreScrollUntil = 0;
+        S.pos = viewerEl.scrollTop || 0;
+        S.lastTs = performance.now();
 
-        // iOS Kick: minimal scrollen, damit IO-Callbacks sicher feuern
         try { viewerEl.scrollTop = Math.min(1, viewerEl.scrollHeight - viewerEl.clientHeight); } catch {}
 
-        // Falls noch nichts gerendert ist: erste Seiten sofort rendern
-        await ensureFirstPagesRendered();
+        try {
+          await ensureFirstPagesRendered();
+        } catch (err) {
+          console.warn('ensureFirstPagesRendered failed', err);
+        }
 
         computeSpeed();
+        S.pos = viewerEl.scrollTop || 0;
+        S.lastTs = performance.now();
+        S.ignoreScrollUntil = performance.now() + 50;
+        S.pending = false;
+
         updateStatus("Auto-Scroll: läuft");
         refreshPlayPauseUI();
-        requestAnimationFrame(tickAutoScroll);
+        S.rafId = requestAnimationFrame(tickAutoScroll);
       }
 
       // Unified handler: activates screen-on and toggles play/pause in one action
-      function togglePlayAndWake() {
+      async function togglePlayAndWake() {
         const btn = document.querySelector('#btnPlayPause');
         if (!btn || btn.disabled) return;
         btn.disabled = true;
 
         if (state.viewer.autoScroll.running || state.viewer.autoScroll.pending) {
-          // Pause
           stopAutoScroll();
           btn.disabled = false;
           refreshPlayPauseUI();
-        } else {
-          // Start: ensure screen stays on (synchronously for iOS), then start scrolling
+          return;
+        }
+
+        try {
+          if (typeof state.viewer.commitSecsPerPageInput === "function") {
+            await state.viewer.commitSecsPerPageInput({ persist: true });
+          } else {
+            const secsEl = document.querySelector('#secsPerPage');
+            if (secsEl) {
+              const raw = String(secsEl.value ?? "").replace(",", ".").trim();
+              if (raw) {
+                const parsed = Number(raw);
+                if (Number.isFinite(parsed)) {
+                  const clamped = Math.max(5, Math.min(600, parsed));
+                  if (state.viewer.secsPerPage !== clamped) {
+                    state.viewer.secsPerPage = clamped;
+                    computeSpeed();
+                    state.viewer.autoScroll.needsRecalc = true;
+                  }
+                }
+              }
+            }
+          }
           state.viewer.wakeDesired = true;
-          // Re-arm gesture listeners just in case this is the first interaction
           armWakeLockFromGestures(document);
           try { acquireWakeLockSync(); } catch {}
-          startAutoScroll()
-            .finally(() => {
-              btn.disabled = false;
-              refreshPlayPauseUI();
-            });
-          // Extra safety: try async acquisition shortly after to catch API availability
+          await startAutoScroll();
           setTimeout(() => { acquireWakeLockAuto(); }, 300);
           startWakeWatch();
+        } finally {
+          btn.disabled = false;
+          refreshPlayPauseUI();
         }
       }
       function stopAutoScroll() {
-        const wasRunning = state.viewer.autoScroll.running;
-        state.viewer.autoScroll.running = false;
-        state.viewer.autoScroll.pending = false;
-        state.viewer.autoScroll.needsRecalc = false;
-        state.viewer.autoScroll.token = null;
+        const S = state.viewer.autoScroll;
+        const wasRunning = S.running;
+        S.running = false;
+        S.pending = false;
+        S.needsRecalc = false;
+        S.speedPxPerSec = 0;
+        S.token = null;
+        S.userAdjusting = false;
+        S.userActiveUntil = 0;
+        S.ignoreScrollUntil = 0;
+        if (S.rafId !== null) {
+          cancelAnimationFrame(S.rafId);
+          S.rafId = null;
+        }
+        const viewerEl = document.querySelector('#viewer');
+        if (viewerEl) {
+          S.pos = viewerEl.scrollTop || 0;
+          S.lastTs = performance.now();
+        }
         if (wasRunning) {
           updateStatus("Auto-Scroll: pausiert");
         }
       }
       function tickAutoScroll(ts) {
-        if (!state.viewer.autoScroll.running) return;
-        const el = document.querySelector('#viewer');
-        if (!el) { 
-          stopAutoScroll(); 
-          refreshPlayPauseUI(); 
-          return; 
-        }
         const S = state.viewer.autoScroll;
+        if (!S.running) {
+          S.rafId = null;
+          return;
+        }
+        const el = document.querySelector('#viewer');
+        if (!el) {
+          stopAutoScroll();
+          refreshPlayPauseUI();
+          return;
+        }
         // If the user is actively adjusting (dragging) or momentum/settling is ongoing,
         // don't override their position; just keep the loop alive and sync base.
         if (S.userAdjusting || (S.userActiveUntil && ts < S.userActiveUntil)) {
           S.pos = el.scrollTop || 0;
           S.lastTs = ts;
-          requestAnimationFrame(tickAutoScroll);
+          S.rafId = requestAnimationFrame(tickAutoScroll);
           return;
         }
         
         // Geschwindigkeit neu berechnen wenn nötig (z.B. wenn Seiten nachladen)
-        if (state.viewer.autoScroll.needsRecalc || state.viewer.autoScroll.speedPxPerSec <= 0.01) {
+        if (S.needsRecalc || S.speedPxPerSec <= 0.01) {
           computeSpeed();
-          state.viewer.autoScroll.needsRecalc = false;
+          S.needsRecalc = false;
+        }
+        if (!S.running) {
+          S.rafId = null;
+          return;
         }
         
-  const dt = (ts - S.lastTs) / 1000;
-  S.lastTs = ts;
+        const dt = Math.max(0, (ts - S.lastTs) / 1000);
+        S.lastTs = ts;
+        if (!S.running) {
+          S.rafId = null;
+          return;
+        }
 
-  const delta = state.viewer.autoScroll.speedPxPerSec * dt;
+        const delta = S.speedPxPerSec * dt;
         // Falls noch nicht scrollbar, NICHT stoppen – warten bis Content kommt
         const maxScrollTop = Math.max(0, el.scrollHeight - el.clientHeight);
         if (maxScrollTop <= 1) {
@@ -6911,15 +7045,19 @@
             try { S.ignoreScrollUntil = performance.now() + 50; el.scrollTop = 1; } catch {}
           }
           // Nächster Frame: erneut versuchen
-          state.viewer.autoScroll.needsRecalc = true;
-          requestAnimationFrame(tickAutoScroll);
+          S.needsRecalc = true;
+          S.rafId = requestAnimationFrame(tickAutoScroll);
           return;
         }
 
         // Float-Akkumulator verwenden, um Subpixel-Bewegung nicht zu verlieren
-  S.pos = Math.min((S.pos || el.scrollTop || 0) + delta, maxScrollTop);
-  S.ignoreScrollUntil = performance.now() + 50; // ignore immediate scroll event from programmatic set
-  el.scrollTop = S.pos;
+        S.pos = Math.min((S.pos || el.scrollTop || 0) + delta, maxScrollTop);
+        S.ignoreScrollUntil = performance.now() + 50; // ignore immediate scroll event from programmatic set
+        el.scrollTop = S.pos;
+        if (!S.running) {
+          S.rafId = null;
+          return;
+        }
 
         // Am Ende angekommen?
         if (el.scrollTop >= maxScrollTop - 1) {
@@ -6929,7 +7067,7 @@
           return;
         }
         
-        requestAnimationFrame(tickAutoScroll);
+        S.rafId = requestAnimationFrame(tickAutoScroll);
       }
       function refreshPlayPauseUI() {
         const btn = document.querySelector('#btnPlayPause');

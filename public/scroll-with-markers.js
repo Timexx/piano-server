@@ -130,7 +130,11 @@ function computeSequenceSpeed() {
  * Erweiterte Tick-Funktion für sequenzbasiertes Scrolling
  */
 function tickAutoScrollWithMarkers(ts) {
-  if (!state.viewer.autoScroll.running) return;
+  const S = state.viewer.autoScroll;
+  if (!S.running) {
+    S.rafId = null;
+    return;
+  }
   
   const viewer = document.querySelector('#viewer');
   if (!viewer) {
@@ -139,30 +143,36 @@ function tickAutoScrollWithMarkers(ts) {
     return;
   }
   
-  const S = state.viewer.autoScroll;
-  
   // User-Interaktion berücksichtigen
   if (S.userAdjusting || (S.userActiveUntil && ts < S.userActiveUntil)) {
     S.lastTs = ts;
-    requestAnimationFrame(tickAutoScrollWithMarkers);
+    S.rafId = requestAnimationFrame(tickAutoScrollWithMarkers);
     return;
   }
   
   // Delta-Zeit berechnen
-  const dt = (ts - S.lastTs) / 1000;
+  const dt = Math.max(0, (ts - S.lastTs) / 1000);
   S.lastTs = ts;
+  if (!S.running) {
+    S.rafId = null;
+    return;
+  }
   
   // Geschwindigkeit neu berechnen wenn nötig
   if (S.needsRecalc || S.speedPxPerSec <= 0.01) {
     computeSequenceSpeed();
     S.needsRecalc = false;
   }
+  if (!S.running) {
+    S.rafId = null;
+    return;
+  }
   
   const maxScrollTop = Math.max(0, viewer.scrollHeight - viewer.clientHeight);
   if (maxScrollTop <= 1) {
     // Warte auf Inhalte
     S.needsRecalc = true;
-    requestAnimationFrame(tickAutoScrollWithMarkers);
+    S.rafId = requestAnimationFrame(tickAutoScrollWithMarkers);
     return;
   }
   
@@ -181,7 +191,7 @@ function tickAutoScrollWithMarkers(ts) {
   if (!pagePos) {
     // Seite noch nicht geladen, warte
     S.needsRecalc = true;
-    requestAnimationFrame(tickAutoScrollWithMarkers);
+    S.rafId = requestAnimationFrame(tickAutoScrollWithMarkers);
     return;
   }
   
@@ -233,7 +243,11 @@ function tickAutoScrollWithMarkers(ts) {
     viewer.scrollTop = Math.min(newScrollTop, maxScrollTop);
   }
   
-  requestAnimationFrame(tickAutoScrollWithMarkers);
+  if (!S.running) {
+    S.rafId = null;
+    return;
+  }
+  S.rafId = requestAnimationFrame(tickAutoScrollWithMarkers);
 }
 
 /**
@@ -244,11 +258,19 @@ async function startAutoScrollWithMarkers() {
   if (!viewerEl) return;
   if (state.viewer.autoScroll.running || state.viewer.autoScroll.pending) return;
   
-  state.viewer.autoScroll.pending = true;
-  state.viewer.autoScroll.running = true;
-  state.viewer.autoScroll.lastTs = performance.now();
-  state.viewer.autoScroll.needsRecalc = true;
-  state.viewer.autoScroll.pos = viewerEl.scrollTop || 0;
+  const S = state.viewer.autoScroll;
+  if (S.rafId !== null) {
+    cancelAnimationFrame(S.rafId);
+    S.rafId = null;
+  }
+  S.pending = true;
+  S.running = true;
+  S.lastTs = performance.now();
+  S.needsRecalc = true;
+  S.pos = viewerEl.scrollTop || 0;
+  S.userAdjusting = false;
+  S.userActiveUntil = 0;
+  S.ignoreScrollUntil = 0;
   
   // iOS Kick
   try {
@@ -260,19 +282,22 @@ async function startAutoScrollWithMarkers() {
       await ensureFirstPagesRendered();
     }
   } finally {
-    state.viewer.autoScroll.pending = false;
+    S.pending = false;
   }
   
   // Initialisiere Sequenz (nachdem Seiten verfügbar sind)
   initializeScrollSequence();
   
   computeSequenceSpeed();
+  S.pos = viewerEl.scrollTop || 0;
+  S.lastTs = performance.now();
+  S.ignoreScrollUntil = performance.now() + 50;
   
   const hasMarkers = (state.viewer.jumpMarkers || []).length > 0;
   safeUpdateStatus(`Auto-Scroll: läuft${hasMarkers ? ' (mit Sprungmarkierungen)' : ''}`);
   safeRefreshPlayPauseUI();
   
-  requestAnimationFrame(tickAutoScrollWithMarkers);
+  S.rafId = requestAnimationFrame(tickAutoScrollWithMarkers);
 }
 
 // Export

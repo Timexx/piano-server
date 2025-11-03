@@ -792,9 +792,9 @@ async function ensureThumbnail(pdfInfo) {
   }
 
   try {
-    console.log(`Creating thumbnail from PDF for ${relPdf}...`);
+    // console.log(`Creating thumbnail from PDF for ${relPdf}...`);
     await createThumbnailFromPdf(pdfPath, thumbPath, relPdf);
-    console.log(`Thumbnail created successfully for ${relPdf}`);
+    // console.log(`Thumbnail created successfully for ${relPdf}`);
   } catch (err) {
     console.error(`createThumbnailFromPdf failed for ${relPdf}:`, err);
     await writeFallbackThumbnail(thumbPath);
@@ -855,7 +855,7 @@ async function createThumbnailFromPdf(pdfPath, thumbPath, relPdf) {
   if (typeof pdf.cleanup === "function") pdf.cleanup();
   if (typeof pdf.destroy === "function") pdf.destroy();
 
-  console.log(`Generated thumbnail for: ${relPdf}`);
+  // console.log(`Generated thumbnail for: ${relPdf}`);
 }
 
 async function getThumbnailPath(relPdf) {
@@ -947,7 +947,7 @@ function loadConfig() {
     const removedCount = favoritesRaw.length - favorites.length;
     const needsCleanup = removedCount > 0;
     if (needsCleanup) {
-      console.log(`[Config] Removed ${removedCount} non-existent favorite(s) from config`);
+      // console.log(`[Config] Removed ${removedCount} non-existent favorite(s) from config`);
     }
 
     const categoriesRaw = Array.isArray(j.categories) ? j.categories : [];
@@ -1153,7 +1153,7 @@ async function saveConfigImmediate() {
       if (_configVersion === saveVersion) {
         _configDirty = false;
       }
-      console.log("Config persisted", { favorites: CONFIG.favorites.length, files: Object.keys(CONFIG.files).length });
+      // console.log("Config persisted", { favorites: CONFIG.favorites.length, files: Object.keys(CONFIG.files).length });
     } catch (e) {
       _configDirty = true;
       console.error("saveConfigImmediate failed:", e);
@@ -1495,7 +1495,7 @@ async function scanDir() {
     const items = results.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }));
     indexCache = { at: Date.now(), items, scanInProgress: false };
 
-    console.log(`Scanned ${items.length} PDF files (recursive)`);
+    // console.log(`Scanned ${items.length} PDF files (recursive)`);
     return items;
   } catch (e) {
     console.error("scanDir failed:", e);

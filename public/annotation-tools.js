@@ -46,22 +46,22 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
   let statusResetTimer = null;
 
   function initControls() {
-    console.log('[Annotation] initControls called, already initialized?', controls.initialized);
+    // console.log('[Annotation] initControls called, already initialized?', controls.initialized);
     if (controls.initialized) return;
     
     controls.root = document.getElementById("annotationControls");
-    console.log('[Annotation] controls.root:', controls.root);
+    // console.log('[Annotation] controls.root:', controls.root);
     if (!controls.root) return;
 
     controls.toggle = document.getElementById("btnAnnotationToggle");
-    console.log('[Annotation] controls.toggle:', controls.toggle);
+    // console.log('[Annotation] controls.toggle:', controls.toggle);
     
     controls.panel = document.getElementById("annotationPanel");
-    console.log('[Annotation] controls.panel:', controls.panel);
+    // console.log('[Annotation] controls.panel:', controls.panel);
     
     controls.toolbar = document.getElementById("annotationToolbar");
-    console.log('[Annotation] controls.toolbar:', controls.toolbar);
-    
+    // console.log('[Annotation] controls.toolbar:', controls.toolbar);
+
     controls.sizeInput = document.getElementById("annotationSize");
     controls.sizeValue = document.getElementById("annotationSizeValue");
     controls.undoBtn = document.getElementById("btnAnnotationUndo");
@@ -99,9 +99,9 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
     });
 
     if (controls.toggle) {
-      console.log('[Annotation] Adding click listener to toggle button');
+      // console.log('[Annotation] Adding click listener to toggle button');
       controls.toggle.addEventListener("click", () => {
-        console.log('[Annotation] Toggle button clicked! Current active:', active);
+        // console.log('[Annotation] Toggle button clicked! Current active:', active);
         setActiveState(!active);
       });
     } else {
@@ -819,10 +819,10 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
 
   function setActiveState(next, opts = {}) {
     const changed = opts.force ? true : next !== active;
-    console.log('[Annotation] setActiveState called - next:', next, 'current active:', active, 'changed:', changed, 'opts:', opts);
+    // console.log('[Annotation] setActiveState called - next:', next, 'current active:', active, 'changed:', changed, 'opts:', opts);
     if (!changed) return;
     active = next;
-    console.log('[Annotation] Active state changed to:', active);
+    // console.log('[Annotation] Active state changed to:', active);
     updateToggleUI();
     refreshOverlayActivation();
     if (!opts.silent) {
@@ -852,9 +852,9 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
 
   function updateToggleUI() {
     if (!controls.toggle) return;
-    
-    console.log('[Annotation] updateToggleUI - active:', active);
-    
+
+    // console.log('[Annotation] updateToggleUI - active:', active);
+
     if (active) {
       controls.toggle.classList.add("annotation-toggle-active");
     } else {
@@ -864,10 +864,10 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
     
     // Toolbar visibility - SIMPLE: just toggle is-open class
     if (controls.toolbar) {
-      console.log('[Annotation] Toolbar element:', controls.toolbar);
+      // console.log('[Annotation] Toolbar element:', controls.toolbar);
       if (active) {
         controls.toolbar.classList.add("is-open");
-        console.log('[Annotation] Added is-open class. Toolbar classes:', controls.toolbar.className);
+        // console.log('[Annotation] Added is-open class. Toolbar classes:', controls.toolbar.className);
       } else {
         controls.toolbar.classList.remove("is-open");
       }
