@@ -5476,10 +5476,8 @@
                       </div>
                     </div>
                   </div>
-                  <div class="flex flex-wrap gap-2 shrink-0">
-                    <button type="button" data-action="activate" class="px-3 py-1.5 rounded-lg ${isActive ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 cursor-default' : 'bg-neutral-800/80 text-neutral-100 border border-neutral-700 hover:border-[--playlist-accent]/60 hover:text-neutral-50'}">
-                      ${isActive ? 'Aktiv' : 'Aktivieren'}
-                    </button>
+                  <div class="flex flex-wrap gap-2 shrink-0 items-center">
+                    ${isActive ? '<span class="px-3 py-1.5 rounded-lg bg-emerald-500/10 text-emerald-300 border border-emerald-400/30 text-sm font-medium">Aktiv</span>' : ''}
                     <button type="button" data-action="delete" class="px-3 py-1.5 rounded-lg border border-rose-500/50 text-rose-300 hover:bg-rose-500/10 transition-colors" ${canDelete ? '' : 'disabled style="opacity:0.4;cursor:not-allowed;"'}>
                       Löschen
                     </button>
@@ -5615,28 +5613,6 @@
                 showToast('Fehler beim Speichern der Farbe', 2500);
               } finally {
                 button.disabled = false;
-              }
-            });
-          });
-
-          listEl.querySelectorAll('button[data-action="activate"]').forEach((btn) => {
-            btn.addEventListener('click', async () => {
-              const id = btn.closest('section')?.dataset.id;
-              if (!id || id === playlist.activeId) return;
-              
-              btn.disabled = true;
-              const originalText = btn.textContent;
-              btn.textContent = 'Aktiviere...';
-              try {
-                await activatePlaylistOnBackend(id);
-                showToast('Playlist aktiviert', 2000);
-                render({});
-              } catch (err) {
-                console.error('Failed to activate playlist:', err);
-                showToast('Fehler beim Aktivieren', 2500);
-                btn.textContent = originalText;
-              } finally {
-                btn.disabled = false;
               }
             });
           });
@@ -6646,19 +6622,19 @@
               if (categoryName) subtitleParts.push(escapeHtml(categoryName));
               else if (columnFolder) subtitleParts.push(escapeHtml(columnFolder));
               const subtitleLabel = subtitleParts.join(' • ') || escapeHtml(itemPath);
-              const accentColor = isCurrentItem ? '#34d399' : categoryColor;
+              const accentColor = categoryColor;
               const accentStyle = accentColor 
                 ? `--row-accent:${accentColor};background:linear-gradient(150deg,color-mix(in srgb,var(--row-accent) 12%,rgba(10,10,15,0.94)) 0%,rgba(8,8,12,0.92) 100%);border-color:color-mix(in srgb,var(--row-accent) 18%,rgba(255,255,255,0.1));`
                 : '';
               const styleAttr = accentStyle ? ` style="${accentStyle}"` : '';
-              const titleClass = isCurrentItem ? 'text-emerald-400' : 'text-neutral-100';
+              const titleClass = 'text-neutral-100';
               const statusBadgeClasses = [
                 'inline-flex items-center rounded-full border border-emerald-400/40 bg-emerald-400/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-300',
                 isCurrentItem ? '' : 'hidden'
               ].filter(Boolean).join(' ');
               const statusBadge = `<span data-active-badge="true" class="${statusBadgeClasses}">Aktiv</span>`;
               const thumbPath = `/thumbnails/${encodePathSegments(itemPath.replace(/\.pdf$/i, '.jpg'))}`;
-              const rowClass = `playlist-row group relative flex items-center gap-4 px-3 py-3 rounded-xl border border-neutral-800/60 bg-neutral-900/75 hover:bg-neutral-800/70 transition-all${isCurrentItem ? ' is-active' : ''}`;
+              const rowClass = 'playlist-row group relative flex items-center gap-4 px-3 py-3 rounded-xl border border-neutral-800/60 bg-neutral-900/75 hover:bg-neutral-800/70 transition-all';
               
               return `
                 <div class="${rowClass}"${styleAttr} data-item-index="${index}" data-item-name="${escapeHtml(itemPath)}">
@@ -6781,12 +6757,6 @@
                 const activeIndex = isActive && currentPlaylist ? currentPlaylist.currentIndex : -1;
                 container.querySelectorAll('[data-item-name]').forEach((rowEl, idx) => {
                   const isRowActive = isActive && idx === activeIndex;
-                  rowEl.classList.toggle('is-active', isRowActive);
-                  const title = rowEl.querySelector('[data-role="playlist-item-title"]');
-                  if (title) {
-                    title.classList.toggle('text-emerald-400', isRowActive);
-                    title.classList.toggle('text-neutral-100', !isRowActive);
-                  }
                   const badge = rowEl.querySelector('[data-active-badge]');
                   if (badge) badge.classList.toggle('hidden', !isRowActive);
                 });
@@ -7598,7 +7568,7 @@
         state.viewer.secsPerPageDirty = false;
         
         // 1. Setze Farbe basierend auf Kategorie oder Fallback
-        applyAccentTheme(state.viewer.categories[0]?.id || state.library.categoryFilter);
+        applyAccentTheme(state.viewer.categories[0]?.id || state.library.categoryFilter, { ignorePlaylistAccent: true });
         
         // 2. Prüfe Farbe und mache Play Button sichtbar
         applyPlayButtonColor();
