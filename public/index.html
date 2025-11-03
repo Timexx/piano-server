@@ -6372,6 +6372,9 @@
               const firstItem = playlist.items?.[0];
               
               if (firstItem) {
+                // Setze currentDetailId, damit Zurück-Button zur Playlist führt
+                playlist.currentDetailId = id;
+                
                 // Wake Lock aktivieren (synchron in User-Geste für iOS)
                 acquireWakeLockSync();
                 // Viewer öffnen mit dem ersten Item
@@ -7228,7 +7231,15 @@
         const headerBack = headerActionsEl.querySelector('button');
         if (headerBack) headerBack.addEventListener('click', (ev) => {
           ev.preventDefault();
-          const leave = () => { location.href = "/"; };
+          const leave = () => { 
+            // Wenn wir von einer Playlist kommen, zurück zur Detail-Seite
+            if (playlist.mode && playlist.currentDetailId) {
+              history.replaceState(null, '', '/');
+              renderPlaylistDetail(playlist.currentDetailId);
+            } else {
+              location.href = "/"; 
+            }
+          };
           aggressiveCleanup();
           if (document.fullscreenElement) {
             document.exitFullscreen().then(leave).catch(leave);
@@ -7261,7 +7272,15 @@
 
         document.querySelector('#btnBack').onclick = () => {
           // Cleanup before leaving viewer; exit fullscreen if active
-          const leave = () => { location.href = "/"; };
+          const leave = () => { 
+            // Wenn wir von einer Playlist kommen, zurück zur Detail-Seite
+            if (playlist.mode && playlist.currentDetailId) {
+              history.replaceState(null, '', '/');
+              renderPlaylistDetail(playlist.currentDetailId);
+            } else {
+              location.href = "/"; 
+            }
+          };
           aggressiveCleanup();
           if (document.fullscreenElement) {
             document.exitFullscreen().then(leave).catch(leave);
