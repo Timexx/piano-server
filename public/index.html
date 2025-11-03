@@ -1975,8 +1975,45 @@
           .playlist-row { transition: transform 0.18s ease, box-shadow 0.18s ease, background 0.18s ease, opacity 0.18s ease; will-change: transform; }
           .playlist-row.is-active { border-color: color-mix(in srgb, var(--accent-color) 70%, rgba(255,255,255,0.08)); background: linear-gradient(160deg, color-mix(in srgb, var(--accent-color) 20%, rgba(12,12,18,0.95)) 0%, rgba(9,9,12,0.94) 100%); box-shadow: 0 12px 32px -20px rgba(0,0,0,0.55); }
           .playlist-row.is-dragging-source { opacity: 0; }
-          .playlist-placeholder { border-radius: 0.75rem; border: 1px dashed rgba(99,102,241,0.45); background: rgba(99,102,241,0.08); box-shadow: inset 0 0 0 1px rgba(99,102,241,0.16); height: var(--placeholder-height, 72px); margin: 4px 0; opacity: 0.78; transition: height 0.18s ease, margin 0.18s ease, opacity 0.18s ease; }
+          .playlist-placeholder { border-radius: 0.9rem; border: 1px dashed rgba(99,102,241,0.45); background: rgba(99,102,241,0.08); box-shadow: inset 0 0 0 1px rgba(99,102,241,0.16); height: var(--placeholder-height, 98px); margin: 6px 0; opacity: 0.78; transition: height 0.18s ease, margin 0.18s ease, opacity 0.18s ease; }
           .playlist-ghost { pointer-events: none; border-radius: 0.75rem; box-shadow: 0 28px 48px rgba(9,9,12,0.35); overflow: hidden; transform-origin: center; }
+          .drag-handle { touch-action: none; }
+          .is-dragging .drag-handle { cursor: grabbing; }
+          .playlist-row .icon-btn-glass {
+            background: rgba(29, 31, 42, 0.75);
+            border: 1px solid rgba(148, 163, 184, 0.22);
+            box-shadow: 0 12px 24px -16px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.06);
+            transition: background 0.18s ease, border-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
+          }
+          .playlist-row .icon-btn-glass:hover {
+            background: rgba(55, 59, 78, 0.88);
+            border-color: rgba(255,255,255,0.35);
+            box-shadow: 0 18px 32px -18px rgba(0,0,0,0.65), inset 0 1px 0 rgba(255,255,255,0.12);
+            transform: translateY(-1px);
+          }
+          .playlist-row .icon-btn-glass:active {
+            transform: translateY(1px);
+            box-shadow: 0 10px 18px -16px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.08);
+          }
+          .detail-item-play, .detail-item-remove {
+            opacity: 1;
+          }
+          /* Improve touch scrolling on iPad */
+          #plDetailList, #playlistList {
+            touch-action: pan-y;
+            -webkit-overflow-scrolling: touch;
+          }
+          
+          @media (hover: hover) {
+            .detail-item-play, .detail-item-remove {
+              opacity: 0;
+            }
+            
+            .playlist-row:hover .detail-item-play,
+            .playlist-row:hover .detail-item-remove {
+              opacity: 1;
+            }
+          }
         `;
         document.head.appendChild(style);
       }
@@ -6146,8 +6183,7 @@
             <div class="flex flex-wrap gap-1 mt-1">${renderCategoryBadges(item)}</div>
           </div>
           <div class="flex items-center gap-2 shrink-0 whitespace-nowrap">
-            <button class="fav text-xl leading-none text-neutral-300" aria-pressed="${state.library.favorites.has(item.name)}">${state.library.favorites.has(item.name) ? "★" : "☆"}</button>
-            <button class="add-playlist h-9 w-9 grid place-items-center rounded-full border border-neutral-700 text-neutral-200 bg-neutral-800/70 hover:bg-neutral-700" data-name="${item.name}" title="Zur Playlist hinzufügen" style="padding:0;">
+            <button class="add-playlist h-9 w-9 grid place-items-center rounded-full border border-neutral-700 text-neutral-200 bg-neutral-800/70 hover:bg-neutral-700 transition-transform" data-name="${item.name}" title="Zur Playlist hinzufügen" style="padding:0;">
               ${SVG_PLAYLIST_ADD}
             </button>
             <button class="assign-cat h-9 w-9 grid place-items-center rounded-full border border-neutral-700 text-neutral-200 bg-neutral-800/70 hover:bg-neutral-700" title="Kategorien hinzufügen" style="padding:0;" aria-label="Kategorien hinzufügen">
@@ -6238,6 +6274,7 @@
       }
 
       function renderPlaylistLibrary() {
+        controlsEl.classList.add('hidden');
         disposeLibraryViewportSizing();
         ensurePlaylistStyles();
         // Header actions
@@ -6416,7 +6453,8 @@
       }
 
       // Neue Funktion: Playlist-Detail-Seite
-      function renderPlaylistDetail(playlistId) {
+      async function renderPlaylistDetail(playlistId) {
+        controlsEl.classList.add('hidden');
         const playlistData = playlist.byId.get(playlistId);
         if (!playlistData) {
           showToast('Playlist nicht gefunden', 2000);
@@ -6489,6 +6527,12 @@
 
               <!-- Items List -->
               <div>
+                ${itemCount > 1 ? `
+                  <div class="md:hidden flex items-center gap-2 text-xs text-neutral-400 px-1 pb-2">
+                    <span class="inline-flex h-5 w-5 items-center justify-center rounded bg-neutral-800/70 border border-neutral-700 text-neutral-300" aria-hidden="true">≡</span>
+                    <span>Zum Sortieren den Griff ziehen</span>
+                  </div>
+                ` : ''}
                 ${itemCount === 0 ? `
                   <div class="rounded-2xl border border-dashed border-neutral-800 bg-neutral-900/60 p-8 text-center">
                     <div class="text-4xl mb-3">🎵</div>
@@ -6548,28 +6592,101 @@
         if (itemCount > 0) {
           const listEl = document.querySelector('#plDetailList');
           if (listEl) {
+            // Lade Kategorie-Informationen für alle Items
+            const itemMetadata = await Promise.all(
+              items.map(async (itemPath) => {
+                try {
+                  const prefs = await getFilePrefsFromBackend(itemPath);
+                  const rawCategories = Array.isArray(prefs?.categories) ? prefs.categories : [];
+                  const firstCategory = rawCategories[0] || null;
+                  const categoryName = typeof firstCategory?.name === 'string' ? firstCategory.name : null;
+                  const categoryIcon = typeof firstCategory?.icon === 'string' ? firstCategory.icon : null;
+                  const rawColor = typeof firstCategory?.color === 'string' ? firstCategory.color.trim() : null;
+                  const categoryColor = rawColor && /^#[0-9A-Fa-f]{3,8}$/.test(rawColor) ? rawColor : null;
+                  return {
+                    path: itemPath,
+                    categories: rawCategories,
+                    categoryColor,
+                    categoryName,
+                    categoryIcon,
+                    size: Number.isFinite(prefs?.size) ? prefs.size : null,
+                    mtime: Number.isFinite(prefs?.mtime) ? prefs.mtime : null
+                  };
+                } catch (err) {
+                  console.warn('Failed to load metadata for', itemPath, err);
+                  return {
+                    path: itemPath,
+                    categories: [],
+                    categoryColor: null,
+                    categoryName: null,
+                    categoryIcon: null,
+                    size: null,
+                    mtime: null
+                  };
+                }
+              })
+            );
+
             const itemsHtml = items.map((itemPath, index) => {
               const isCurrentItem = isActive && index === playlistData.currentIndex;
               const displayName = itemPath.split('/').pop().replace(/\.pdf$/i, '');
               
+              // Hole Kategorie-Informationen aus den geladenen Metadaten
+              const metadata = itemMetadata[index];
+              const categoryColor = metadata?.categoryColor;
+              const categoryName = metadata?.categoryName;
+              const columnFolder = itemPath.includes('/') ? itemPath.slice(0, itemPath.lastIndexOf('/')) : '';
+              const subtitleParts = [];
+              if (metadata?.size) subtitleParts.push(escapeHtml(formatSize(metadata.size)));
+              if (metadata?.mtime) {
+                try {
+                  subtitleParts.push(escapeHtml(new Date(metadata.mtime).toLocaleDateString()));
+                } catch {}
+              }
+              if (categoryName) subtitleParts.push(escapeHtml(categoryName));
+              else if (columnFolder) subtitleParts.push(escapeHtml(columnFolder));
+              const subtitleLabel = subtitleParts.join(' • ') || escapeHtml(itemPath);
+              const accentColor = isCurrentItem ? '#34d399' : categoryColor;
+              const accentStyle = accentColor 
+                ? `--row-accent:${accentColor};background:linear-gradient(150deg,color-mix(in srgb,var(--row-accent) 12%,rgba(10,10,15,0.94)) 0%,rgba(8,8,12,0.92) 100%);border-color:color-mix(in srgb,var(--row-accent) 18%,rgba(255,255,255,0.1));`
+                : '';
+              const styleAttr = accentStyle ? ` style="${accentStyle}"` : '';
+              const titleClass = isCurrentItem ? 'text-emerald-400' : 'text-neutral-100';
+              const statusBadgeClasses = [
+                'inline-flex items-center rounded-full border border-emerald-400/40 bg-emerald-400/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-300',
+                isCurrentItem ? '' : 'hidden'
+              ].filter(Boolean).join(' ');
+              const statusBadge = `<span data-active-badge="true" class="${statusBadgeClasses}">Aktiv</span>`;
+              const thumbPath = `/thumbnails/${encodePathSegments(itemPath.replace(/\.pdf$/i, '.jpg'))}`;
+              const rowClass = `playlist-row group relative flex items-center gap-4 px-3 py-3 rounded-xl border border-neutral-800/60 bg-neutral-900/75 hover:bg-neutral-800/70 transition-all${isCurrentItem ? ' is-active' : ''}`;
+              
               return `
-                <div class="group relative flex items-center gap-3 px-4 py-3 rounded-xl border ${isCurrentItem ? 'border-emerald-500/40 bg-emerald-500/5' : 'border-neutral-800/60 bg-neutral-900/80'} hover:border-neutral-700 transition-all" data-item-index="${index}" data-item-name="${escapeHtml(itemPath)}">
-                  <div class="drag-handle flex-shrink-0 h-8 w-6 grid place-items-center text-neutral-500 hover:text-neutral-300 cursor-grab active:cursor-grabbing opacity-0 group-hover:opacity-100" title="Ziehen zum Sortieren">
+                <div class="${rowClass}"${styleAttr} data-item-index="${index}" data-item-name="${escapeHtml(itemPath)}">
+                  <div class="drag-handle flex-shrink-0 h-8 w-6 grid place-items-center text-neutral-500 hover:text-neutral-300 cursor-grab active:cursor-grabbing opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity" title="Ziehen zum Sortieren" data-drag-handle="true">
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
                       <path d="M9 3h2v2H9V3zm0 4h2v2H9V7zm0 4h2v2H9v-2zm0 4h2v2H9v-2zm0 4h2v2H9v-2zM13 3h2v2h-2V3zm0 4h2v2h-2V7zm0 4h2v2h-2v-2zm0 4h2v2h-2v-2zm0 4h2v2h-2v-2z"/>
                     </svg>
                   </div>
+                  <div class="relative shrink-0">
+                    <img src="${escapeHtml(thumbPath)}" alt="${escapeHtml(displayName)}" loading="lazy" class="thumb block h-20 w-16 rounded-lg border border-neutral-900/40 object-cover bg-neutral-950/70" onerror="this.classList.add('hidden'); this.nextElementSibling.classList.remove('hidden');">
+                    <div class="thumb hidden h-20 w-16 rounded-lg border border-dashed border-neutral-800/60 bg-neutral-900/80 text-xs font-medium text-neutral-500 grid place-items-center">PDF</div>
+                    ${accentColor ? `<div class="pointer-events-none absolute inset-0 rounded-lg ring-1 ring-inset ring-[--row-accent]/20 opacity-0 group-hover:opacity-100 transition-opacity" aria-hidden="true"></div>` : ''}
+                  </div>
                   <div class="flex-1 min-w-0">
-                    <div class="text-sm font-medium ${isCurrentItem ? 'text-emerald-400' : 'text-neutral-100'} truncate">${escapeHtml(displayName)}</div>
-                    <div class="text-xs text-neutral-500 truncate">${escapeHtml(itemPath)}</div>
+                    <div class="flex items-center gap-2">
+                      <div data-role="playlist-item-title" class="text-sm font-medium ${titleClass} truncate" title="${escapeHtml(displayName)}">${escapeHtml(displayName)}</div>
+                      ${statusBadge}
+                    </div>
+                    <div class="text-xs text-neutral-400 truncate">${subtitleLabel}</div>
+                    <div class="mt-2 flex flex-wrap gap-1.5">${renderCategoryBadges(metadata || { categories: [] })}</div>
                   </div>
                   <div class="flex items-center gap-1.5">
-                    <button type="button" class="detail-item-play h-9 w-9 rounded-full bg-white/8 border border-white/14 text-neutral-200 hover:bg-emerald-500 hover:text-neutral-900 hover:border-emerald-500 transition-all opacity-0 group-hover:opacity-100" data-item-index="${index}" title="Diesen Titel abspielen">
+                    <button type="button" class="detail-item-play icon-btn-glass h-9 w-9 rounded-full text-neutral-100 hover:text-white" data-item-index="${index}" title="Diesen Titel abspielen">
                       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="currentColor" class="mx-auto">
                         <path d="M8 5v14l11-7z"></path>
                       </svg>
                     </button>
-                    <button type="button" class="detail-item-remove h-9 w-9 rounded-full bg-white/8 border border-white/14 text-neutral-200 hover:bg-red-500/20 hover:text-red-400 hover:border-red-500/40 transition-all opacity-0 group-hover:opacity-100" data-item-index="${index}" title="Aus Playlist entfernen">
+                    <button type="button" class="detail-item-remove icon-btn-glass h-9 w-9 rounded-full text-neutral-100 hover:text-red-300" data-item-index="${index}" title="Aus Playlist entfernen">
                       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mx-auto">
                         <line x1="18" y1="6" x2="6" y2="18"></line>
                         <line x1="6" y1="6" x2="18" y2="18"></line>
@@ -6627,220 +6744,281 @@
               });
             });
 
-            // ORIGINAL SMOOTH DRAG & DROP - Placeholder-basiert (aus Backup wiederhergestellt)
+            // Touch-friendly drag & drop with precise drop targets
             (function setupPlaylistDnd() {
               const container = listEl;
-              let drag = null;
+              if (!container) return;
 
-              const scheduleGhostTransform = (x, y) => {
-                if (!drag) return;
-                drag.pending = { x, y };
-                if (drag.frame) return;
-                drag.frame = requestAnimationFrame(() => {
-                  if (!drag || !drag.pending) return;
-                  drag.ghost.style.transform = `translate3d(${drag.pending.x}px, ${drag.pending.y}px, 0) scale(1.02)`;
-                  drag.frame = null;
+              let drag = null;
+              const interactiveSelector = 'button, a, input, textarea, select, [role="button"]';
+
+              const getScrollContainer = (el) => {
+                let p = el && el.parentElement;
+                while (p) {
+                  const cs = getComputedStyle(p);
+                  if (/auto|scroll/.test(cs.overflowY)) return p;
+                  p = p.parentElement;
+                }
+                return document.scrollingElement || document.body;
+              };
+              const scrollEl = getScrollContainer(container);
+
+              const computeOrder = () => Array.from(container.querySelectorAll('[data-item-name]')).map((el) => el.getAttribute('data-item-name'));
+
+              const updateDomIndices = () => {
+                const rows = Array.from(container.querySelectorAll('[data-item-name]'));
+                rows.forEach((rowEl, index) => {
+                  rowEl.setAttribute('data-item-index', String(index));
+                  rowEl.querySelectorAll('[data-item-index]').forEach((btn) => {
+                    btn.setAttribute('data-item-index', String(index));
+                  });
+                });
+                return rows;
+              };
+
+              const refreshActiveStates = () => {
+                const currentPlaylist = playlist.byId.get(playlistId);
+                const activeIndex = isActive && currentPlaylist ? currentPlaylist.currentIndex : -1;
+                container.querySelectorAll('[data-item-name]').forEach((rowEl, idx) => {
+                  const isRowActive = isActive && idx === activeIndex;
+                  rowEl.classList.toggle('is-active', isRowActive);
+                  const title = rowEl.querySelector('[data-role="playlist-item-title"]');
+                  if (title) {
+                    title.classList.toggle('text-emerald-400', isRowActive);
+                    title.classList.toggle('text-neutral-100', !isRowActive);
+                  }
+                  const badge = rowEl.querySelector('[data-active-badge]');
+                  if (badge) badge.classList.toggle('hidden', !isRowActive);
                 });
               };
 
-              const cleanupListeners = () => {
-                document.removeEventListener('pointermove', onPointerMove);
-                document.removeEventListener('pointerup', onPointerUp);
-                document.removeEventListener('pointercancel', onPointerUp);
+              const placeholderIndex = () => {
+                if (!drag?.placeholder) return -1;
+                return Array.from(container.children).indexOf(drag.placeholder);
+              };
+
+              const positionGhost = (clientX, clientY) => {
+                if (!drag) return;
+                const x = clientX - drag.offsetX;
+                const y = clientY - drag.offsetY;
+                drag.pending = { x, y };
+                if (drag.frame) return;
+                drag.frame = requestAnimationFrame(() => {
+                  drag.frame = null;
+                  if (!drag?.ghost || !drag.pending) return;
+                  drag.ghost.style.transform = `translate3d(${drag.pending.x}px, ${drag.pending.y}px, 0)`;
+                });
               };
 
               const autoscrollIfNeeded = (clientY) => {
-                const rect = container.getBoundingClientRect();
-                const threshold = 56;
+                const scroller = scrollEl || container;
+                const rect = scroller.getBoundingClientRect();
+                const threshold = 72;
+                let delta = 0;
                 if (clientY < rect.top + threshold) {
-                  container.scrollTop -= 14;
+                  const dist = Math.max(0, threshold - (clientY - rect.top));
+                  delta = -Math.min(40, Math.max(8, dist * 0.55));
                 } else if (clientY > rect.bottom - threshold) {
-                  container.scrollTop += 14;
+                  const dist = Math.max(0, threshold - (rect.bottom - clientY));
+                  delta = Math.min(40, Math.max(8, dist * 0.55));
                 }
+                if (delta !== 0) scroller.scrollTop += delta;
               };
 
-              const currentTargetIndex = (clientY) => {
-                const rows = Array.from(container.querySelectorAll('[data-item-index]')).filter((el) => el.style.display !== 'none');
-                for (let i = 0; i < rows.length; i++) {
-                  const r = rows[i].getBoundingClientRect();
-                  if (clientY < r.top + r.height / 2) return i;
+              const updatePlaceholder = (clientY) => {
+                if (!drag) return;
+                const siblings = Array.from(container.querySelectorAll('[data-item-name]'));
+                let inserted = false;
+                for (const sibling of siblings) {
+                  const rect = sibling.getBoundingClientRect();
+                  if (clientY < rect.top + rect.height / 2) {
+                    if (drag.placeholder !== sibling) {
+                      container.insertBefore(drag.placeholder, sibling);
+                    }
+                    inserted = true;
+                    break;
+                  }
                 }
-                return rows.length;
+                if (!inserted) container.appendChild(drag.placeholder);
+                drag.targetIndex = placeholderIndex();
               };
 
-              function onPointerDown(ev) {
-                const handle = ev.target.closest && ev.target.closest('.drag-handle');
-                if (!handle) return;
-                if (ev.button !== 0 && ev.pointerType === 'mouse') return;
-                const row = handle.closest('[data-item-index]');
-                if (!row) return;
-                const idx = Number(row.getAttribute('data-item-index'));
-                if (!Number.isFinite(idx)) return;
-                
-                // WICHTIG: Alle Events komplett blocken!
-                ev.preventDefault();
-                ev.stopPropagation();
-                ev.stopImmediatePropagation();
-                
-                handle.setPointerCapture?.(ev.pointerId);
-
+              const beginDrag = (ev, row) => {
                 const rect = row.getBoundingClientRect();
+                const initialOrder = computeOrder();
+                const placeholder = document.createElement('div');
+                placeholder.className = 'playlist-placeholder';
+                placeholder.style.setProperty('--placeholder-height', `${rect.height}px`);
+                const style = window.getComputedStyle(row);
+                placeholder.style.marginTop = style.marginTop;
+                placeholder.style.marginBottom = style.marginBottom;
+
                 const ghost = row.cloneNode(true);
                 ghost.classList.add('playlist-ghost');
                 ghost.style.position = 'fixed';
                 ghost.style.left = '0px';
                 ghost.style.top = '0px';
-                ghost.style.width = rect.width + 'px';
-                ghost.style.height = rect.height + 'px';
-                ghost.style.zIndex = '1000';
-                ghost.style.pointerEvents = 'none';
+                ghost.style.width = `${rect.width}px`;
+                ghost.style.height = `${rect.height}px`;
                 ghost.style.transform = `translate3d(${rect.left}px, ${rect.top}px, 0)`;
-                ghost.style.transition = 'transform 0.08s ease-out';
-
-                const placeholder = document.createElement('div');
-                placeholder.className = 'playlist-placeholder';
-                placeholder.style.setProperty('--placeholder-height', `${rect.height}px`);
-
-                row.classList.add('is-dragging-source');
-                row.style.display = 'none';
-                row.parentElement.insertBefore(placeholder, row.nextSibling);
+                ghost.style.pointerEvents = 'none';
                 document.body.appendChild(ghost);
+
+                const itemName = row.getAttribute('data-item-name') || '';
+
+                container.insertBefore(placeholder, row.nextElementSibling);
+                row.classList.add('is-dragging-source');
+                row.remove();
 
                 drag = {
                   pointerId: ev.pointerId,
                   row,
-                  idx,
                   ghost,
                   placeholder,
                   offsetX: ev.clientX - rect.left,
                   offsetY: ev.clientY - rect.top,
-                  list: container,
                   frame: null,
-                  pending: null
+                  pending: null,
+                  originalIndex: Number(row.getAttribute('data-item-index') ?? '0'),
+                  initialOrder,
+                  itemName,
+                  targetIndex: placeholderIndex()
                 };
 
-                scheduleGhostTransform(rect.left, rect.top);
+                container.classList.add('is-dragging');
+                positionGhost(ev.clientX, ev.clientY);
+                try { if (navigator.vibrate) navigator.vibrate(10); } catch {}
+              };
 
-                document.addEventListener('pointermove', onPointerMove, { passive: false });
-                document.addEventListener('pointerup', onPointerUp, { passive: true });
-                document.addEventListener('pointercancel', onPointerUp, { passive: true });
-              }
-
-              function onPointerMove(ev) {
+              const finishDrag = (ev, cancelled = false) => {
                 if (!drag) return;
-                
-                // WICHTIG: Alle Events komplett blocken!
-                ev.preventDefault();
-                ev.stopPropagation();
-                ev.stopImmediatePropagation();
-                
-                const x = ev.clientX - drag.offsetX;
-                const y = ev.clientY - drag.offsetY;
-                scheduleGhostTransform(x, y);
-                autoscrollIfNeeded(ev.clientY);
+                const { row, ghost, placeholder } = drag;
 
-                const targetIndex = currentTargetIndex(ev.clientY);
-                const visibleRows = Array.from(container.querySelectorAll('[data-item-index]')).filter((el) => el.style.display !== 'none');
-                const anchor = visibleRows[targetIndex] || null;
-                if (anchor) {
-                  if (drag.placeholder.nextElementSibling !== anchor) {
-                    container.insertBefore(drag.placeholder, anchor);
-                  }
-                } else if (container.lastElementChild !== drag.placeholder) {
-                  container.appendChild(drag.placeholder);
-                }
-              }
-
-              function onPointerUp(ev) {
-                if (!drag) return;
-                
-                // WICHTIG: Alle Events komplett blocken!
-                if (ev) {
-                  ev.preventDefault();
-                  ev.stopPropagation();
-                  ev.stopImmediatePropagation();
-                }
-                
-                cleanupListeners();
                 if (drag.frame) {
                   cancelAnimationFrame(drag.frame);
                   drag.frame = null;
                 }
 
-                const { row, ghost, placeholder, idx } = drag;
-                const children = Array.from(container.children);
-                const placeholderIndex = children.indexOf(placeholder);
+                if (ghost?.isConnected) ghost.remove();
+
+                if (cancelled) {
+                  placeholder.remove();
+                  const order = drag.initialOrder;
+                  const nodes = new Map();
+                  container.querySelectorAll('[data-item-name]').forEach((node) => {
+                    nodes.set(node.getAttribute('data-item-name'), node);
+                  });
+                  nodes.set(drag.itemName, row);
+                  row.classList.remove('is-dragging-source');
+                  order.forEach((name) => {
+                    const node = nodes.get(name);
+                    if (node) container.appendChild(node);
+                  });
+                  updateDomIndices();
+                  refreshActiveStates();
+                  container.classList.remove('is-dragging');
+                  drag = null;
+                  return;
+                }
+
+                if (!placeholder.isConnected) container.appendChild(placeholder);
+                container.insertBefore(row, placeholder);
                 placeholder.remove();
-                row.style.display = '';
                 row.classList.remove('is-dragging-source');
-                ghost.remove();
 
-                const maxIndex = Math.max(0, container.querySelectorAll('[data-item-index]').length - 1);
-                let targetIndex = placeholderIndex;
-                if (targetIndex < 0) targetIndex = idx;
-                targetIndex = Math.max(0, Math.min(maxIndex, targetIndex));
+                updateDomIndices();
+                const newOrder = computeOrder();
 
-                drag = null;
+                const prev = drag.initialOrder;
+                let orderChanged = newOrder.length !== prev.length;
+                if (!orderChanged) {
+                  for (let i = 0; i < newOrder.length; i++) {
+                    if (newOrder[i] !== prev[i]) {
+                      orderChanged = true;
+                      break;
+                    }
+                  }
+                }
 
-                // Move item if position changed
-                if (idx !== targetIndex) {
-                  // WICHTIG: Hole die aktuelle Playlist-Daten direkt!
+                if (orderChanged) {
                   const currentPlaylist = playlist.byId.get(playlistId);
-                  if (!currentPlaylist) return;
-                  
-                  const currentItems = currentPlaylist.items || [];
-                  const newOrder = currentItems.slice();
-                  const [movedItem] = newOrder.splice(idx, 1);
-                  newOrder.splice(targetIndex, 0, movedItem);
-                  
-                  // Update currentIndex tracking
-                  if (isActive && currentPlaylist.currentIndex !== undefined) {
-                    if (currentPlaylist.currentIndex === idx) {
-                      currentPlaylist.currentIndex = targetIndex;
-                    } else if (idx < targetIndex && currentPlaylist.currentIndex > idx && currentPlaylist.currentIndex <= targetIndex) {
-                      currentPlaylist.currentIndex--;
-                    } else if (idx > targetIndex && currentPlaylist.currentIndex >= targetIndex && currentPlaylist.currentIndex < idx) {
-                      currentPlaylist.currentIndex++;
+                  const itemName = drag.itemName;
+                  const originalIndex = drag.originalIndex;
+                  const newIndex = newOrder.indexOf(itemName);
+
+                  if (currentPlaylist) {
+                    currentPlaylist.items = newOrder.slice();
+                    if (playlistId === playlist.activeId) {
+                      playlist.items = newOrder.slice();
+                    }
+                    if (isActive && Number.isInteger(currentPlaylist.currentIndex)) {
+                      if (currentPlaylist.currentIndex === originalIndex) {
+                        currentPlaylist.currentIndex = newIndex;
+                      } else if (currentPlaylist.currentIndex > originalIndex && currentPlaylist.currentIndex <= newIndex) {
+                        currentPlaylist.currentIndex -= 1;
+                      } else if (currentPlaylist.currentIndex < originalIndex && currentPlaylist.currentIndex >= newIndex) {
+                        currentPlaylist.currentIndex += 1;
+                      }
                     }
                   }
 
-                  // Reorder DOM
-                  const rows = Array.from(container.querySelectorAll('[data-item-index]'));
-                  newOrder.forEach((itemPath, newIdx) => {
-                    const r = rows.find(el => el.getAttribute('data-item-name') === itemPath);
-                    if (r) {
-                      r.setAttribute('data-item-index', String(newIdx));
-                      container.appendChild(r);
-                      
-                      // Update visual state
-                      const isCurrent = isActive && newIdx === currentPlaylist.currentIndex;
-                      r.classList.toggle('border-emerald-500/40', isCurrent);
-                      r.classList.toggle('bg-emerald-500/5', isCurrent);
-                      r.classList.toggle('border-neutral-800/60', !isCurrent);
-                      r.classList.toggle('bg-neutral-900/80', !isCurrent);
-                      
-                      const title = r.querySelector('.flex-1 .text-sm');
-                      if (title) {
-                        title.classList.toggle('text-emerald-400', isCurrent);
-                        title.classList.toggle('text-neutral-100', !isCurrent);
-                      }
-                    }
+                  items.splice(0, items.length, ...newOrder);
+                  playlistData.items = newOrder.slice();
+                  refreshActiveStates();
+
+                  playlistApi.reorder(playlistId, newOrder).catch((err) => {
+                    console.error('❌ Reorder failed:', err);
+                    fetchPlaylists();
                   });
-
-                  // Save to backend
-                  playlistApi.reorder(playlistId, newOrder)
-                    .then(() => {
-                      console.log('✅ Playlist reordered');
-                      // Update local state
-                      currentPlaylist.items = newOrder;
-                    })
-                    .catch(err => console.error('❌ Reorder failed:', err));
+                } else {
+                  refreshActiveStates();
                 }
-              }
 
-              listEl.addEventListener('pointerdown', onPointerDown);
+                container.classList.remove('is-dragging');
+                drag = null;
+              };
+
+              const onPointerDown = (ev) => {
+                if (drag) return;
+                const row = ev.target.closest && ev.target.closest('[data-item-name]');
+                if (!row) return;
+                if (ev.button !== 0 && ev.pointerType === 'mouse') return;
+                if (ev.target.closest(interactiveSelector)) return;
+                if (ev.pointerType === 'touch' || ev.pointerType === 'pen') {
+                  const handle = ev.target.closest && ev.target.closest('[data-drag-handle]');
+                  if (!handle) return;
+                }
+                ev.preventDefault();
+                container.setPointerCapture?.(ev.pointerId);
+                beginDrag(ev, row);
+              };
+
+              const onPointerMove = (ev) => {
+                if (!drag || ev.pointerId !== drag.pointerId) return;
+                ev.preventDefault();
+                positionGhost(ev.clientX, ev.clientY);
+                autoscrollIfNeeded(ev.clientY);
+                updatePlaceholder(ev.clientY);
+              };
+
+              const onPointerUp = (ev) => {
+                if (!drag || ev.pointerId !== drag.pointerId) return;
+                ev.preventDefault();
+                container.releasePointerCapture?.(ev.pointerId);
+                finishDrag(ev, false);
+              };
+
+              const onPointerCancel = (ev) => {
+                if (!drag || ev.pointerId !== drag.pointerId) return;
+                container.releasePointerCapture?.(ev.pointerId);
+                finishDrag(ev, true);
+              };
+
+              container.addEventListener('pointerdown', onPointerDown, { passive: false });
+              container.addEventListener('pointermove', onPointerMove, { passive: false });
+              container.addEventListener('pointerup', onPointerUp);
+              container.addEventListener('pointercancel', onPointerCancel);
             })();
-
             // Helper function to re-attach event listeners after re-render
             function attachItemEventListeners() {
               listEl.querySelectorAll('.detail-item-play').forEach(btn => {
@@ -7172,6 +7350,9 @@
       
       // ===== Viewer =====
       async function renderViewer(fileName) {
+        // Schließe offene Playlist-Docks/Manager, damit der Viewer sauber startet
+        try { closePlaylistPanel(); } catch {}
+        try { closePlaylistManager(); } catch {}
         disposeLibraryViewportSizing();
         document.body.classList.add('in-viewer');
         setUploadButtonVisible(false);
@@ -7313,6 +7494,97 @@
         // Let the pianist adjust scroll position while auto-scroll runs;
         // resume from that position when released.
         registerUserScrollControls(container);
+
+        // Pinch-to-Zoom Gesten-Steuerung für Tablets - Verbesserte intuitive Version
+        (function setupPinchZoom() {
+          let pinchState = {
+            active: false,
+            initialDistance: 0,
+            initialZoom: 1,
+            lastScale: 1
+          };
+
+          const getDistance = (touch1, touch2) => {
+            const dx = touch2.clientX - touch1.clientX;
+            const dy = touch2.clientY - touch1.clientY;
+            return Math.sqrt(dx * dx + dy * dy);
+          };
+
+          const handleTouchStart = (e) => {
+            // Nur bei genau 2 Fingern aktivieren
+            if (e.touches.length === 2) {
+              // Nicht bei laufendem Auto-Scroll stören
+              if (state.viewer.autoScroll.running) {
+                return;
+              }
+              
+              e.preventDefault();
+              e.stopPropagation();
+              
+              pinchState.active = true;
+              pinchState.initialDistance = getDistance(e.touches[0], e.touches[1]);
+              pinchState.initialZoom = state.viewer.zoom;
+              pinchState.lastScale = 1;
+              
+              // User-Scroll temporär deaktivieren
+              state.viewer.autoScroll.userAdjusting = true;
+            }
+          };
+
+          const handleTouchMove = (e) => {
+            if (!pinchState.active) return;
+            
+            // Nur bei genau 2 Fingern fortfahren
+            if (e.touches.length !== 2) {
+              return;
+            }
+            
+            e.preventDefault();
+            e.stopPropagation();
+            
+            const currentDistance = getDistance(e.touches[0], e.touches[1]);
+            const rawScale = currentDistance / pinchState.initialDistance;
+            
+            // Sanftes Smoothing für flüssigere Geste
+            const smoothedScale = pinchState.lastScale * 0.3 + rawScale * 0.7;
+            pinchState.lastScale = smoothedScale;
+            
+            const newZoom = pinchState.initialZoom * smoothedScale;
+            
+            // Sofortiges visuelles Feedback
+            setViewerZoom(newZoom, { immediate: true });
+          };
+
+          const handleTouchEnd = (e) => {
+            if (!pinchState.active) return;
+            
+            // Geste beenden wenn weniger als 2 Finger
+            if (e.touches.length < 2) {
+              // Finalen Zoom noch einmal anwenden für sauberes Rendering
+              setViewerZoom(state.viewer.zoom, { immediate: true });
+              
+              pinchState.active = false;
+              pinchState.lastScale = 1;
+              
+              // User-Scroll wieder aktivieren
+              state.viewer.autoScroll.userAdjusting = false;
+            }
+          };
+
+          const handleTouchCancel = (e) => {
+            if (pinchState.active) {
+              pinchState.active = false;
+              pinchState.lastScale = 1;
+              state.viewer.autoScroll.userAdjusting = false;
+            }
+          };
+
+          // Event Listener mit capture-Phase für bessere Kontrolle
+          container.addEventListener('touchstart', handleTouchStart, { passive: false, capture: true });
+          container.addEventListener('touchmove', handleTouchMove, { passive: false, capture: true });
+          container.addEventListener('touchend', handleTouchEnd, { passive: false, capture: true });
+          container.addEventListener('touchcancel', handleTouchCancel, { passive: false, capture: true });
+        })();
 
         const prefs = await getFilePrefsFromBackend(fileName);
         state.viewer.secsPerPage = prefs?.secsPerPage || 45;
