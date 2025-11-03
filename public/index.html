@@ -3666,24 +3666,33 @@
         root.style.setProperty("--accent-soft", `${effective}26`);
         root.style.setProperty("--accent-muted", `${effective}4d`);
 
-        if (accent) {
+        if (accent && accentSource?.type !== 'playlist') {
           document.body.setAttribute("data-accent-active", "true");
         } else {
           document.body.removeAttribute("data-accent-active");
         }
       }
       
-      function applyPlayButtonColor() {
-        const playBtn = document.querySelector('#btnPlayPause');
-        if (!playBtn) return;
+  function applyPlayButtonColor() {
+    const playBtn = document.querySelector('#btnPlayPause');
+    if (!playBtn) return;
         
         // Erst Farbe setzen, dann sichtbar machen
-        requestAnimationFrame(() => {
-          playBtn.classList.add('is-ready');
-        });
-      }
+    requestAnimationFrame(() => {
+      playBtn.classList.add('is-ready');
+    });
+  }
 
-      const DEFAULT_UPLOAD_LIMIT_MB = 200;
+  function resetHeaderAccentToDefault() {
+    const defaultAccent = '#6366F1';
+    document.body.removeAttribute('data-accent-active');
+    const root = document.documentElement;
+    root.style.setProperty('--accent-color', defaultAccent);
+    root.style.setProperty('--accent-soft', `${defaultAccent}26`);
+    root.style.setProperty('--accent-muted', `${defaultAccent}4d`);
+  }
+
+  const DEFAULT_UPLOAD_LIMIT_MB = 200;
 
       function ensureUploadButton() {
         // Check if button exists AND is still in the DOM
@@ -4872,23 +4881,29 @@
           const btnLib = wrap.querySelector('[data-mode="lib"]');
           const btnPl = wrap.querySelector('[data-mode="pl"]');
           const on = playlist.mode === true; // true = Playlist active
+          const defaultAccent = '#6366F1';
+          const libraryAccent = (state.ui.accentSource?.type === 'playlist') ? defaultAccent : (state.ui.accentColor || defaultAccent);
           
           // Update active state with modern styling
           if (btnLib) {
-            btnLib.classList.toggle('bg-[--accent-color]', !on);
-            btnLib.classList.toggle('text-white', !on);
-            btnLib.classList.toggle('shadow-sm', !on);
-            btnLib.classList.toggle('text-neutral-400', on);
-            btnLib.classList.toggle('hover:text-neutral-200', on);
-            btnLib.setAttribute('aria-pressed', String(!on));
+            const isActive = !on;
+            btnLib.classList.toggle('text-white', isActive);
+            btnLib.classList.toggle('shadow-sm', isActive);
+            btnLib.classList.toggle('text-neutral-400', !isActive);
+            btnLib.classList.toggle('hover:text-neutral-200', !isActive);
+            btnLib.setAttribute('aria-pressed', String(isActive));
+            btnLib.style.backgroundColor = isActive ? libraryAccent : 'transparent';
+            btnLib.style.color = isActive ? '#ffffff' : '';
           }
           if (btnPl) {
-            btnPl.classList.toggle('bg-[--accent-color]', on);
-            btnPl.classList.toggle('text-white', on);
-            btnPl.classList.toggle('shadow-sm', on);
-            btnPl.classList.toggle('text-neutral-400', !on);
-            btnPl.classList.toggle('hover:text-neutral-200', !on);
-            btnPl.setAttribute('aria-pressed', String(on));
+            const isActive = on;
+            btnPl.classList.toggle('text-white', isActive);
+            btnPl.classList.toggle('shadow-sm', isActive);
+            btnPl.classList.toggle('text-neutral-400', !isActive);
+            btnPl.classList.toggle('hover:text-neutral-200', !isActive);
+            btnPl.setAttribute('aria-pressed', String(isActive));
+            btnPl.style.backgroundColor = isActive ? defaultAccent : 'transparent';
+            btnPl.style.color = isActive ? '#ffffff' : '';
           }
           return;
         }
@@ -4899,7 +4914,7 @@
         const plActive = playlist.mode;
         wrap.innerHTML = `
           <button type="button" data-mode="lib" aria-pressed="${libActive}" 
-                  class="px-3 py-1.5 rounded-md transition-all text-sm font-medium ${libActive ? 'bg-[--accent-color] text-white shadow-sm' : 'text-neutral-400 hover:text-neutral-200'}">
+                  class="mode-switch-btn px-3 py-1.5 rounded-md transition-all text-sm font-medium ${libActive ? 'text-white shadow-sm' : 'text-neutral-400 hover:text-neutral-200'}" style="${libActive ? 'background-color:#6366F1;color:#ffffff;' : ''}">
             <span class="flex items-center gap-1.5">
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
@@ -4909,7 +4924,7 @@
             </span>
           </button>
           <button type="button" data-mode="pl" aria-pressed="${plActive}" 
-                  class="px-3 py-1.5 rounded-md transition-all text-sm font-medium ${plActive ? 'bg-[--accent-color] text-white shadow-sm' : 'text-neutral-400 hover:text-neutral-200'}">
+                  class="mode-switch-btn px-3 py-1.5 rounded-md transition-all text-sm font-medium ${plActive ? 'text-white shadow-sm' : 'text-neutral-400 hover:text-neutral-200'}" style="${plActive ? 'background-color:#6366F1;color:#ffffff;' : ''}">
             <span class="flex items-center gap-1.5">
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
                 <line x1="8" y1="6" x2="21" y2="6"></line>
@@ -5094,8 +5109,13 @@
       }
 
       function refreshAccentTheme() {
+        const inViewer = document.body.classList.contains('in-viewer');
         if (playlist.mode) {
-          applyAccentTheme(null);
+          if (inViewer) {
+            applyAccentTheme(null, { ignorePlaylistAccent: true });
+          } else {
+            applyAccentTheme(null, { ignorePlaylistAccent: true });
+          }
         } else {
           applyAccentTheme(state.library?.categoryFilter || null);
         }
@@ -6300,6 +6320,7 @@
             <div class="flex flex-wrap gap-1 mt-1">${renderCategoryBadges(item)}</div>
           </div>
           <div class="flex items-center gap-2 shrink-0 whitespace-nowrap">
+            <button class="fav h-9 w-9 grid place-items-center rounded-full border border-neutral-700 text-neutral-300 bg-neutral-800/70 hover:bg-neutral-700 transition-transform" title="Als Favorit markieren" aria-pressed="false" style="padding:0;">☆</button>
             <button class="add-playlist h-9 w-9 grid place-items-center rounded-full border border-neutral-700 text-neutral-200 bg-neutral-800/70 hover:bg-neutral-700 transition-transform" data-name="${item.name}" title="Zur Playlist hinzufügen" style="padding:0;">
               ${SVG_PLAYLIST_ADD}
             </button>
@@ -6308,23 +6329,29 @@
             </button>
           </div>
         `;
-        const favBtnRow = a.querySelector(".fav");
-        setFavVisual(favBtnRow, state.library.favorites.has(item.name));
-        favBtnRow.addEventListener("click", async (ev) => {
-          ev.preventDefault();
-          ev.stopPropagation();
-          const btn = favBtnRow;
-          const makeFav = !state.library.favorites.has(item.name);
-          try {
-            await setFavoriteOnBackend(item.name, makeFav);
-            if (makeFav) state.library.favorites.add(item.name);
-            else state.library.favorites.delete(item.name);
-            setFavVisual(btn, makeFav);
-            updateFavoritesChipCounter(); // Update counter live
-          } catch {
-            setFavVisual(btn, state.library.favorites.has(item.name));
-          }
-        });
+        const favBtnRow = a.querySelector('.fav');
+        if (favBtnRow) {
+          const isFav = state.library.favorites.has(item.name);
+          favBtnRow.setAttribute('aria-pressed', String(isFav));
+          setFavVisual(favBtnRow, isFav);
+          favBtnRow.addEventListener('click', async (ev) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+            const makeFav = !state.library.favorites.has(item.name);
+            try {
+              await setFavoriteOnBackend(item.name, makeFav);
+              if (makeFav) state.library.favorites.add(item.name);
+              else state.library.favorites.delete(item.name);
+              setFavVisual(favBtnRow, makeFav);
+              favBtnRow.setAttribute('aria-pressed', String(makeFav));
+              updateFavoritesChipCounter();
+            } catch {
+              const current = state.library.favorites.has(item.name);
+              setFavVisual(favBtnRow, current);
+              favBtnRow.setAttribute('aria-pressed', String(current));
+            }
+          });
+        }
         const assignBtn = a.querySelector('.assign-cat');
         if (assignBtn) assignBtn.addEventListener('click', (ev) => {
           ev.preventDefault();
@@ -6390,10 +6417,14 @@
         });
       }
 
-      function renderPlaylistLibrary() {
-        controlsEl.classList.add('hidden');
-        disposeLibraryViewportSizing();
-        ensurePlaylistStyles();
+  function renderPlaylistLibrary() {
+    document.body.classList.remove('in-viewer');
+    setUploadButtonVisible(true);
+    headerActionsEl.innerHTML = '';
+    controlsEl.classList.add('hidden');
+    resetHeaderAccentToDefault();
+    disposeLibraryViewportSizing();
+    ensurePlaylistStyles();
         // Header actions
         ensureModeSwitcher();
         ensureUploadButton();
@@ -6570,8 +6601,15 @@
       }
 
       // Neue Funktion: Playlist-Detail-Seite
-      async function renderPlaylistDetail(playlistId) {
-        controlsEl.classList.add('hidden');
+  async function renderPlaylistDetail(playlistId) {
+    document.body.classList.remove('in-viewer');
+    setUploadButtonVisible(true);
+    headerActionsEl.innerHTML = '';
+    controlsEl.classList.add('hidden');
+    resetHeaderAccentToDefault();
+    ensureModeSwitcher();
+    ensureUploadButton();
+    ensurePlaylistBadge();
         const playlistData = playlist.byId.get(playlistId);
         if (!playlistData) {
           showToast('Playlist nicht gefunden', 2000);
