@@ -2317,6 +2317,8 @@
           pageLabelAllowance: null,
           pageScaledHeight: null,
           zoom: 1,
+          zoomPreview: null,
+          committedZoom: 1,
           zoomTimer: null,
           zoomControlsReady: false,
           zoomVersion: 0,
@@ -3066,6 +3068,8 @@
     window.annotations = annotations;
 
     state.viewer.zoom = loadStoredZoom();
+    state.viewer.committedZoom = state.viewer.zoom;
+    state.viewer.zoomPreview = null;
     updateZoomUI();
     setupZoomControls();
 
@@ -3154,7 +3158,8 @@
       }
 
       function updateZoomUI() {
-        const percent = zoomToPercent(state.viewer.zoom);
+        const activeZoom = state.viewer.zoomPreview ?? state.viewer.zoom;
+        const percent = zoomToPercent(activeZoom);
         if (zoomControls.slider) {
           zoomControls.slider.value = String(percent);
           zoomControls.slider.setAttribute('aria-valuenow', String(percent));
@@ -3168,9 +3173,135 @@
         setViewerZoom(state.viewer.zoom + delta, { immediate });
       }
 
-      function setViewerZoom(value, { immediate = false } = {}) {
+      function adjustScrollForZoom(prevZoom, newZoom, focal) {
+        if (!focal) return;
+        const viewerEl = document.querySelector('#viewer');
+        if (!viewerEl) return;
+        if (!Number.isFinite(prevZoom) || prevZoom <= 0) return;
+        if (!Number.isFinite(newZoom) || newZoom <= 0) return;
+        const ratio = newZoom / prevZoom;
+        if (!Number.isFinite(ratio) || ratio <= 0) return;
+
+        const { contentY, viewportOffsetY, contentX, viewportOffsetX } = focal;
+
+        if (Number.isFinite(contentY) && Number.isFinite(viewportOffsetY)) {
+          const targetScrollY = contentY * ratio - viewportOffsetY;
+          const maxScrollY = Math.max(0, viewerEl.scrollHeight - viewerEl.clientHeight);
+          viewerEl.scrollTop = Math.max(0, Math.min(maxScrollY, targetScrollY));
+        }
+
+        if (Number.isFinite(contentX) && Number.isFinite(viewportOffsetX)) {
+          const targetScrollX = contentX * ratio - viewportOffsetX;
+          const maxScrollX = Math.max(0, viewerEl.scrollWidth - viewerEl.clientWidth);
+          viewerEl.scrollLeft = Math.max(0, Math.min(maxScrollX, targetScrollX));
+        }
+      }
+
+      function applyZoomPreviewLayout(zoom) {
+        if (!document.body.classList.contains('in-viewer')) return;
+        const container = document.querySelector('#viewer');
+        if (!container) return;
+        const placeholders = Array.from(container.querySelectorAll('[data-page]'));
+        let lastBlockHeight = null;
+        let lastScaledHeight = null;
+        let lastStageWidth = null;
+        let lastLabelAllowance = null;
+
+        for (const ph of placeholders) {
+          if (!(ph instanceof HTMLElement)) continue;
+          if (ph.dataset.rendered !== '1') continue;
+          const stage = ph.querySelector('[data-role="page-stage"]');
+          if (!stage) continue;
+          const canvas = stage.querySelector('canvas[data-role="pdf-canvas"]');
+          if (!canvas) continue;
+          const baseWidth = Number(canvas.dataset.baseWidth);
+          const baseHeight = Number(canvas.dataset.baseHeight);
+          if (!Number.isFinite(baseWidth) || !Number.isFinite(baseHeight)) continue;
+
+          const scaledWidth = Math.max(1, Math.round(baseWidth * zoom));
+          const scaledHeight = Math.max(1, Math.round(baseHeight * zoom));
+
+          stage.style.width = `${scaledWidth}px`;
+          stage.style.minWidth = `${scaledWidth}px`;
+          stage.style.maxWidth = 'none';
+          stage.style.height = `${scaledHeight}px`;
+          canvas.style.width = `${scaledWidth}px`;
+          canvas.style.height = `${scaledHeight}px`;
+
+          const overlayLayers = stage.querySelectorAll('canvas.annotation-layer, canvas.annotation-committed');
+          overlayLayers.forEach((layer) => {
+            layer.style.width = `${scaledWidth}px`;
+            layer.style.height = `${scaledHeight}px`;
+          });
+
+          const labelAllowance = Number(stage.dataset.labelAllowance) || Number(ph.dataset.labelAllowance) || (() => {
+            const label = ph.querySelector('[data-role="page-label"]');
+            return label ? label.offsetHeight + 16 : 48;
+          })();
+
+          const blockHeight = scaledHeight + labelAllowance;
+          ph.style.height = `${blockHeight}px`;
+          ph.style.minHeight = `${blockHeight}px`;
+          ph.dataset.blockHeight = String(blockHeight);
+          ph.dataset.renderedHeight = String(blockHeight);
+          ph.dataset.labelAllowance = String(labelAllowance);
+
+          lastBlockHeight = blockHeight;
+          lastScaledHeight = scaledHeight;
+          lastStageWidth = scaledWidth;
+          lastLabelAllowance = labelAllowance;
+        }
+
+        if (Number.isFinite(lastBlockHeight)) {
+          state.viewer.pageBlockHeight = lastBlockHeight;
+        }
+        if (Number.isFinite(lastScaledHeight)) {
+          state.viewer.pageScaledHeight = lastScaledHeight;
+        }
+        if (Number.isFinite(lastStageWidth)) {
+          state.viewer.pageStageWidth = lastStageWidth;
+        }
+        if (Number.isFinite(lastLabelAllowance)) {
+          state.viewer.pageLabelAllowance = lastLabelAllowance;
+        }
+
+        state.viewer.autoScroll.needsRecalc = true;
+      }
+
+      function getViewerCenterFocal() {
+        const viewerEl = document.querySelector('#viewer');
+        if (!viewerEl) return null;
+        const offsetX = viewerEl.clientWidth / 2;
+        const offsetY = viewerEl.clientHeight / 2;
+        return {
+          contentX: viewerEl.scrollLeft + offsetX,
+          viewportOffsetX: offsetX,
+          contentY: viewerEl.scrollTop + offsetY,
+          viewportOffsetY: offsetY
+        };
+      }
+
+      function setViewerZoom(value, { immediate = false, preview = false, focal = null, force = false } = {}) {
         const clamped = clampZoom(value);
-        const changed = Math.abs(clamped - state.viewer.zoom) >= 0.001;
+        const focalPoint = focal || getViewerCenterFocal();
+
+        if (preview) {
+          const prevPreview = state.viewer.zoomPreview ?? state.viewer.zoom;
+          const delta = Math.abs(clamped - prevPreview);
+          if (delta < 0.001) return;
+          if (state.viewer.zoomTimer) {
+            clearTimeout(state.viewer.zoomTimer);
+            state.viewer.zoomTimer = null;
+          }
+          state.viewer.zoomPreview = clamped;
+          updateZoomUI();
+          applyZoomPreviewLayout(clamped);
+          adjustScrollForZoom(prevPreview, clamped, focalPoint);
+          return;
+        }
+
+        const prevZoom = state.viewer.zoom;
+        const changed = Math.abs(clamped - prevZoom) >= 0.001;
 
         if (state.viewer.zoomTimer) {
           clearTimeout(state.viewer.zoomTimer);
@@ -3179,16 +3310,24 @@
 
         if (changed) {
           state.viewer.zoom = clamped;
+          state.viewer.zoomPreview = null;
           state.viewer.zoomVersion += 1;
           persistZoom(clamped);
+        } else if (!force) {
+          state.viewer.zoomPreview = null;
+          updateZoomUI();
+          return;
+        } else {
+          state.viewer.zoomPreview = null;
         }
 
         updateZoomUI();
+        adjustScrollForZoom(prevZoom, clamped, focalPoint);
 
         const viewerActive = document.body.classList.contains('in-viewer') && state.viewer._pdf;
         if (!viewerActive) return;
 
-        if (immediate) {
+        if (immediate || force) {
           applyZoomToPages().catch((err) => console.warn('Zoom update failed', err));
           return;
         }
@@ -3235,6 +3374,8 @@
           state.viewer.autoScroll.lastTs = performance.now();
         }
         updateStatus();
+        state.viewer.committedZoom = state.viewer.zoom;
+        state.viewer.zoomPreview = null;
       }
 
       function adjustPlaceholderHeights(blockHeight) {
@@ -7465,13 +7606,15 @@
         // resume from that position when released.
         registerUserScrollControls(container);
 
-        // Pinch-to-Zoom Gesten-Steuerung für Tablets - Verbesserte intuitive Version
+        // Pinch-to-Zoom Gesten-Steuerung für Tablets - flüssige Vorschau + Fokus-Erhalt
         (function setupPinchZoom() {
           let pinchState = {
             active: false,
             initialDistance: 0,
             initialZoom: 1,
-            lastScale: 1
+            lastScale: 1,
+            lastZoom: null,
+            focal: null
           };
 
           const getDistance = (touch1, touch2) => {
@@ -7480,76 +7623,100 @@
             return Math.sqrt(dx * dx + dy * dy);
           };
 
+          const computeFocal = (touches) => {
+            const viewerRect = container.getBoundingClientRect();
+            const scrollTop = container.scrollTop;
+            const scrollLeft = container.scrollLeft;
+            if (touches.length < 2) return pinchState.focal;
+            const centerX = (touches[0].clientX + touches[1].clientX) / 2;
+            const centerY = (touches[0].clientY + touches[1].clientY) / 2;
+            const offsetYRaw = centerY - viewerRect.top;
+            const offsetXRaw = centerX - viewerRect.left;
+            const offsetY = Math.max(0, Math.min(viewerRect.height, offsetYRaw));
+            const offsetX = Math.max(0, Math.min(viewerRect.width, offsetXRaw));
+            return {
+              contentY: scrollTop + offsetY,
+              viewportOffsetY: offsetY,
+              contentX: scrollLeft + offsetX,
+              viewportOffsetX: offsetX
+            };
+          };
+
           const handleTouchStart = (e) => {
-            // Nur bei genau 2 Fingern aktivieren
             if (e.touches.length === 2) {
-              // Nicht bei laufendem Auto-Scroll stören
               if (state.viewer.autoScroll.running) {
                 return;
               }
-              
+
               e.preventDefault();
               e.stopPropagation();
-              
+
               pinchState.active = true;
               pinchState.initialDistance = getDistance(e.touches[0], e.touches[1]);
-              pinchState.initialZoom = state.viewer.zoom;
+              pinchState.initialZoom = state.viewer.zoomPreview ?? state.viewer.zoom;
               pinchState.lastScale = 1;
-              
-              // User-Scroll temporär deaktivieren
+              pinchState.lastZoom = pinchState.initialZoom;
+              pinchState.focal = computeFocal(e.touches);
+
               state.viewer.autoScroll.userAdjusting = true;
             }
           };
 
           const handleTouchMove = (e) => {
             if (!pinchState.active) return;
-            
-            // Nur bei genau 2 Fingern fortfahren
             if (e.touches.length !== 2) {
               return;
             }
-            
+
             e.preventDefault();
             e.stopPropagation();
-            
+
+            pinchState.focal = computeFocal(e.touches);
             const currentDistance = getDistance(e.touches[0], e.touches[1]);
             const rawScale = currentDistance / pinchState.initialDistance;
-            
-            // Sanftes Smoothing für flüssigere Geste
+
             const smoothedScale = pinchState.lastScale * 0.3 + rawScale * 0.7;
             pinchState.lastScale = smoothedScale;
-            
-            const newZoom = pinchState.initialZoom * smoothedScale;
-            
-            // Sofortiges visuelles Feedback
-            setViewerZoom(newZoom, { immediate: true });
+
+            const newZoom = clampZoom(pinchState.initialZoom * smoothedScale);
+            pinchState.lastZoom = newZoom;
+
+            setViewerZoom(newZoom, { preview: true, focal: pinchState.focal });
+          };
+
+          const finalizePinch = (forceZoom = null) => {
+            const targetZoom = clampZoom(forceZoom ?? pinchState.lastZoom ?? state.viewer.zoomPreview ?? state.viewer.zoom);
+            const focal = pinchState.focal;
+            applyZoomPreviewLayout(targetZoom);
+            state.viewer.zoomPreview = null;
+            setViewerZoom(targetZoom, { immediate: true, focal, force: true });
+
+            pinchState.active = false;
+            pinchState.lastScale = 1;
+            pinchState.lastZoom = null;
+            pinchState.focal = null;
+            state.viewer.autoScroll.userAdjusting = false;
           };
 
           const handleTouchEnd = (e) => {
             if (!pinchState.active) return;
-            
-            // Geste beenden wenn weniger als 2 Finger
             if (e.touches.length < 2) {
-              // Finalen Zoom noch einmal anwenden für sauberes Rendering
-              setViewerZoom(state.viewer.zoom, { immediate: true });
-              
-              pinchState.active = false;
-              pinchState.lastScale = 1;
-              
-              // User-Scroll wieder aktivieren
-              state.viewer.autoScroll.userAdjusting = false;
+              finalizePinch();
             }
           };
 
-          const handleTouchCancel = (e) => {
-            if (pinchState.active) {
-              pinchState.active = false;
-              pinchState.lastScale = 1;
-              state.viewer.autoScroll.userAdjusting = false;
-            }
+          const handleTouchCancel = () => {
+            if (!pinchState.active) return;
+            state.viewer.zoomPreview = null;
+            applyZoomPreviewLayout(state.viewer.zoom);
+            updateZoomUI();
+            pinchState.active = false;
+            pinchState.lastScale = 1;
+            pinchState.lastZoom = null;
+            pinchState.focal = null;
+            state.viewer.autoScroll.userAdjusting = false;
           };
 
-          // Event Listener mit capture-Phase für bessere Kontrolle
           container.addEventListener('touchstart', handleTouchStart, { passive: false, capture: true });
           container.addEventListener('touchmove', handleTouchMove, { passive: false, capture: true });
           container.addEventListener('touchend', handleTouchEnd, { passive: false, capture: true });
