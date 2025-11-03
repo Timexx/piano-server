@@ -934,12 +934,21 @@ function loadConfig() {
     const raw = fs.readFileSync(CONFIG_FILE, "utf8");
     const j = JSON.parse(raw);
     const favoritesRaw = Array.isArray(j.favorites) ? j.favorites : [];
+    
+    // Clean up favorites: only keep ones that actually exist as files
     const favorites = favoritesRaw
       .map((name) => {
-        const info = resolvePdfName(name, { requireExists: false });
+        const info = resolvePdfName(name, { requireExists: true }); // Changed to requireExists: true
         return info ? info.rel : null;
       })
       .filter(Boolean);
+    
+    // Auto-cleanup: if some favorites were removed, mark config as dirty to save cleaned version
+    const removedCount = favoritesRaw.length - favorites.length;
+    const needsCleanup = removedCount > 0;
+    if (needsCleanup) {
+      console.log(`[Config] Removed ${removedCount} non-existent favorite(s) from config`);
+    }
 
     const categoriesRaw = Array.isArray(j.categories) ? j.categories : [];
     const seenIds = new Set();
@@ -991,13 +1000,13 @@ function loadConfig() {
       a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" })
     );
 
-    return { favorites: favList, files, categories };
+    return { favorites: favList, files, categories, needsCleanup };
   } catch {
-    return { favorites: [], files: {}, categories: [] };
+    return { favorites: [], files: {}, categories: [], needsCleanup: false };
   }
 }
 let CONFIG = loadConfig();
-let _configDirty = false;
+let _configDirty = CONFIG.needsCleanup || false; // Mark dirty if cleanup happened
 let _configVersion = 0;
 let _saveInProgress = null;
 let configFileState = (() => {
@@ -1008,6 +1017,14 @@ let configFileState = (() => {
     return null;
   }
 })();
+
+// Auto-save cleaned config if favorites were removed
+if (CONFIG.needsCleanup) {
+  delete CONFIG.needsCleanup; // Remove flag before saving
+  setTimeout(() => {
+    saveConfigImmediate().catch(err => console.error('[Config] Auto-cleanup save failed:', err));
+  }, 1000);
+}
 
 /* ---------------- Playlist persistence ---------------- */
 function loadPlaylist() {

@@ -2459,6 +2459,37 @@
           }
         } catch {}
       }
+      
+      // Update favorites chip counter live
+      function updateFavoritesChipCounter() {
+        const favChip = document.getElementById('filterFavChip');
+        if (!favChip) return;
+        
+        const favCount = state.library.favorites?.size || 0;
+        const favActive = state.library.onlyFavorites;
+        
+        // Find or create badge span
+        let badge = favChip.querySelector('span:last-child');
+        const isBadge = badge && badge.textContent.match(/^\d+$/);
+        
+        if (favCount > 0) {
+          const badgeClasses = `inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full text-xs font-bold ${favActive ? 'bg-amber-400/90 text-neutral-900' : 'bg-amber-500/20 text-amber-300'}`;
+          if (isBadge) {
+            // Update existing badge
+            badge.textContent = favCount;
+            badge.className = badgeClasses;
+          } else {
+            // Create new badge
+            const newBadge = document.createElement('span');
+            newBadge.className = badgeClasses;
+            newBadge.textContent = favCount;
+            favChip.appendChild(newBadge);
+          }
+        } else if (isBadge) {
+          // Remove badge if count is 0
+          badge.remove();
+        }
+      }
       async function getFilePrefsFromBackend(name) {
         try {
           const res = await fetch(`/api/prefs/file?name=${encodeURIComponent(name)}`, { cache: "no-store" });
@@ -3702,6 +3733,7 @@
                 appEl.innerHTML = '<div class="flex items-center justify-center h-[70vh] text-neutral-400">Lade…</div>';
                 await loadPage();
                 renderLibrary();
+                updateFavoritesChipCounter(); // Update badge styling after toggle
                 return;
               }
               
@@ -4129,24 +4161,43 @@
         wrap.appendChild(scroller);
 
         const pool = new Map();
+        
+        // For small datasets (≤100 items), render all items immediately without virtualization
+        // This ensures favorites and filtered lists always show completely
+        const useFullRender = total <= 100;
 
         function renderViewport() {
           const scrollTop = scroller.scrollTop;
-          const viewH = scroller.clientHeight;
+          let viewH = scroller.clientHeight;
+          
+          // Safety: If viewport height is not yet calculated or too small, use a reasonable minimum
+          // This ensures initial render shows enough items
+          if (viewH < 300) viewH = Math.max(600, window.innerHeight - 200);
+          
           const bufferRows = 3;
 
-          const firstRow = Math.max(0, Math.floor(scrollTop / rowStride) - bufferRows);
-          const lastRow  = Math.min(rows - 1, Math.floor((scrollTop + viewH) / rowStride) + bufferRows);
+          let firstIndex, lastIndex;
+          
+          if (useFullRender) {
+            // Render all items for small datasets
+            firstIndex = 0;
+            lastIndex = total - 1;
+          } else {
+            // Use virtualization for large datasets
+            const firstRow = Math.max(0, Math.floor(scrollTop / rowStride) - bufferRows);
+            const lastRow  = Math.min(rows - 1, Math.floor((scrollTop + viewH) / rowStride) + bufferRows);
+            firstIndex = firstRow * cols;
+            lastIndex  = Math.min(total - 1, (lastRow + 1) * cols - 1);
+          }
 
-          const firstIndex = firstRow * cols;
-          const lastIndex  = Math.min(total - 1, (lastRow + 1) * cols - 1);
-
-          // Simple cleanup - remove out-of-view elements
-          for (const [key, el] of pool) {
-            const idx = Number(key);
-            if (idx < firstIndex || idx > lastIndex) {
-              el.remove();
-              pool.delete(key);
+          // Simple cleanup - remove out-of-view elements (only for virtualized mode)
+          if (!useFullRender) {
+            for (const [key, el] of pool) {
+              const idx = Number(key);
+              if (idx < firstIndex || idx > lastIndex) {
+                el.remove();
+                pool.delete(key);
+              }
             }
           }
 
@@ -4185,7 +4236,11 @@
             renderTimer = null;
           });
         }
-        scroller.addEventListener("scroll", scheduleRenderViewport, { passive: true });
+        
+        // Only add scroll listener for large datasets that use virtualization
+        if (!useFullRender) {
+          scroller.addEventListener("scroll", scheduleRenderViewport, { passive: true });
+        }
         window.addEventListener("resize", () => mountVirtualizer(false), { once: true });
 
         renderViewport();
@@ -4263,6 +4318,7 @@
               await setFavoriteOnBackend(item.name, makeFav);
               if (makeFav) state.library.favorites.add(item.name); else state.library.favorites.delete(item.name);
               setFavVisual(favBtn, makeFav);
+              updateFavoritesChipCounter(); // Update counter live
             } catch {
               setFavVisual(favBtn, state.library.favorites.has(item.name));
             }
@@ -4346,6 +4402,7 @@
             if (makeFav) state.library.favorites.add(item.name);
             else state.library.favorites.delete(item.name);
             setFavVisual(btn, makeFav);
+            updateFavoritesChipCounter(); // Update counter live
           } catch {
             setFavVisual(btn, state.library.favorites.has(item.name));
           }
