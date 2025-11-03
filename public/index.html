@@ -7486,9 +7486,9 @@
           return;
         }
         
-        // Find the control group to insert into
-        const controlGroup = document.querySelector('#controls .control-group:first-child');
-        if (!controlGroup) return;
+        // Find the first control-module-body to insert into (after Back and Fullscreen buttons)
+        const controlModuleBody = document.querySelector('#controls .control-panel-left .control-module .control-module-body');
+        if (!controlModuleBody) return;
         
         if (!prev) {
           prev = document.createElement('button');
@@ -7503,7 +7503,7 @@
             </svg>
           `;
           prev.addEventListener('click', () => navigatePlaylist(-1));
-          controlGroup.appendChild(prev);
+          controlModuleBody.appendChild(prev);
         }
         
         if (!next) {
@@ -7519,7 +7519,7 @@
             </svg>
           `;
           next.addEventListener('click', () => navigatePlaylist(1));
-          controlGroup.appendChild(next);
+          controlModuleBody.appendChild(next);
         }
         
         const idx = getEffectivePlaylistIndex();
