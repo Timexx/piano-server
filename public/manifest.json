@@ -1,0 +1,23 @@
+{
+  "name": "Piano Sheets",
+  "short_name": "Piano",
+  "description": "Offline-fähige Piano Notenblatt-Bibliothek",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#050506",
+  "theme_color": "#6366F1",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "/icon-maskable.svg",
+      "sizes": "192x192 256x256 384x384 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["music", "education", "utilities"],
+  "scope": "/",
+  "lang": "de",
+  "dir": "ltr",
+  "screenshots": []
+}

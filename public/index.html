@@ -4,6 +4,15 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>Piano Sheets</title>
+    <link rel="icon" href="/icon-maskable.svg" type="image/svg+xml">
+    <link rel="shortcut icon" href="/icon-maskable.svg" type="image/svg+xml">
+    
+    <!-- PWA Manifest -->
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#6366F1">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Piano Sheets">
 
     <!-- Tailwind CSS (CDN) -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -199,6 +208,58 @@
   /* Ensure favorite star on cards turns yellow when active */
   .music-card .icon-btn.fav.text-yellow-400 { color: #facc15; }
   .music-card .icon-btn.fav.text-neutral-300 { color: #d1d5db; }
+      .music-card .icon-btn.offline-active {
+        background: rgba(34, 197, 94, 0.18);
+        border-color: rgba(134, 239, 172, 0.55);
+        color: #bbf7d0;
+      }
+      .music-card .icon-btn.offline-active:hover {
+        background: rgba(34, 197, 94, 0.25);
+        border-color: rgba(134, 239, 172, 0.8);
+      }
+      .badge-offline {
+        position: absolute;
+        top: -6px;
+        right: -6px;
+        background: #22c55e;
+        color: #0f172a;
+        border-radius: 999px;
+        padding: 0 0.4rem;
+        font-size: 0.65rem;
+        font-weight: 700;
+        box-shadow: 0 4px 12px rgba(34, 197, 94, 0.35);
+      }
+      .offline-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        padding: 0.25rem 0.55rem;
+        border-radius: 999px;
+        background: rgba(34, 197, 94, 0.18);
+        border: 1px solid rgba(34, 197, 94, 0.35);
+        color: #bbf7d0;
+        font-size: 0.7rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+      .offline-dot {
+        width: 0.45rem;
+        height: 0.45rem;
+        border-radius: 999px;
+        background: currentColor;
+        display: inline-flex;
+      }
+      .btn-offline {
+        position: relative;
+      }
+      .btn-offline[disabled] {
+        opacity: 0.6;
+      }
+      .offline-spinner {
+        width: 1.1rem;
+        height: 1.1rem;
+        animation: spin 0.9s linear infinite;
+      }
       #libraryPager {
         background: linear-gradient(180deg, rgba(9,9,12,0.85) 0%, rgba(9,9,12,0.93) 100%);
         border-top: 1px solid rgba(255,255,255,0.06);
@@ -1648,6 +1709,42 @@
 
     <!-- App logic embedded as module -->
     <script type="module">
+      // ===== PWA Service Worker Registration =====
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js')
+            .then((registration) => {
+              console.log('✅ Service Worker registered:', registration.scope);
+              
+              // Update verfügbar
+              registration.addEventListener('updatefound', () => {
+                const newWorker = registration.installing;
+                newWorker.addEventListener('statechange', () => {
+                  if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                    // Neuer Service Worker verfügbar
+                    if (confirm('Neue Version verfügbar! Jetzt aktualisieren?')) {
+                      newWorker.postMessage({ type: 'SKIP_WAITING' });
+                      window.location.reload();
+                    }
+                  }
+                });
+              });
+            })
+            .catch((error) => {
+              console.warn('❌ Service Worker registration failed:', error);
+            });
+          
+          // Reload wenn neuer SW aktiviert wird
+          let refreshing = false;
+          navigator.serviceWorker.addEventListener('controllerchange', () => {
+            if (!refreshing) {
+              refreshing = true;
+              window.location.reload();
+            }
+          });
+        });
+      }
+
       import { createAnnotationManager } from "./annotation-tools.js";
 
       // force same-origin worker to avoid blob/CORS issues (Safari/iPad)
@@ -1655,6 +1752,12 @@
 
   const $ = (sel, el = document) => el.querySelector(sel);
   const encodePathSegments = (rel) => rel.split('/').map(encodeURIComponent).join('/');
+  const cssEscape = (value) => {
+        if (window.CSS && typeof window.CSS.escape === 'function') {
+          return window.CSS.escape(value);
+        }
+        return String(value ?? '').replace(/([\0-\x1F\x7F"'\\\[\]\{\}<>#%&*,./:;=?@`|~\s])/g, '\\$1');
+      };
       const appEl = document.querySelector('#app');
       const controlsEl = document.querySelector('#controls');
       const headerActionsEl = document.querySelector('#header-actions');
@@ -1737,6 +1840,37 @@
       const SVG_PLAYLIST_REMOVE = `
         <svg xmlns="http://www.w3.org/2000/svg" height="24" viewBox="0 -960 960 960" width="24" fill="currentColor" aria-hidden="true" focusable="false">
           <path d="m576-80-56-56 104-104-104-104 56-56 104 104 104-104 56 56-104 104 104 104-56 56-104-104L576-80ZM120-320v-80h280v80H120Zm0-160v-80h440v80H120Zm0-160v-80h440v80H120Z"/>
+        </svg>`;
+      const SVG_CLOUD_DOWNLOAD = `
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+          <path d="M20 16.5A4.5 4.5 0 0018 8h-1.26A7 7 0 104 14.75" />
+          <path d="M12 12v8" />
+          <path d="M8.5 16.5L12 20l3.5-3.5" />
+        </svg>`;
+      const SVG_CLOUD_CHECK = `
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+          <path d="M20 16.5A4.5 4.5 0 0018 8h-1.26A7 7 0 104 14.75" />
+          <path d="M9.5 16.5l2.5 2.5 4.5-4.5" />
+        </svg>`;
+      const SVG_REFRESH = `
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+          <polyline points="23 4 23 10 17 10" />
+          <polyline points="1 20 1 14 7 14" />
+          <path d="M3.51 9a9 9 0 0114.13-3.36L23 10" />
+          <path d="M20.49 15a9 9 0 01-14.13 3.36L1 14" />
+        </svg>`;
+      const SVG_TRASH_MINI = `
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+          <polyline points="3 6 5 6 21 6" />
+          <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
+          <path d="M10 11v6" />
+          <path d="M14 11v6" />
+          <path d="M15 6l-1-3h-4l-1 3" />
+        </svg>`;
+      const SVG_SPINNER = `
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false" class="offline-spinner">
+          <circle cx="12" cy="12" r="9" opacity="0.25" />
+          <path d="M21 12a9 9 0 00-9-9" />
         </svg>`;
       const SVG_CATEGORY_ADD = `
         <svg xmlns="http://www.w3.org/2000/svg" height="24" viewBox="0 -960 960 960" width="24" fill="currentColor" aria-hidden="true" focusable="false">
@@ -1970,6 +2104,7 @@
           });
         }
       }
+
       async function releaseWakeLock() {
         try { if (state.viewer.wakeLock) { await state.viewer.wakeLock.release(); state.viewer.wakeLock = null; } } catch {}
         try { if (state.viewer.noSleep && state.viewer.noSleepEnabled) { state.viewer.noSleep.disable(); state.viewer.noSleepEnabled = false; } } catch {}
@@ -1988,6 +2123,7 @@
       function stopWakeWatch() {
         if (state.viewer.wakeTimer) { clearInterval(state.viewer.wakeTimer); state.viewer.wakeTimer = null; }
       }
+
       // Re-acquire when the tab becomes visible again (Safari can drop locks)
       document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible' && document.body.classList.contains('in-viewer')) {
@@ -2006,12 +2142,73 @@
       window.addEventListener('pageshow', () => {
         if (document.body.classList.contains('in-viewer')) acquireWakeLockAuto();
       });
-      window.addEventListener('pagehide', () => {
-        // nothing; iOS may suspend timers – watchdog will restart on pageshow
-      });
 
-      const params = new URLSearchParams(location.search);
-      const currentFile = params.get("file"); // encoded
+      async function runPdfPageRefresh() {
+        if (pdfRefreshState.running) {
+          pdfRefreshState.timer = window.setTimeout(runPdfPageRefresh, 160);
+          return;
+        }
+
+        pdfRefreshState.timer = null;
+
+        const pendingPages = Array.from(pdfRefreshState.pages).sort((a, b) => a - b);
+        const requiresUpdate = pendingPages.length > 0 || pdfRefreshState.needsDocRefresh;
+        if (!requiresUpdate) return;
+
+        const fileName = state.viewer.fileName;
+        const bustToken = pdfRefreshState.token || (state.viewer.cacheToken ?? Date.now());
+        if (!fileName) {
+          resetPdfRefreshState();
+          return;
+        }
+
+        pdfRefreshState.running = true;
+
+        try {
+          const urlBase = `/sheets/${encodePathSegments(fileName)}`;
+          if (pdfRefreshState.needsDocRefresh) {
+            state.viewer.cacheToken = bustToken;
+            await preloadPdfDocument(`${urlBase}?v=${bustToken}`);
+            await renderViewer(fileName, { bustToken });
+          } else if (pendingPages.length) {
+            await refreshPdfPages(fileName, pendingPages, { bustToken });
+          }
+        } catch (err) {
+          console.warn('PDF refresh failed', err);
+        } finally {
+          const hasMore = pdfRefreshState.pages.size || pdfRefreshState.needsDocRefresh;
+          pdfRefreshState.pages.clear();
+          pdfRefreshState.needsDocRefresh = false;
+          pdfRefreshState.token = null;
+          pdfRefreshState.running = false;
+          if (pdfRefreshState.timer) {
+            clearTimeout(pdfRefreshState.timer);
+            pdfRefreshState.timer = null;
+          }
+          if (hasMore) {
+            pdfRefreshState.timer = window.setTimeout(runPdfPageRefresh, 200);
+          }
+        }
+      }
+
+      // Load offline state from localStorage
+      let offlineStorageRaw = {};
+      try {
+        const stored = localStorage.getItem('offlineState');
+        if (stored) {
+          offlineStorageRaw = JSON.parse(stored);
+        }
+      } catch (err) {
+        console.warn('Failed to load offline state:', err);
+        offlineStorageRaw = {};
+      }
+      const offlineStoredItems = Array.isArray(offlineStorageRaw?.items) ? offlineStorageRaw.items : [];
+      const offlineStoredManifest = offlineStorageRaw?.manifest && typeof offlineStorageRaw.manifest === 'object'
+        ? offlineStorageRaw.manifest
+        : {};
+      const offlineStoredLastSync = Number(offlineStorageRaw?.lastSync) || null;
+      const offlineStoredPrimed = Boolean(offlineStorageRaw?.libraryPrimed);
+      const offlineStoredFilter = Boolean(offlineStorageRaw?.filterOnly);
 
       // ---- Global State (simplified for server-side thumbnails) ----
       const state = {
@@ -2068,10 +2265,674 @@
           lastCheck: 0,
           isLowMemory: false,
           checkInterval: 10000 // Check every 10s
+        },
+        offline: {
+          supported: typeof navigator !== 'undefined' && 'serviceWorker' in navigator,
+          workerReady: false,
+          cached: new Set(offlineStoredItems.filter((item) => typeof item === 'string')),
+          manifest: offlineStoredManifest,
+          busy: false,
+          pending: new Set(),
+          inFlight: new Map(),
+          lastError: null,
+          lastSync: offlineStoredLastSync,
+          libraryPrimed: offlineStoredPrimed,
+          filterOnly: offlineStoredFilter,
+          online: navigator.onLine
         }
       };
 
   window.state = state;
+
+      const LIBRARY_SNAPSHOT_KEY = 'librarySnapshot:last';
+
+      function escapeHtml(value) {
+        return String(value ?? '')
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#39;');
+      }
+
+      function persistOfflineState() {
+        if (!state.offline.supported) return;
+        const snapshot = {
+          items: Array.from(state.offline.cached),
+          manifest: state.offline.manifest,
+          lastSync: state.offline.lastSync,
+          libraryPrimed: state.offline.libraryPrimed,
+          filterOnly: !!state.offline.filterOnly
+        };
+        try {
+          localStorage.setItem('offlineState', JSON.stringify(snapshot));
+        } catch (err) {
+          console.warn('Persist offline state failed:', err);
+        }
+      }
+
+      function updateOfflineOnlineStatus() {
+        if (!state.offline.supported) return;
+        state.offline.online = navigator.onLine;
+        document.body.dataset.network = state.offline.online ? 'online' : 'offline';
+      }
+
+      async function sendMessageToServiceWorker(type, payload = {}) {
+        if (!state.offline.supported) {
+          throw new Error('Service Worker not available');
+        }
+        let registration;
+        try {
+          registration = await navigator.serviceWorker.ready;
+        } catch (err) {
+          throw new Error('Service Worker not ready');
+        }
+        const target = navigator.serviceWorker.controller || registration.active;
+        if (!target) {
+          throw new Error('Service Worker controller unavailable');
+        }
+        return new Promise((resolve, reject) => {
+          const channel = new MessageChannel();
+          const timeout = window.setTimeout(() => {
+            channel.port1.close();
+            reject(new Error('Service Worker response timeout'));
+          }, 12000);
+          channel.port1.onmessage = (event) => {
+            window.clearTimeout(timeout);
+            resolve(event.data || {});
+          };
+          try {
+            target.postMessage({ ...payload, type }, [channel.port2]);
+          } catch (err) {
+            window.clearTimeout(timeout);
+            reject(err);
+          }
+        });
+      }
+
+      function offlineResourceUrlsForItem(item) {
+        if (!item || !item.name) return [];
+        const encoded = encodePathSegments(item.name);
+        const urls = [
+          `/sheets/${encoded}`,
+          item.thumbnail || `/thumbnails/${encodePathSegments(item.name.replace(/\.pdf$/i, '.jpg'))}`,
+          `/api/prefs/file?name=${encodeURIComponent(item.name)}`,
+          `/api/annotations?name=${encodeURIComponent(item.name)}`
+        ];
+        return [...new Set(urls.filter(Boolean))];
+      }
+
+      function buildOfflineManifestEntry(item) {
+        if (!item || !item.name) return null;
+        const categories = Array.isArray(item.categories)
+          ? item.categories.map((cat) => ({
+              id: cat.id,
+              name: cat.name,
+              color: cat.color,
+              icon: cat.icon
+            }))
+          : [];
+        return {
+          name: item.name,
+          displayName: item.displayName || item.name.split('/').pop(),
+          folder: item.folder || '',
+          thumbnail: item.thumbnail || `/thumbnails/${encodePathSegments(item.name.replace(/\.pdf$/i, '.jpg'))}`,
+          url: item.url || `/sheets/${encodePathSegments(item.name)}`,
+          categories,
+          size: Number(item.size) || null,
+          mtime: Number(item.mtime) || null
+        };
+      }
+
+      function getOfflineManifestEntry(name) {
+        if (!name) return null;
+        const manifest = state.offline.manifest || {};
+        return manifest[name] || null;
+      }
+
+      function refreshOfflineIndicators() {
+        requestAnimationFrame(() => {
+          document.querySelectorAll('[data-item-name]').forEach((el) => {
+            updateOfflineIndicatorForElement(el);
+          });
+        });
+      }
+
+      function updateOfflineIndicatorForElement(el) {
+        if (!el || !el.dataset) return;
+        const rel = el.dataset.itemName;
+        if (!rel) return;
+        const isCached = state.offline.supported && state.offline.cached.has(rel);
+        const badgeSelector = '[data-offline-badge="1"]';
+        let badge = el.querySelector(badgeSelector);
+        if (isCached) {
+          if (!badge) {
+            badge = document.createElement('span');
+            badge.dataset.offlineBadge = '1';
+            badge.className = 'badge-offline';
+            badge.textContent = 'Offline';
+            el.appendChild(badge);
+          }
+        } else if (badge) {
+          badge.remove();
+        }
+
+        const btn = el.querySelector('[data-action="offline"]');
+        if (btn) {
+          updateOfflineButtonAppearance(btn, rel);
+        }
+      }
+
+      function updateOfflineButtonAppearance(btn, rel) {
+        if (!btn) return;
+        const busy = btn.dataset.offlineBusy === '1';
+        const name = rel || btn.dataset.offlineName || '';
+        if (!state.offline.supported) {
+          if (!busy) {
+            btn.innerHTML = SVG_CLOUD_DOWNLOAD;
+            btn.classList.remove('offline-active');
+            btn.setAttribute('aria-pressed', 'false');
+          }
+          btn.disabled = true;
+          btn.title = 'Offline-Funktion nicht verfügbar';
+          btn.dataset.offlineName = name;
+          return;
+        }
+        const isCached = state.offline.cached.has(name);
+        const controllerReady = state.offline.workerReady || !!navigator.serviceWorker?.controller;
+        const onlineNow = navigator.onLine !== false;
+        const allowDownload = controllerReady && onlineNow;
+
+        if (!busy) {
+          btn.innerHTML = isCached ? SVG_CLOUD_CHECK : SVG_CLOUD_DOWNLOAD;
+          btn.classList.toggle('offline-active', isCached);
+          btn.setAttribute('aria-pressed', String(isCached));
+        }
+
+        btn.disabled = false;
+        if (!busy) {
+          if (!controllerReady) {
+            btn.title = 'Initialisiere Offline-Unterstützung…';
+          } else if (!onlineNow && !isCached) {
+            btn.title = 'Keine Verbindung – Download nicht möglich.';
+          } else {
+            btn.title = isCached ? 'Offline-Version entfernen' : 'Offline speichern';
+          }
+        }
+
+        if (!isCached && (!allowDownload || busy)) {
+          btn.classList.remove('offline-active');
+        }
+        btn.dataset.offlineName = name;
+      }
+
+      function setOfflineButtonBusy(btn, busy) {
+        if (!btn) return;
+        if (busy) {
+          btn.dataset.offlineBusy = '1';
+          btn.disabled = true;
+          btn.innerHTML = SVG_SPINNER;
+        } else {
+          delete btn.dataset.offlineBusy;
+          updateOfflineButtonAppearance(btn, btn.dataset.offlineName);
+        }
+      }
+
+      function forEachOfflineButton(name, callback) {
+        if (!name || typeof callback !== 'function') return;
+        document.querySelectorAll('.btn-offline').forEach((btn) => {
+          if (btn.dataset && btn.dataset.offlineName === name) {
+            callback(btn);
+          }
+        });
+      }
+
+      function setOfflineButtonsBusyByName(name, busy) {
+        forEachOfflineButton(name, (btn) => setOfflineButtonBusy(btn, busy));
+      }
+
+      function handleOfflineCacheResult(payload) {
+        if (!payload || typeof payload !== 'object') return;
+        const name = payload.name;
+        if (!name) return;
+
+        state.offline.pending.delete(name);
+        state.offline.inFlight.delete(name);
+        setOfflineButtonsBusyByName(name, false);
+
+        if (payload.success) {
+          state.offline.cached.add(name);
+          if (payload.manifest && typeof payload.manifest === 'object') {
+            state.offline.manifest[name] = payload.manifest;
+          }
+          state.offline.lastSync = Date.now();
+          persistOfflineState();
+          refreshOfflineIndicators();
+          renderOfflineShelf();
+          const label = payload.manifest?.displayName || payload.displayName || name;
+          showToast(`Offline verfügbar: ${label}`, 2600);
+        } else {
+          state.offline.lastError = payload.error || 'Download fehlgeschlagen';
+          refreshOfflineIndicators();
+          renderOfflineShelf();
+          const label = payload.displayName || payload.manifest?.displayName || name;
+          showToast(payload.error ? `Download fehlgeschlagen: ${label}` : 'Download fehlgeschlagen.', 3200);
+        }
+      }
+
+      async function cacheItemForOffline(item) {
+        if (!state.offline.supported) {
+          const error = new Error('Offline caching not supported');
+          error.userMessage = 'Offline-Funktion nicht verfügbar.';
+          throw error;
+        }
+        const urls = offlineResourceUrlsForItem(item);
+        const manifestEntry = buildOfflineManifestEntry(item);
+        const requestId = `offline-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+        const response = await sendMessageToServiceWorker('CACHE_URLS', {
+          urls,
+          name: item.name,
+          manifest: manifestEntry,
+          displayName: manifestEntry?.displayName || item.displayName || item.name,
+          requestId
+        });
+        if (response && response.success === false) {
+          const error = new Error(response.error || 'Caching failed');
+          error.userMessage = 'Download fehlgeschlagen.';
+          throw error;
+        }
+        state.offline.workerReady = true;
+        return { requestId, manifest: manifestEntry };
+      }
+
+      async function removeItemFromOffline(item) {
+        if (!state.offline.supported) {
+          const error = new Error('Offline caching not supported');
+          error.userMessage = 'Offline-Funktion nicht verfügbar.';
+          throw error;
+        }
+        const urls = offlineResourceUrlsForItem(item);
+        const response = await sendMessageToServiceWorker('REMOVE_URLS', { urls });
+        if (response && response.success === false) {
+          const error = new Error(response.error || 'Remove failed');
+          error.userMessage = 'Offline-Daten konnten nicht entfernt werden.';
+          throw error;
+        }
+        state.offline.workerReady = true;
+        state.offline.cached.delete(item.name);
+        delete state.offline.manifest[item.name];
+        state.offline.lastSync = Date.now();
+        persistOfflineState();
+      }
+
+      function buildOfflineLibraryItems() {
+        const items = [];
+        state.offline.cached.forEach((name) => {
+          const manifest = getOfflineManifestEntry(name) || {};
+          items.push({
+            id: encodeURIComponent(name),
+            name,
+            displayName: manifest.displayName || name.split('/').pop(),
+            folder: manifest.folder || '',
+            thumbnail: manifest.thumbnail || `/thumbnails/${encodePathSegments(name.replace(/\.pdf$/i, '.jpg'))}`,
+            url: manifest.url || `/sheets/${encodePathSegments(name)}`,
+            categories: Array.isArray(manifest.categories) ? manifest.categories : [],
+            size: manifest.size || 0,
+            mtime: manifest.mtime || 0
+          });
+        });
+        return items.sort((a, b) => a.displayName.localeCompare(b.displayName, 'de', { sensitivity: 'base' }));
+      }
+
+      function deriveOfflineCategories() {
+        const seen = new Map();
+        const manifest = state.offline.manifest || {};
+        Object.keys(manifest).forEach((name) => {
+          const entry = manifest[name];
+          if (!entry || !Array.isArray(entry.categories)) return;
+          entry.categories.forEach((cat) => {
+            if (!cat || !cat.id) return;
+            if (!seen.has(cat.id)) {
+              seen.set(cat.id, { ...cat });
+            }
+          });
+        });
+        return Array.from(seen.values());
+      }
+
+      function buildOfflineLibraryFallbackData() {
+        const items = buildOfflineLibraryItems();
+        return {
+          items,
+          total: items.length,
+          categories: deriveOfflineCategories()
+        };
+      }
+
+      async function syncOfflineInventory({ silent = false } = {}) {
+        if (!state.offline.supported) return;
+        try {
+          const response = await sendMessageToServiceWorker('GET_CACHED_PDFS');
+          state.offline.workerReady = true;
+          const pdfs = Array.isArray(response?.pdfs) ? response.pdfs : [];
+          state.offline.cached = new Set(pdfs);
+          Object.keys(state.offline.manifest).forEach((key) => {
+            if (!state.offline.cached.has(key)) {
+              delete state.offline.manifest[key];
+            }
+          });
+          state.offline.lastSync = Date.now();
+          persistOfflineState();
+          refreshOfflineIndicators();
+          renderOfflineShelf();
+          if (!silent) {
+            showToast(`Offline-Inhalte aktualisiert (${pdfs.length})`, 2600);
+          }
+        } catch (error) {
+          state.offline.lastError = error?.message || String(error);
+          if (!silent) {
+            showToast('Offline-Status konnte nicht aktualisiert werden.', 3200);
+          }
+          console.warn('Offline sync failed:', error);
+        }
+      }
+
+      async function clearOfflineCaches() {
+        if (!state.offline.supported) return;
+        try {
+          await sendMessageToServiceWorker('CLEAR_OFFLINE');
+          state.offline.workerReady = true;
+        } catch (err) {
+          console.warn('CLEAR_OFFLINE failed:', err);
+        }
+        state.offline.cached = new Set();
+        state.offline.manifest = {};
+        state.offline.libraryPrimed = false;
+        state.offline.lastSync = Date.now();
+        persistOfflineState();
+        refreshOfflineIndicators();
+        renderOfflineShelf();
+      }
+
+      function renderOfflineShelf() {
+        const shelf = document.querySelector('#offlineShelf');
+        if (!shelf) return;
+        if (!state.offline.supported) {
+          shelf.classList.add('hidden');
+          shelf.innerHTML = '';
+          return;
+        }
+        const count = state.offline.cached.size;
+        if (!count) {
+          shelf.classList.add('hidden');
+          shelf.innerHTML = '';
+          return;
+        }
+        shelf.classList.remove('hidden');
+        const filterActive = !!state.offline.filterOnly;
+        const entries = buildOfflineLibraryItems();
+        const pills = entries.length
+          ? entries.map((entry) => `
+              <button type="button" class="offline-pill" data-offline-open="${entry.name}" title="Im Viewer öffnen">
+                <span class="offline-dot"></span>
+                <span>${escapeHtml(entry.displayName)}</span>
+              </button>
+            `).join('')
+          : '<span class="text-sm text-neutral-400">Noch keine Metadaten verfügbar.</span>';
+        shelf.innerHTML = `
+          <div class="rounded-2xl border border-neutral-800/60 bg-neutral-900/80 backdrop-blur-sm p-4 sm:p-5 flex flex-col gap-4">
+            <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <div class="text-xs uppercase tracking-[0.25em] text-neutral-500">Offline</div>
+                <div class="mt-1 flex items-center gap-2 text-lg font-semibold text-neutral-100">
+                  Offline verfügbar
+                  <span class="offline-pill" aria-label="Anzahl offline verfügbarer Titel"><span class="offline-dot"></span>${count}</span>
+                </div>
+                <p class="text-sm text-neutral-400 mt-1">Diese Titel kannst du ohne Internet öffnen.</p>
+              </div>
+              <div class="flex flex-wrap gap-2 sm:justify-end">
+                <button id="btnOfflineFilter" type="button" class="btn btn-secondary ${filterActive ? 'offline-active' : ''}">
+                  ${filterActive ? 'Offline-Filter aktiv' : 'Nur offline anzeigen'}
+                </button>
+                <button id="btnOfflineRefresh" type="button" class="btn btn-secondary btn-icon" title="Status aktualisieren">${SVG_REFRESH}</button>
+                <button id="btnOfflineClear" type="button" class="btn btn-secondary btn-icon" title="Offline-Speicher leeren">${SVG_TRASH_MINI}</button>
+              </div>
+            </div>
+            <div class="flex flex-wrap gap-2" role="list">
+              ${pills}
+            </div>
+          </div>
+        `;
+
+        const filterBtn = shelf.querySelector('#btnOfflineFilter');
+        if (filterBtn) {
+          filterBtn.addEventListener('click', () => {
+            state.offline.filterOnly = !state.offline.filterOnly;
+            state.library.page = 1;
+            persistOfflineState();
+            renderLibrary();
+          });
+        }
+        const refreshBtn = shelf.querySelector('#btnOfflineRefresh');
+        if (refreshBtn) refreshBtn.addEventListener('click', () => syncOfflineInventory());
+        const clearBtn = shelf.querySelector('#btnOfflineClear');
+        if (clearBtn) {
+          clearBtn.addEventListener('click', () => {
+            showConfirmDialog({
+              title: 'Offline-Speicher leeren?',
+              message: 'Alle offline gespeicherten Titel werden entfernt.',
+              confirmText: 'Ja, löschen',
+              cancelText: 'Abbrechen',
+              isDangerous: true,
+              onConfirm: async () => {
+                await clearOfflineCaches();
+                showToast('Offline-Speicher geleert.', 2600);
+              }
+            });
+          });
+        }
+        shelf.querySelectorAll('[data-offline-open]').forEach((btn) => {
+          btn.addEventListener('click', (ev) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+            const rel = btn.getAttribute('data-offline-open');
+            if (!rel) return;
+            acquireWakeLockSync();
+            history.replaceState(null, '', `/?file=${encodeURIComponent(rel)}`);
+            renderViewer(rel);
+          });
+        });
+      }
+
+      function saveLibrarySnapshot(snapshot) {
+        try {
+          localStorage.setItem(LIBRARY_SNAPSHOT_KEY, JSON.stringify(snapshot));
+        } catch (err) {
+          console.warn('Snapshot save failed:', err);
+        }
+      }
+
+      function loadLibrarySnapshot() {
+        try {
+          const raw = localStorage.getItem(LIBRARY_SNAPSHOT_KEY);
+          return raw ? JSON.parse(raw) : null;
+        } catch (err) {
+          console.warn('Snapshot load failed:', err);
+          return null;
+        }
+      }
+
+      function snapshotParamsEqual(a, b) {
+        return JSON.stringify(a || {}) === JSON.stringify(b || {});
+      }
+
+      async function handleOfflineToggle(btn, item) {
+        if (!item || !item.name) return;
+        if (!state.offline.supported) {
+          showToast('Offline-Funktion nicht verfügbar.', 3200);
+          return;
+        }
+        const rel = item.name;
+        if (state.offline.pending.has(rel)) return;
+        const isCached = state.offline.cached.has(rel);
+
+        if (isCached) {
+          state.offline.pending.add(rel);
+          setOfflineButtonsBusyByName(rel, true);
+          try {
+            const confirmed = await new Promise((resolve) => {
+              showConfirmDialog({
+                title: 'Offline-Version entfernen?',
+                message: `Soll "${escapeHtml(item.displayName || item.name)}" aus dem Offline-Speicher entfernt werden?`,
+                confirmText: 'Entfernen',
+                cancelText: 'Abbrechen',
+                isDangerous: true,
+                onConfirm: () => resolve(true),
+                onCancel: () => resolve(false)
+              });
+            });
+            if (!confirmed) return;
+            await removeItemFromOffline(item);
+            showToast(`Offline-Version entfernt: ${item.displayName || item.name}`, 2600);
+            refreshOfflineIndicators();
+            renderOfflineShelf();
+          } catch (error) {
+            state.offline.lastError = error?.message || String(error);
+            showToast(error?.userMessage || 'Offline-Aktion fehlgeschlagen.', 3600);
+            console.warn('Offline toggle failed:', error);
+          } finally {
+            state.offline.pending.delete(rel);
+            setOfflineButtonsBusyByName(rel, false);
+          }
+          return;
+        }
+
+        const controllerReady = state.offline.workerReady || !!navigator.serviceWorker?.controller;
+        const onlineNow = navigator.onLine !== false;
+        if (!onlineNow) {
+          showToast('Keine Verbindung – Download nicht möglich.', 3200);
+          return;
+        }
+        if (!controllerReady) {
+          showToast('Offline-Unterstützung wird vorbereitet. Bitte kurz warten.', 3200);
+          return;
+        }
+
+        state.offline.pending.add(rel);
+        state.offline.inFlight.set(rel, { displayName: item.displayName || item.name });
+        setOfflineButtonsBusyByName(rel, true);
+
+        try {
+          await cacheItemForOffline(item);
+          showToast(`Download gestartet: ${item.displayName || item.name}`, 2400);
+        } catch (error) {
+          state.offline.lastError = error?.message || String(error);
+          state.offline.pending.delete(rel);
+          state.offline.inFlight.delete(rel);
+          setOfflineButtonsBusyByName(rel, false);
+          showToast(error?.userMessage || 'Offline-Aktion fehlgeschlagen.', 3600);
+          console.warn('Offline toggle failed:', error);
+        }
+      }
+
+      function handleOfflineStatusChange() {
+        if (!state.offline.supported) return;
+        const previous = state.offline.online;
+        updateOfflineOnlineStatus();
+        refreshOfflineIndicators();
+        renderOfflineShelf();
+        if (state.offline.online && !previous) {
+          showToast('Zurück online.', 2400);
+          syncOfflineInventory({ silent: true });
+        } else if (!state.offline.online && previous) {
+          showToast('Offline. Nur gespeicherte Inhalte verfügbar.', 3600);
+        }
+      }
+
+      function initializeOfflineSupport() {
+        if (!state.offline.supported) return;
+        updateOfflineOnlineStatus();
+        renderOfflineShelf();
+        refreshOfflineIndicators();
+        const controller = navigator.serviceWorker.controller;
+        if (controller) {
+          state.offline.workerReady = true;
+        }
+        navigator.serviceWorker.ready
+          .then(() => {
+            state.offline.workerReady = true;
+            if (!state.offline.lastSync) {
+              syncOfflineInventory({ silent: true });
+            } else {
+              refreshOfflineIndicators();
+              renderOfflineShelf();
+            }
+          })
+          .catch((err) => console.warn('Service Worker ready failed:', err));
+      }
+
+      if (state.offline.supported) {
+        window.addEventListener('online', handleOfflineStatusChange);
+        window.addEventListener('offline', handleOfflineStatusChange);
+        initializeOfflineSupport();
+        navigator.serviceWorker.addEventListener?.('controllerchange', () => {
+          state.offline.workerReady = true;
+          refreshOfflineIndicators();
+          renderOfflineShelf();
+        });
+        navigator.serviceWorker.addEventListener?.('message', (event) => {
+          const data = event?.data;
+          if (data && data.type === 'OFFLINE_CACHE_RESULT') {
+            handleOfflineCacheResult(data);
+          }
+        });
+      }
+
+      function updatePaginationDisplay() {
+        const offlineActive = state.offline.supported && state.offline.filterOnly && state.offline.cached.size > 0;
+        const totalPages = offlineActive ? 1 : Math.max(1, Math.ceil(state.library.total / state.library.pageSize));
+        const currentPage = offlineActive ? 1 : state.library.page;
+        const prevDisabled = offlineActive || currentPage <= 1;
+        const nextDisabled = offlineActive || currentPage >= totalPages;
+
+        const pNow = document.querySelector('#pNow');
+        if (pNow) pNow.textContent = currentPage;
+
+        const prevBtn = document.querySelector('#prevPage');
+        if (prevBtn) {
+          prevBtn.classList.toggle('invisible', prevDisabled);
+          prevBtn.classList.toggle('pointer-events-none', prevDisabled);
+          prevBtn.classList.toggle('select-none', prevDisabled);
+          prevBtn.classList.toggle('opacity-0', prevDisabled);
+          if (prevDisabled) {
+            prevBtn.setAttribute('aria-disabled', 'true');
+            prevBtn.setAttribute('tabindex', '-1');
+          } else {
+            prevBtn.removeAttribute('aria-disabled');
+            prevBtn.removeAttribute('tabindex');
+          }
+        }
+
+        const nextBtn = document.querySelector('#nextPage');
+        if (nextBtn) {
+          nextBtn.classList.toggle('invisible', nextDisabled);
+          nextBtn.classList.toggle('pointer-events-none', nextDisabled);
+          nextBtn.classList.toggle('select-none', nextDisabled);
+          nextBtn.classList.toggle('opacity-0', nextDisabled);
+          if (nextDisabled) {
+            nextBtn.setAttribute('aria-disabled', 'true');
+            nextBtn.setAttribute('tabindex', '-1');
+          } else {
+            nextBtn.removeAttribute('aria-disabled');
+            nextBtn.removeAttribute('tabindex');
+          }
+        }
+
+        const pager = document.querySelector('#libraryPager');
+        if (pager) {
+          pager.classList.toggle('hidden', offlineActive);
+        }
+      }
 
   const pdfRefreshState = {
     pages: new Set(),
@@ -2112,68 +2973,7 @@
     pdfRefreshState.running = false;
   }
 
-  async function runPdfPageRefresh() {
-    if (pdfRefreshState.running) {
-      pdfRefreshState.timer = window.setTimeout(runPdfPageRefresh, 160);
-      return;
-    }
-
-    pdfRefreshState.timer = null;
-
-    const pendingPages = Array.from(pdfRefreshState.pages).sort((a, b) => a - b);
-    const requiresUpdate = pendingPages.length > 0 || pdfRefreshState.needsDocRefresh;
-    if (!requiresUpdate) return;
-
-    const bust = Number.isFinite(pdfRefreshState.token) ? pdfRefreshState.token : Date.now();
-    const fileName = state.viewer.fileName;
-    pdfRefreshState.token = null;
-    pdfRefreshState.needsDocRefresh = false;
-    pdfRefreshState.pages.clear();
-
-    if (!fileName || !window.pdfjsLib) return;
-
-    const url = `/sheets/${encodePathSegments(fileName)}?v=${bust}`;
-    pdfRefreshState.running = true;
-
-    try {
-      const pdf = await pdfjsLib.getDocument({ url }).promise;
-      if (fileName !== state.viewer.fileName) {
-        try { pdf.cleanup?.(); pdf.destroy?.(); } catch {}
-        return;
-      }
-      const previous = state.viewer._pdf;
-      state.viewer._pdf = pdf;
-      state.viewer.url = url;
-      state.viewer.cacheToken = bust;
-
-      const container = document.querySelector('#viewer');
-      if (container && pendingPages.length) {
-        for (const pageNumber of pendingPages) {
-          const placeholder = container.querySelector(`.viewer-page[data-page="${pageNumber}"]`);
-          if (placeholder) {
-            try {
-              await renderOnePageInto(placeholder, pdf, pageNumber);
-            } catch (pageErr) {
-              console.warn('PDF-Seite konnte nicht aktualisiert werden', pageNumber, pageErr);
-            }
-          }
-        }
-      }
-
-      if (previous && previous !== pdf) {
-        try { previous.cleanup?.(); previous.destroy?.(); } catch {}
-      }
-    } catch (err) {
-      console.warn('PDF refresh failed', err);
-    } finally {
-      pdfRefreshState.running = false;
-      if (pdfRefreshState.pages.size || pdfRefreshState.needsDocRefresh) {
-        pdfRefreshState.timer = window.setTimeout(runPdfPageRefresh, 200);
-      }
-    }
-  }
-
-    const annotations = createAnnotationManager({
+  const annotations = createAnnotationManager({
       state,
       updateStatus,
       fetcher: (url, options) => fetch(url, options ?? {}),
@@ -2418,6 +3218,9 @@
       }
 
       // ===== Router =====
+      const params = new URLSearchParams(location.search);
+      const currentFile = params.get("file"); // encoded
+      
       (async function init() {
         // Initialize playlist sync early for UI affordances
         try { await fetchPlaylist(); } catch {}
@@ -2937,12 +3740,51 @@
       }
       async function loadPage() {
         const L = state.library;
-        // Keep page fixed when paginating; don't reset page here.
-        const data = await fetchPage({ q: L.q, sort: L.sort, order: L.order, page: L.page, pageSize: L.pageSize, fav: L.onlyFavorites, category: L.categoryFilter });
-        L.items = data.items || [];
-        L.total = data.total || 0;
-        if (Array.isArray(data.categories)) {
-          state.categories = data.categories;
+        const snapshotParams = {
+          q: L.q,
+          sort: L.sort,
+          order: L.order,
+          page: L.page,
+          pageSize: L.pageSize,
+          fav: L.onlyFavorites,
+          category: L.categoryFilter
+        };
+        let data;
+        try {
+          data = await fetchPage({
+            q: L.q,
+            sort: L.sort,
+            order: L.order,
+            page: L.page,
+            pageSize: L.pageSize,
+            fav: L.onlyFavorites,
+            category: L.categoryFilter
+          });
+          saveLibrarySnapshot({ params: snapshotParams, payload: data });
+        } catch (err) {
+          console.warn('Bibliothek konnte nicht geladen werden, verwende lokale Daten', err);
+          const snapshot = loadLibrarySnapshot();
+          if (snapshot && snapshot.payload && snapshotParamsEqual(snapshot.params, snapshotParams)) {
+            data = snapshot.payload;
+            showToast('Letzte Bibliothek wird offline angezeigt.', 3200);
+          } else {
+            const fallback = buildOfflineLibraryFallbackData();
+            if (fallback.items.length) {
+              data = { items: fallback.items, total: fallback.total, categories: fallback.categories };
+              state.offline.libraryPrimed = true;
+              persistOfflineState();
+              showToast('Offline-Bibliothek geladen.', 3200);
+            } else {
+              throw err;
+            }
+          }
+        }
+
+        const payload = data || {};
+        L.items = Array.isArray(payload.items) ? payload.items : [];
+        L.total = Number(payload.total) || 0;
+        if (Array.isArray(payload.categories)) {
+          state.categories = payload.categories;
           // Preserve special filter 'none' (uncategorized)
           if (L.categoryFilter && L.categoryFilter !== 'none' && !state.categories.some(cat => cat.id === L.categoryFilter)) {
             L.categoryFilter = null;
@@ -2997,8 +3839,16 @@
 
         const L = state.library;
         applyAccentTheme(L.categoryFilter);
+        const offlineFilterActive = state.offline.supported && state.offline.filterOnly && state.offline.cached.size > 0;
+        if (offlineFilterActive) {
+          state.library.page = 1;
+        }
         const allMode = L.pageSize === "all";
-        const totalPages = Math.max(1, Math.ceil(L.total / L.pageSize));
+        const totalPages = offlineFilterActive ? 1 : Math.max(1, Math.ceil(L.total / L.pageSize));
+        const currentPage = offlineFilterActive ? 1 : L.page;
+        const prevDisabled = offlineFilterActive || currentPage <= 1;
+        const nextDisabled = offlineFilterActive || currentPage >= totalPages;
+        const pagerHiddenClass = offlineFilterActive ? 'hidden' : '';
 
         const isSmallScreen = window.innerWidth <= 540;
         const filterCollapsed = state.ui.filterCollapsed;
@@ -3095,17 +3945,23 @@
                 <span id="activeFilterCategoryName" class="flex items-center gap-1.5"></span>
               </div>
             </div>
+            <section id="offlineShelf" class="hidden"></section>
             <div class="flex flex-col flex-1 min-h-0 overflow-hidden">
               <section id="virtualWrap" class="relative flex-1 min-h-0"></section>
-              <section id="libraryPager" class="flex items-center justify-between pt-3 shrink-0">
-                <button id="prevPage" class="px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-800 ${L.page<=1?"invisible pointer-events-none select-none opacity-0":""}" ${L.page<=1?"aria-disabled=\"true\" tabindex=\"-1\"":""}>« Zurück</button>
-                <div class="text-sm text-neutral-400">Seite <span id="pNow">${L.page}</span> / ${totalPages}</div>
-                <button id="nextPage" class="px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-800 ${L.page>=totalPages?"invisible pointer-events-none select-none opacity-0":""}" ${L.page>=totalPages?"aria-disabled=\"true\" tabindex=\"-1\"":""}>Weiter »</button>
+              <section id="libraryPager" class="flex items-center justify-between pt-3 shrink-0 ${pagerHiddenClass}">
+                <button id="prevPage" class="px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-800 ${prevDisabled?"invisible pointer-events-none select-none opacity-0":""}" ${prevDisabled?"aria-disabled=\"true\" tabindex=\"-1\"":""}>« Zurück</button>
+                <div class="text-sm text-neutral-400">Seite <span id="pNow">${currentPage}</span> / ${totalPages}</div>
+                <button id="nextPage" class="px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-800 ${nextDisabled?"invisible pointer-events-none select-none opacity-0":""}" ${nextDisabled?"aria-disabled=\"true\" tabindex=\"-1\"":""}>Weiter »</button>
               </section>
             </div>
           </div>`;
 
   renderCategoryBar();
+  renderOfflineShelf();
+  updatePaginationDisplay();
+  if (state.offline.supported) {
+    refreshOfflineIndicators();
+  }
 
         // Add header segmented mode switch + upload
         ensureModeSwitcher();
@@ -3171,25 +4027,7 @@
                   mountVirtualizer(true);
                 }
                 
-                // Update pagination display
-                const totalPages = Math.max(1, Math.ceil(state.library.total / state.library.pageSize));
-                const pNow = document.querySelector('#pNow');
-                if (pNow) pNow.textContent = state.library.page;
-                const prevBtn = document.querySelector('#prevPage');
-                const nextBtn = document.querySelector('#nextPage');
-                if (prevBtn) {
-
-                  prevBtn.classList.toggle('invisible', state.library.page <= 1);
-                  prevBtn.classList.toggle('pointer-events-none', state.library.page <= 1);
-                  prevBtn.classList.toggle('select-none', state.library.page <= 1);
-                  prevBtn.classList.toggle('opacity-0', state.library.page <= 1);
-                }
-                if (nextBtn) {
-                  nextBtn.classList.toggle('invisible', state.library.page >= totalPages);
-                  nextBtn.classList.toggle('pointer-events-none', state.library.page >= totalPages);
-                  nextBtn.classList.toggle('select-none', state.library.page >= totalPages);
-                  nextBtn.classList.toggle('opacity-0', state.library.page >= totalPages);
-                }
+                updatePaginationDisplay();
                 
                 // Restore focus to search field
                 searchEl.focus();
@@ -3229,24 +4067,7 @@
                 mountVirtualizer(true);
               }
               
-              // Update pagination display
-              const totalPages = Math.max(1, Math.ceil(state.library.total / state.library.pageSize));
-              const pNow = document.querySelector('#pNow');
-              if (pNow) pNow.textContent = state.library.page;
-              const prevBtn = document.querySelector('#prevPage');
-              const nextBtn = document.querySelector('#nextPage');
-              if (prevBtn) {
-                prevBtn.classList.toggle('invisible', state.library.page <= 1);
-                prevBtn.classList.toggle('pointer-events-none', state.library.page <= 1);
-                prevBtn.classList.toggle('select-none', state.library.page <= 1);
-                prevBtn.classList.toggle('opacity-0', state.library.page <= 1);
-              }
-              if (nextBtn) {
-                nextBtn.classList.toggle('invisible', state.library.page >= totalPages);
-                nextBtn.classList.toggle('pointer-events-none', state.library.page >= totalPages);
-                nextBtn.classList.toggle('select-none', state.library.page >= totalPages);
-                nextBtn.classList.toggle('opacity-0', state.library.page >= totalPages);
-              }
+              updatePaginationDisplay();
               
               // Restore focus if it was in the search field
               if (hadFocus) {
@@ -3617,23 +4438,35 @@
           });
         });
 
-        document.querySelector('#prevPage').onclick = async () => {
-          if (L.page > 1) {
-            L.page--;
-            appEl.innerHTML = '<div class="flex items-center justify-center h-[70vh] text-neutral-400">Lade…</div>';
-            await loadPage();
-            renderLibrary();
-          }
-        };
-        document.querySelector('#nextPage').onclick = async () => {
-          const totalPages = Math.max(1, Math.ceil(L.total / L.pageSize));
-          if (L.page < totalPages) {
-            L.page++;
-            appEl.innerHTML = '<div class="flex items-center justify-center h-[70vh] text-neutral-400">Lade…</div>';
-            await loadPage();
-            renderLibrary();
-          }
-        };
+        const prevPageBtn = document.querySelector('#prevPage');
+        if (prevPageBtn) {
+          prevPageBtn.onclick = async () => {
+            if (state.offline.supported && state.offline.filterOnly && state.offline.cached.size > 0) {
+              return;
+            }
+            if (L.page > 1) {
+              L.page--;
+              appEl.innerHTML = '<div class="flex items-center justify-center h-[70vh] text-neutral-400">Lade…</div>';
+              await loadPage();
+              renderLibrary();
+            }
+          };
+        }
+        const nextPageBtn = document.querySelector('#nextPage');
+        if (nextPageBtn) {
+          nextPageBtn.onclick = async () => {
+            if (state.offline.supported && state.offline.filterOnly && state.offline.cached.size > 0) {
+              return;
+            }
+            const totalPagesDynamic = Math.max(1, Math.ceil(L.total / L.pageSize));
+            if (L.page < totalPagesDynamic) {
+              L.page++;
+              appEl.innerHTML = '<div class="flex items-center justify-center h-[70vh] text-neutral-400">Lade…</div>';
+              await loadPage();
+              renderLibrary();
+            }
+          };
+        }
 
         // Memory status display
         
@@ -4123,10 +4956,11 @@
         wrap.innerHTML = "";
 
         const L = state.library;
-        let items = L.items;
+        const offlineFilterActive = state.offline.supported && state.offline.filterOnly && state.offline.cached.size > 0;
+        let items = offlineFilterActive ? buildOfflineLibraryItems() : L.items;
 
         const fuse = window.Fuse && L.q
-          ? new Fuse(items, { keys: ["name"], threshold: 0.3 })
+          ? new Fuse(items, { keys: ["name", "displayName"], threshold: 0.3 })
           : null;
         if (fuse) items = fuse.search(L.q).map(r => r.item);
 
@@ -4276,6 +5110,7 @@
         const accent = Array.isArray(item.categories) && item.categories[0]?.color ? item.categories[0].color : null;
         a.className = "music-card block will-change-transform";
         if (accent) a.style.setProperty('--card-accent', accent);
+        a.dataset.itemName = item.name;
 
         // Build inner
         const bg = document.createElement('img');
@@ -4339,6 +5174,24 @@
         });
         // Ensure playlist icons reflect current state
         queueMicrotask(() => updateLibraryPlaylistButtons());
+
+        const actionsContainer = overlay.querySelector('.card-actions');
+        if (actionsContainer) {
+          const offlineBtn = document.createElement('button');
+          offlineBtn.type = 'button';
+          offlineBtn.className = 'icon-btn btn-offline';
+          offlineBtn.dataset.action = 'offline';
+          offlineBtn.setAttribute('aria-label', 'Offline speichern');
+          offlineBtn.addEventListener('click', (ev) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+            handleOfflineToggle(offlineBtn, item);
+          });
+          actionsContainer.appendChild(offlineBtn);
+          updateOfflineButtonAppearance(offlineBtn, item.name);
+        }
+
+        updateOfflineIndicatorForElement(a);
         
         // Click-Handler für direktes Laden (ohne Page-Reload) + Wake Lock Aktivierung
         a.addEventListener('click', (ev) => {
@@ -4359,7 +5212,8 @@
         a.href = `/?file=${item.id}`;
         // Align list design to new card style: rounded, padded, subtly tinted background
         const accent = Array.isArray(item.categories) && item.categories[0]?.color ? item.categories[0].color : null;
-        a.className = "h-full flex items-center gap-3 px-3 py-2 rounded-xl border border-neutral-800/40 bg-neutral-900/80 hover:bg-neutral-800/80 transition-colors";
+        a.className = "relative h-full flex items-center gap-3 px-3 py-2 rounded-xl border border-neutral-800/40 bg-neutral-900/80 hover:bg-neutral-800/80 transition-colors";
+        a.dataset.itemName = item.name;
         if (accent) {
           a.style.setProperty('--row-accent', accent);
           // Darker, more elegant gradient for rows
@@ -4439,6 +5293,23 @@
           }
         });
         
+        const actions = a.querySelector('.flex.items-center.gap-2');
+        if (actions) {
+          const offlineBtn = document.createElement('button');
+          offlineBtn.type = 'button';
+          offlineBtn.className = 'icon-btn btn-offline h-9 w-9 grid place-items-center rounded-full border border-neutral-700 text-neutral-200 bg-neutral-800/70 hover:bg-neutral-700';
+          offlineBtn.dataset.action = 'offline';
+          offlineBtn.setAttribute('aria-label', 'Offline speichern');
+          offlineBtn.addEventListener('click', (ev) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+            handleOfflineToggle(offlineBtn, item);
+          });
+          actions.appendChild(offlineBtn);
+          updateOfflineButtonAppearance(offlineBtn, item.name);
+        }
+        updateOfflineIndicatorForElement(a);
+
         return a;
       }
 
