@@ -7,6 +7,7 @@ const https = require("https");
 const os = require("os");
 const { pipeline } = require("stream/promises");
 const { Transform } = require("stream");
+const { randomUUID } = require("crypto");
 const { PDFDocument } = require("pdf-lib");
 
 // Optional middlewares (used if installed; otherwise skipped)
@@ -58,7 +59,8 @@ const PUBLIC_DIR = path.join(ROOT, "public");
 const SHEETS_DIR = path.join(ROOT, "sheets");
 const DATA_DIR = path.join(ROOT, "data");
 const CONFIG_FILE = path.join(DATA_DIR, "config.json");
-const PLAYLIST_FILE = path.join(DATA_DIR, "playlist.json");
+const LEGACY_PLAYLIST_FILE = path.join(DATA_DIR, "playlist.json");
+const PLAYLISTS_FILE = path.join(DATA_DIR, "playlists.json");
 const THUMBS_DIR = path.join(DATA_DIR, "thumbnails"); // New: thumbnail cache directory
 const ANNOTATIONS_DIR = path.join(DATA_DIR, "annotations");
 const MAX_ANNOTATION_VERSIONS = 20;
@@ -725,30 +727,61 @@ function toPosixPath(input) {
 
 function resolvePdfName(name, options = {}) {
   const { requireExists = true } = options;
-  if (typeof name !== "string") return null;
-
-  let candidate = name.trim();
-  if (!candidate) return null;
-  try { candidate = decodeURIComponent(candidate); } catch {}
-
-  const normalized = path.posix.normalize(toPosixPath(candidate));
-  if (!normalized || normalized === "." || normalized.startsWith("../") || path.isAbsolute(normalized)) {
+  if (typeof name !== "string") {
+    console.log('resolvePdfName: name is not a string:', typeof name);
     return null;
   }
-  if (!normalized.toLowerCase().endsWith(".pdf")) return null;
+
+  let candidate = name.trim();
+  if (!candidate) {
+    console.log('resolvePdfName: name is empty after trim');
+    return null;
+  }
+  
+  const original = candidate;
+  try { candidate = decodeURIComponent(candidate); } catch (err) {
+    console.log('resolvePdfName: decodeURIComponent failed for:', original, err.message);
+  }
+
+  const normalized = path.posix.normalize(toPosixPath(candidate));
+  
+  console.log('resolvePdfName debug:', {
+    input: name,
+    trimmed: original,
+    decoded: candidate,
+    normalized,
+    requireExists
+  });
+  
+  if (!normalized || normalized === "." || normalized.startsWith("../") || path.isAbsolute(normalized)) {
+    console.log('resolvePdfName: invalid path structure');
+    return null;
+  }
+  if (!normalized.toLowerCase().endsWith(".pdf")) {
+    console.log('resolvePdfName: does not end with .pdf');
+    return null;
+  }
 
   const abs = path.resolve(path.join(SHEETS_DIR, normalized));
-  if (path.relative(SHEETS_DIR, abs).startsWith("..")) return null;
+  if (path.relative(SHEETS_DIR, abs).startsWith("..")) {
+    console.log('resolvePdfName: path escapes SHEETS_DIR');
+    return null;
+  }
 
   if (requireExists) {
     try {
       const st = fs.statSync(abs);
-      if (!st.isFile()) return null;
+      if (!st.isFile()) {
+        console.log('resolvePdfName: exists but is not a file');
+        return null;
+      }
     } catch {
+      console.log('resolvePdfName: file does not exist:', abs);
       return null;
     }
   }
 
+  console.log('resolvePdfName: success ->', { rel: normalized, abs });
   return { rel: normalized, abs };
 }
 
@@ -1027,35 +1060,239 @@ if (CONFIG.needsCleanup) {
 }
 
 /* ---------------- Playlist persistence ---------------- */
-function loadPlaylist() {
+const PLAYLIST_ICON_FALLBACK = "🎵";
+const PLAYLIST_COLOR_PALETTE = [
+  "#6366F1",
+  "#D946EF",
+  "#F97316",
+  "#0EA5E9",
+  "#22C55E",
+  "#F59E0B",
+  "#EC4899",
+  "#14B8A6",
+  "#A855F7",
+  "#F43F5E"
+];
+
+function createPlaylistId() {
+  if (typeof randomUUID === "function") {
+    try { return randomUUID(); } catch {}
+  }
+  return `pl-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function pickAccentColor(index = 0) {
+  if (!Array.isArray(PLAYLIST_COLOR_PALETTE) || !PLAYLIST_COLOR_PALETTE.length) {
+    return sanitizeHexColor(DEFAULT_CATEGORY_COLOR);
+  }
+  const len = PLAYLIST_COLOR_PALETTE.length;
+  const idx = ((index % len) + len) % len;
+  return sanitizeHexColor(PLAYLIST_COLOR_PALETTE[idx]);
+}
+
+function sanitizePlaylistName(name, fallback = "Setlist") {
+  if (typeof name !== "string") return fallback;
+  const trimmed = name.trim();
+  return trimmed || fallback;
+}
+
+function sanitizePlaylistIcon(icon) {
+  if (typeof icon !== "string") return PLAYLIST_ICON_FALLBACK;
+  const trimmed = icon.trim();
+  if (!trimmed) return PLAYLIST_ICON_FALLBACK;
+  return trimmed.slice(0, 2);
+}
+
+function sanitizeAccentColor(color, paletteIndex = 0) {
+  if (typeof color === "string" && color.trim()) {
+    return sanitizeHexColor(color);
+  }
+  return pickAccentColor(paletteIndex);
+}
+
+function sanitizePlaylistEntry(raw, index = 0) {
+  if (!raw || typeof raw !== "object") return null;
+  const now = Date.now();
+  const id = typeof raw.id === "string" && raw.id.trim() ? raw.id.trim() : createPlaylistId();
+  const name = sanitizePlaylistName(raw.name, `Playlist ${index + 1}`);
+  const icon = sanitizePlaylistIcon(raw.icon || raw.emoji);
+  const accentColor = sanitizeAccentColor(raw.accentColor, index);
+  const itemsRaw = Array.isArray(raw.items) ? raw.items : [];
+  const normalizedItems = ensureUniqueOrder(itemsRaw.map((name) => normalizeRelName(name)).filter(Boolean));
+  let currentIndex = Number.isInteger(raw.currentIndex) ? raw.currentIndex : (normalizedItems.length ? 0 : -1);
+  if (!normalizedItems.length) currentIndex = -1;
+  else currentIndex = Math.max(-1, Math.min(normalizedItems.length - 1, currentIndex));
+  const createdAt = Number(raw.createdAt) || now;
+  const updatedAt = Number(raw.updatedAt) || now;
+  return { id, name, icon, accentColor, items: normalizedItems, currentIndex, createdAt, updatedAt };
+}
+
+function createPlaylist(options = {}, meta = {}) {
+  const now = Date.now();
+  const index = typeof meta.paletteIndex === "number" ? meta.paletteIndex : 0;
+  const entry = sanitizePlaylistEntry({
+    id: createPlaylistId(),
+    name: options.name,
+    icon: options.icon,
+    emoji: options.emoji,
+    accentColor: options.accentColor,
+    items: options.items,
+    currentIndex: options.currentIndex,
+    createdAt: now,
+    updatedAt: now
+  }, index);
+  entry.createdAt = now;
+  entry.updatedAt = now;
+  return entry;
+}
+
+function sanitizePlaylistsState(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const list = Array.isArray(raw.playlists) ? raw.playlists : [];
+  const seen = new Set();
+  const sanitized = [];
+  list.forEach((entry, idx) => {
+    const sanitizedEntry = sanitizePlaylistEntry(entry, idx);
+    if (!sanitizedEntry) return;
+    if (seen.has(sanitizedEntry.id)) {
+      sanitizedEntry.id = createPlaylistId();
+    }
+    seen.add(sanitizedEntry.id);
+    sanitized.push(sanitizedEntry);
+  });
+  if (!sanitized.length) return null;
+  const activeId = typeof raw.activeId === "string" && seen.has(raw.activeId) ? raw.activeId : sanitized[0].id;
+  const updatedAt = Number(raw.updatedAt) || Math.max(...sanitized.map((pl) => pl.updatedAt));
+  return { playlists: sanitized, activeId, updatedAt };
+}
+
+function convertLegacyPlaylist(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const converted = sanitizePlaylistEntry({
+    id: raw.id,
+    name: raw.name,
+    items: raw.items,
+    currentIndex: raw.currentIndex,
+    accentColor: raw.accentColor,
+    icon: raw.icon,
+    emoji: raw.emoji,
+    createdAt: raw.updatedAt,
+    updatedAt: raw.updatedAt
+  }, 0);
+  if (!converted) return null;
+  return { playlists: [converted], activeId: converted.id, updatedAt: converted.updatedAt };
+}
+
+function ensurePlaylistFile(state) {
   try {
-    const raw = fs.readFileSync(PLAYLIST_FILE, "utf8");
-    const j = JSON.parse(raw);
-    const items = Array.isArray(j.items) ? j.items.map((name) => {
-      const info = resolvePdfName(name, { requireExists: false });
-      return info ? info.rel : null;
-    }).filter(Boolean) : [];
-    const currentIndex = Number.isInteger(j.currentIndex) ? Math.max(-1, Math.min(items.length - 1, j.currentIndex)) : -1;
-    return { items, currentIndex, updatedAt: Number(j.updatedAt) || Date.now(), name: typeof j.name === 'string' ? j.name : null };
-  } catch {
-    return { items: [], currentIndex: -1, updatedAt: Date.now(), name: null };
+    fs.mkdirSync(path.dirname(PLAYLISTS_FILE), { recursive: true });
+    fs.writeFileSync(PLAYLISTS_FILE, JSON.stringify(state, null, 2), "utf8");
+  } catch (err) {
+    console.error("ensurePlaylistFile failed:", err);
   }
 }
-let PLAYLIST = loadPlaylist();
+
+function loadPlaylists() {
+  const readJson = (file) => {
+    try {
+      const raw = fs.readFileSync(file, "utf8");
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  };
+
+  let state = sanitizePlaylistsState(readJson(PLAYLISTS_FILE));
+  if (state) return state;
+
+  const legacy = convertLegacyPlaylist(readJson(LEGACY_PLAYLIST_FILE));
+  if (legacy) {
+    ensurePlaylistFile(legacy);
+    return legacy;
+  }
+
+  const initialPlaylist = createPlaylist({ name: "Setlist" });
+  const initial = { playlists: [initialPlaylist], activeId: initialPlaylist.id, updatedAt: initialPlaylist.updatedAt };
+  ensurePlaylistFile(initial);
+  return initial;
+}
+
+let PLAYLIST_STATE = loadPlaylists();
 let _playlistSaveInProgress = null;
-async function savePlaylistImmediate() {
+
+function clonePlaylist(playlist) {
+  return {
+    id: playlist.id,
+    name: playlist.name,
+    icon: playlist.icon,
+    accentColor: playlist.accentColor,
+    items: playlist.items.slice(),
+    currentIndex: playlist.currentIndex,
+    createdAt: playlist.createdAt,
+    updatedAt: playlist.updatedAt,
+    itemCount: playlist.items.length
+  };
+}
+
+function serializePlaylistState(state) {
+  return {
+    activeId: state.activeId,
+    updatedAt: state.updatedAt,
+    playlists: state.playlists.map((pl) => clonePlaylist(pl))
+  };
+}
+
+function getActivePlaylist() {
+  return PLAYLIST_STATE.playlists.find((pl) => pl.id === PLAYLIST_STATE.activeId) || PLAYLIST_STATE.playlists[0] || null;
+}
+
+function serializeActivePlaylist() {
+  const active = getActivePlaylist();
+  if (!active) {
+    const now = Date.now();
+    return {
+      id: null,
+      name: null,
+      icon: PLAYLIST_ICON_FALLBACK,
+      accentColor: pickAccentColor(0),
+      items: [],
+      currentIndex: -1,
+      createdAt: now,
+      updatedAt: now,
+      itemCount: 0
+    };
+  }
+  return clonePlaylist(active);
+}
+
+function ensureActivePlaylistPresent() {
+  if (!PLAYLIST_STATE.playlists.length) {
+    const created = createPlaylist({ name: "Setlist" });
+    PLAYLIST_STATE.playlists.push(created);
+    PLAYLIST_STATE.activeId = created.id;
+    PLAYLIST_STATE.updatedAt = created.updatedAt;
+    return created;
+  }
+  const active = getActivePlaylist();
+  if (active) return active;
+  PLAYLIST_STATE.activeId = PLAYLIST_STATE.playlists[0].id;
+  return PLAYLIST_STATE.playlists[0];
+}
+
+async function savePlaylistsImmediate() {
   if (_playlistSaveInProgress) {
     try { await _playlistSaveInProgress; } catch {}
   }
+  const snapshot = serializePlaylistState(PLAYLIST_STATE);
   const task = (async () => {
     try {
-      await fs.promises.mkdir(path.dirname(PLAYLIST_FILE), { recursive: true });
-      const tmp = PLAYLIST_FILE + ".tmp";
-      await fs.promises.writeFile(tmp, JSON.stringify(PLAYLIST, null, 2), "utf8");
-      await fs.promises.rename(tmp, PLAYLIST_FILE);
-    } catch (e) {
-      console.error("savePlaylistImmediate failed:", e);
-      throw e;
+      await fs.promises.mkdir(path.dirname(PLAYLISTS_FILE), { recursive: true });
+      const tmp = `${PLAYLISTS_FILE}.tmp`;
+      await fs.promises.writeFile(tmp, JSON.stringify(snapshot, null, 2), "utf8");
+      await fs.promises.rename(tmp, PLAYLISTS_FILE);
+    } catch (err) {
+      console.error("savePlaylistsImmediate failed:", err);
+      throw err;
     } finally {
       _playlistSaveInProgress = null;
     }
@@ -1064,14 +1301,458 @@ async function savePlaylistImmediate() {
   return task;
 }
 
-/* ---------------- Playlist SSE broadcasting ---------------- */
-const playlistClients = new Set();
-function broadcastPlaylist() {
-  const payload = `data: ${JSON.stringify(PLAYLIST)}\n\n`;
-  for (const res of playlistClients) {
-    try { res.write(payload); } catch {}
+const playlistActiveClients = new Set();
+const playlistStateClients = new Set();
+
+function broadcastPlaylists() {
+  const activePayload = `data: ${JSON.stringify(serializeActivePlaylist())}\n\n`;
+  const statePayload = `data: ${JSON.stringify(serializePlaylistState(PLAYLIST_STATE))}\n\n`;
+  for (const res of playlistActiveClients) {
+    try { res.write(activePayload); } catch {}
+  }
+  for (const res of playlistStateClients) {
+    try { res.write(statePayload); } catch {}
   }
 }
+
+function updatePlaylistTimestamp(playlist) {
+  const now = Date.now();
+  playlist.updatedAt = now;
+  PLAYLIST_STATE.updatedAt = now;
+}
+
+function buildDefaultPlaylistName() {
+  const base = "Playlist";
+  const seen = new Set(PLAYLIST_STATE.playlists.map((pl) => pl.name.toLowerCase()));
+  let idx = PLAYLIST_STATE.playlists.length + 1;
+  let candidate = `${base} ${idx}`;
+  while (seen.has(candidate.toLowerCase())) {
+    idx += 1;
+    candidate = `${base} ${idx}`;
+  }
+  return candidate;
+}
+
+function addItemToPlaylist(playlist, rel) {
+  if (playlist.items.includes(rel)) return false;
+  playlist.items.push(rel);
+  updatePlaylistTimestamp(playlist);
+  return true;
+}
+
+function removeItemFromPlaylist(playlist, rel) {
+  const idx = playlist.items.indexOf(rel);
+  if (idx === -1) return false;
+  playlist.items.splice(idx, 1);
+  if (playlist.currentIndex >= idx) {
+    playlist.currentIndex = Math.max(-1, playlist.currentIndex - 1);
+  }
+  updatePlaylistTimestamp(playlist);
+  return true;
+}
+
+function clearPlaylistItems(playlist) {
+  if (!playlist.items.length && playlist.currentIndex === -1) return false;
+  playlist.items = [];
+  playlist.currentIndex = -1;
+  updatePlaylistTimestamp(playlist);
+  return true;
+}
+
+function reorderPlaylistItems(playlist, rels) {
+  const unique = ensureUniqueOrder(rels);
+  playlist.items = unique;
+  if (!playlist.items.length) {
+    playlist.currentIndex = -1;
+  } else if (typeof playlist.currentIndex === "number") {
+    playlist.currentIndex = Math.max(-1, Math.min(playlist.items.length - 1, playlist.currentIndex));
+  }
+  updatePlaylistTimestamp(playlist);
+  return true;
+}
+
+function setPlaylistItems(playlist, rels, currentIndex) {
+  const unique = ensureUniqueOrder(rels);
+  playlist.items = unique;
+  if (Number.isInteger(currentIndex)) {
+    playlist.currentIndex = Math.max(-1, Math.min(playlist.items.length - 1, currentIndex));
+  } else {
+    playlist.currentIndex = playlist.items.length ? 0 : -1;
+  }
+  updatePlaylistTimestamp(playlist);
+  return true;
+}
+
+function setPlaylistCurrentIndex(playlist, index) {
+  playlist.currentIndex = Math.max(-1, Math.min(playlist.items.length - 1, index));
+  updatePlaylistTimestamp(playlist);
+  return true;
+}
+
+function removePlaylistById(id) {
+  const idx = PLAYLIST_STATE.playlists.findIndex((pl) => pl.id === id);
+  if (idx === -1) return false;
+  PLAYLIST_STATE.playlists.splice(idx, 1);
+  if (!PLAYLIST_STATE.playlists.length) {
+    const created = createPlaylist({ name: "Setlist" });
+    PLAYLIST_STATE.playlists.push(created);
+    PLAYLIST_STATE.activeId = created.id;
+    PLAYLIST_STATE.updatedAt = created.updatedAt;
+  } else if (PLAYLIST_STATE.activeId === id) {
+    PLAYLIST_STATE.activeId = PLAYLIST_STATE.playlists[0].id;
+    PLAYLIST_STATE.updatedAt = Date.now();
+  } else {
+    PLAYLIST_STATE.updatedAt = Date.now();
+  }
+  return true;
+}
+
+function findPlaylistOrFail(id) {
+  ensureActivePlaylistPresent();
+  return PLAYLIST_STATE.playlists.find((pl) => pl.id === id) || null;
+}
+
+/* ---------------- Playlist API (REST + SSE) ---------------- */
+// CRITICAL: JSON body parser middleware must come BEFORE routes that need it
+app.use(express.json({ limit: "20mb" }));
+
+app.get("/api/playlists", (req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  res.json(serializePlaylistState(PLAYLIST_STATE));
+});
+app.get("/api/playlists/events", (req, res) => {
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-store");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders?.();
+
+  try { res.write(`data: ${JSON.stringify(serializePlaylistState(PLAYLIST_STATE))}\n\n`); } catch {}
+  playlistStateClients.add(res);
+
+  const keepAlive = setInterval(() => {
+    try { res.write(`: ping\n\n`); } catch {}
+  }, 25000);
+
+  req.on("close", () => {
+    clearInterval(keepAlive);
+    playlistStateClients.delete(res);
+    try { res.end(); } catch {}
+  });
+});
+
+// Legacy active playlist endpoints (kept for backwards compatibility)
+app.get("/api/playlist", (req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  res.json(serializeActivePlaylist());
+});
+app.get("/api/playlist/events", (req, res) => {
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-store");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders?.();
+
+  try { res.write(`data: ${JSON.stringify(serializeActivePlaylist())}\n\n`); } catch {}
+  playlistActiveClients.add(res);
+
+  const keepAlive = setInterval(() => {
+    try { res.write(`: ping\n\n`); } catch {}
+  }, 25000);
+
+  req.on("close", () => {
+    clearInterval(keepAlive);
+    playlistActiveClients.delete(res);
+    try { res.end(); } catch {}
+  });
+});
+
+app.post("/api/playlists", async (req, res) => {
+  const { name, icon, accentColor, items } = req.body || {};
+  ensureActivePlaylistPresent();
+  const playlist = createPlaylist({
+    name: sanitizePlaylistName(name, buildDefaultPlaylistName()),
+    icon,
+    accentColor,
+    items
+  }, { paletteIndex: PLAYLIST_STATE.playlists.length });
+  PLAYLIST_STATE.playlists.push(playlist);
+  PLAYLIST_STATE.activeId = playlist.id;
+  updatePlaylistTimestamp(playlist);
+  await savePlaylistsImmediate().catch(() => {});
+  broadcastPlaylists();
+  res.status(201).json({ ok: true, playlist: clonePlaylist(playlist), state: serializePlaylistState(PLAYLIST_STATE) });
+});
+
+app.post("/api/playlists/:id/activate", async (req, res) => {
+  const { id } = req.params;
+  const playlist = findPlaylistOrFail(id);
+  if (!playlist) return res.status(404).json({ error: "Playlist not found" });
+  PLAYLIST_STATE.activeId = playlist.id;
+  PLAYLIST_STATE.updatedAt = Date.now();
+  await savePlaylistsImmediate().catch(() => {});
+  broadcastPlaylists();
+  res.json({ ok: true, state: serializePlaylistState(PLAYLIST_STATE) });
+});
+
+app.patch("/api/playlists/:id", async (req, res) => {
+  const { id } = req.params;
+  const playlist = findPlaylistOrFail(id);
+  if (!playlist) return res.status(404).json({ error: "Playlist not found" });
+  const { name, icon, accentColor, currentIndex } = req.body || {};
+  if (name !== undefined) playlist.name = sanitizePlaylistName(name, playlist.name);
+  if (icon !== undefined) playlist.icon = sanitizePlaylistIcon(icon);
+  if (accentColor !== undefined) playlist.accentColor = sanitizeAccentColor(accentColor);
+  if (currentIndex !== undefined && Number.isInteger(currentIndex)) {
+    playlist.currentIndex = Math.max(-1, Math.min(playlist.items.length - 1, currentIndex));
+  }
+  updatePlaylistTimestamp(playlist);
+  await savePlaylistsImmediate().catch(() => {});
+  broadcastPlaylists();
+  res.json({ ok: true, playlist: clonePlaylist(playlist) });
+});
+
+app.delete("/api/playlists/:id", async (req, res) => {
+  const { id } = req.params;
+  if (!removePlaylistById(id)) {
+    return res.status(404).json({ error: "Playlist not found" });
+  }
+  ensureActivePlaylistPresent();
+  await savePlaylistsImmediate().catch(() => {});
+  broadcastPlaylists();
+  res.json({ ok: true, state: serializePlaylistState(PLAYLIST_STATE) });
+});
+
+app.post("/api/playlists/:id/items/add", async (req, res) => {
+  const { id } = req.params;
+  const playlist = findPlaylistOrFail(id);
+  if (!playlist) return res.status(404).json({ error: "Playlist not found" });
+  const { name } = req.body || {};
+  const rel = normalizeRelName(name);
+  if (!rel) return res.status(400).json({ error: "Invalid file name" });
+  const changed = addItemToPlaylist(playlist, rel);
+  if (changed) {
+    await savePlaylistsImmediate().catch(() => {});
+    broadcastPlaylists();
+  }
+  res.json({ ok: true, playlist: clonePlaylist(playlist) });
+});
+
+app.post("/api/playlists/:id/items/remove", async (req, res) => {
+  const { id } = req.params;
+  const playlist = findPlaylistOrFail(id);
+  if (!playlist) return res.status(404).json({ error: "Playlist not found" });
+  const { name } = req.body || {};
+  const rel = normalizeRelName(name);
+  if (!rel) return res.status(400).json({ error: "Invalid file name" });
+  const changed = removeItemFromPlaylist(playlist, rel);
+  if (changed) {
+    await savePlaylistsImmediate().catch(() => {});
+    broadcastPlaylists();
+  }
+  res.json({ ok: true, playlist: clonePlaylist(playlist) });
+});
+
+app.post("/api/playlists/:id/items/clear", async (req, res) => {
+  const { id } = req.params;
+  const playlist = findPlaylistOrFail(id);
+  if (!playlist) return res.status(404).json({ error: "Playlist not found" });
+  const changed = clearPlaylistItems(playlist);
+  if (changed) {
+    await savePlaylistsImmediate().catch(() => {});
+    broadcastPlaylists();
+  }
+  res.json({ ok: true, playlist: clonePlaylist(playlist) });
+});
+
+app.post("/api/playlists/:id/items/reorder", async (req, res) => {
+  const { id } = req.params;
+  const playlist = findPlaylistOrFail(id);
+  if (!playlist) return res.status(404).json({ error: "Playlist not found" });
+  const { order } = req.body || {};
+  if (!Array.isArray(order)) return res.status(400).json({ error: "order must be an array" });
+  const normalized = order.map((name) => normalizeRelName(name)).filter(Boolean);
+  reorderPlaylistItems(playlist, normalized);
+  await savePlaylistsImmediate().catch(() => {});
+  broadcastPlaylists();
+  res.json({ ok: true, playlist: clonePlaylist(playlist) });
+});
+
+app.post("/api/playlists/:id/items/set", async (req, res) => {
+  const { id } = req.params;
+  const playlist = findPlaylistOrFail(id);
+  if (!playlist) return res.status(404).json({ error: "Playlist not found" });
+  const { items, currentIndex } = req.body || {};
+  if (!Array.isArray(items)) return res.status(400).json({ error: "items must be an array" });
+  const normalized = items.map((name) => normalizeRelName(name)).filter(Boolean);
+  setPlaylistItems(playlist, normalized, currentIndex);
+  await savePlaylistsImmediate().catch(() => {});
+  broadcastPlaylists();
+  res.json({ ok: true, playlist: clonePlaylist(playlist) });
+});
+
+app.post("/api/playlists/:id/items/current", async (req, res) => {
+  const { id } = req.params;
+  const playlist = findPlaylistOrFail(id);
+  if (!playlist) return res.status(404).json({ error: "Playlist not found" });
+  const { index } = req.body || {};
+  if (!Number.isInteger(index)) return res.status(400).json({ error: "index must be integer" });
+  setPlaylistCurrentIndex(playlist, index);
+  await savePlaylistsImmediate().catch(() => {});
+  broadcastPlaylists();
+  res.json({ ok: true, playlist: clonePlaylist(playlist) });
+});
+
+app.post("/api/playlists/items/assign", async (req, res) => {
+  console.log('========================================');
+  console.log('POST /api/playlists/items/assign RECEIVED');
+  console.log('req.body type:', typeof req.body);
+  console.log('req.body:', req.body);
+  console.log('req.body stringified:', JSON.stringify(req.body, null, 2));
+  console.log('req.headers["content-type"]:', req.headers['content-type']);
+  
+  const { name, playlists } = req.body || {};
+  
+  console.log('Extracted name:', name, 'type:', typeof name);
+  console.log('Extracted playlists:', playlists, 'type:', typeof playlists);
+  console.log('========================================');
+  
+  if (!name || typeof name !== 'string') {
+    console.warn('VALIDATION FAILED - Invalid or missing name parameter:', name);
+    return res.status(400).json({ error: "Invalid or missing file name" });
+  }
+  
+  // Try to normalize the name - be more lenient
+  let rel = name.trim();
+  
+  // If it's already a valid path, use it directly
+  // Otherwise try to resolve it
+  if (rel && rel.toLowerCase().endsWith('.pdf')) {
+    // Basic validation without requiring file to exist
+    const normalized = rel.split('\\').join('/'); // Convert backslashes to forward slashes
+    
+    // Remove any URL encoding
+    try {
+      rel = decodeURIComponent(normalized);
+    } catch {
+      rel = normalized;
+    }
+    
+    // Remove leading/trailing slashes
+    rel = rel.replace(/^\/+|\/+$/g, '');
+    
+    console.log('Normalized filename:', rel);
+  } else {
+    console.warn('Invalid filename format:', name);
+    return res.status(400).json({ error: `Invalid file name: ${name}` });
+  }
+  
+  const ids = Array.isArray(playlists) ? playlists.map((id) => (typeof id === "string" ? id.trim() : "")).filter(Boolean) : [];
+  
+  if (ids.length === 0) {
+    console.warn('No valid playlist IDs provided');
+    return res.status(400).json({ error: "No playlists selected" });
+  }
+  
+  console.log('Assigning item:', { rel, playlistIds: ids });
+  
+  const targetSet = new Set(ids);
+  let changed = false;
+
+  PLAYLIST_STATE.playlists.forEach((pl) => {
+    const has = pl.items.includes(rel);
+    const shouldHave = targetSet.has(pl.id);
+    if (shouldHave && !has) {
+      pl.items.push(rel);
+      updatePlaylistTimestamp(pl);
+      changed = true;
+      console.log(`Added ${rel} to playlist ${pl.name}`);
+    } else if (!shouldHave && has) {
+      pl.items = pl.items.filter((item) => item !== rel);
+      if (pl.currentIndex >= pl.items.length) {
+        pl.currentIndex = pl.items.length ? pl.items.length - 1 : -1;
+      }
+      updatePlaylistTimestamp(pl);
+      changed = true;
+      console.log(`Removed ${rel} from playlist ${pl.name}`);
+    }
+  });
+
+  if (changed) {
+    await savePlaylistsImmediate().catch((err) => {
+      console.error('Failed to save playlists:', err);
+    });
+    broadcastPlaylists();
+    console.log('Playlist assignments saved successfully');
+  } else {
+    console.log('No changes needed for assignments');
+  }
+
+  res.json({ ok: true, state: serializePlaylistState(PLAYLIST_STATE) });
+});
+
+// Legacy convenience endpoints targeting the active playlist
+app.post("/api/playlist/add", async (req, res) => {
+  const active = ensureActivePlaylistPresent();
+  const { name } = req.body || {};
+  const rel = normalizeRelName(name);
+  if (!rel) return res.status(400).json({ error: "Invalid file name" });
+  const changed = addItemToPlaylist(active, rel);
+  if (changed) {
+    await savePlaylistsImmediate().catch(() => {});
+    broadcastPlaylists();
+  }
+  res.json({ ok: true, playlist: serializeActivePlaylist() });
+});
+app.post("/api/playlist/remove", async (req, res) => {
+  const active = ensureActivePlaylistPresent();
+  const { name } = req.body || {};
+  const rel = normalizeRelName(name);
+  if (!rel) return res.status(400).json({ error: "Invalid file name" });
+  const changed = removeItemFromPlaylist(active, rel);
+  if (changed) {
+    await savePlaylistsImmediate().catch(() => {});
+    broadcastPlaylists();
+  }
+  res.json({ ok: true, playlist: serializeActivePlaylist() });
+});
+app.post("/api/playlist/clear", async (req, res) => {
+  const active = ensureActivePlaylistPresent();
+  const changed = clearPlaylistItems(active);
+  if (changed) {
+    await savePlaylistsImmediate().catch(() => {});
+    broadcastPlaylists();
+  }
+  res.json({ ok: true, playlist: serializeActivePlaylist() });
+});
+app.post("/api/playlist/reorder", async (req, res) => {
+  const active = ensureActivePlaylistPresent();
+  const { order } = req.body || {};
+  if (!Array.isArray(order)) return res.status(400).json({ error: "order must be an array" });
+  const normalized = order.map((name) => normalizeRelName(name)).filter(Boolean);
+  reorderPlaylistItems(active, normalized);
+  await savePlaylistsImmediate().catch(() => {});
+  broadcastPlaylists();
+  res.json({ ok: true, playlist: serializeActivePlaylist() });
+});
+app.post("/api/playlist", async (req, res) => {
+  const active = ensureActivePlaylistPresent();
+  const { items, currentIndex, name } = req.body || {};
+  if (!Array.isArray(items)) return res.status(400).json({ error: "items must be an array" });
+  if (name !== undefined) active.name = sanitizePlaylistName(name, active.name);
+  const normalized = items.map((item) => normalizeRelName(item)).filter(Boolean);
+  setPlaylistItems(active, normalized, currentIndex);
+  await savePlaylistsImmediate().catch(() => {});
+  broadcastPlaylists();
+  res.json({ ok: true, playlist: serializeActivePlaylist() });
+});
+app.post("/api/playlist/current", async (req, res) => {
+  const active = ensureActivePlaylistPresent();
+  const { index } = req.body || {};
+  if (!Number.isInteger(index)) return res.status(400).json({ error: "index must be integer" });
+  setPlaylistCurrentIndex(active, index);
+  await savePlaylistsImmediate().catch(() => {});
+  broadcastPlaylists();
+  res.json({ ok: true, playlist: serializeActivePlaylist() });
+});
 
 function refreshIndexFromConfig() {
   if (!indexCache || !Array.isArray(indexCache.items) || !indexCache.items.length) return;
@@ -1233,7 +1914,7 @@ if (compression && MEMORY_SETTINGS.enableGzipCompression) {
 
 if (morgan) app.use(morgan("tiny"));
 
-app.use(express.json({ limit: "20mb" }));
+// NOTE: express.json() middleware is now placed BEFORE API routes (see line ~1415)
 
 // Add memory monitoring middleware
 /* ---------------- Front-end (SPA) ---------------- */
@@ -1590,33 +2271,6 @@ app.post("/api/system/cache/clear", (req, res) => {
   }
 });
 
-/* ---------------- Playlist API (REST + SSE) ---------------- */
-app.get("/api/playlist", async (req, res) => {
-  // Return current playlist
-  res.setHeader("Cache-Control", "no-store");
-  res.json(PLAYLIST);
-});
-app.get("/api/playlist/events", (req, res) => {
-  res.setHeader("Content-Type", "text/event-stream");
-  res.setHeader("Cache-Control", "no-store");
-  res.setHeader("Connection", "keep-alive");
-  res.flushHeaders?.();
-
-  // Send initial snapshot
-  try { res.write(`data: ${JSON.stringify(PLAYLIST)}\n\n`); } catch {}
-  playlistClients.add(res);
-
-  const keepAlive = setInterval(() => {
-    try { res.write(`: ping\n\n`); } catch {}
-  }, 25000);
-
-  req.on("close", () => {
-    clearInterval(keepAlive);
-    playlistClients.delete(res);
-    try { res.end(); } catch {}
-  });
-});
-
 function normalizeRelName(name) {
   const info = resolvePdfName(name, { requireExists: false });
   return info ? info.rel : null;
@@ -1646,76 +2300,6 @@ function withAnnotationLock(rel, task) {
   return next;
 }
 
-app.post("/api/playlist/add", async (req, res) => {
-  const { name } = req.body || {};
-  const rel = normalizeRelName(name);
-  if (!rel) return res.status(400).json({ error: "Invalid file name" });
-  if (!PLAYLIST.items.includes(rel)) {
-    PLAYLIST.items.push(rel);
-    PLAYLIST.updatedAt = Date.now();
-    await savePlaylistImmediate().catch(() => {});
-    broadcastPlaylist();
-  }
-  res.json({ ok: true, playlist: PLAYLIST });
-});
-app.post("/api/playlist/remove", async (req, res) => {
-  const { name } = req.body || {};
-  const rel = normalizeRelName(name);
-  if (!rel) return res.status(400).json({ error: "Invalid file name" });
-  const idx = PLAYLIST.items.indexOf(rel);
-  if (idx !== -1) {
-    PLAYLIST.items.splice(idx, 1);
-    if (typeof PLAYLIST.currentIndex === 'number' && PLAYLIST.currentIndex >= idx) {
-      PLAYLIST.currentIndex = Math.max(-1, PLAYLIST.currentIndex - 1);
-    }
-    PLAYLIST.updatedAt = Date.now();
-    await savePlaylistImmediate().catch(() => {});
-    broadcastPlaylist();
-  }
-  res.json({ ok: true, playlist: PLAYLIST });
-});
-app.post("/api/playlist/clear", async (req, res) => {
-  PLAYLIST.items = [];
-  PLAYLIST.currentIndex = -1;
-  PLAYLIST.updatedAt = Date.now();
-  await savePlaylistImmediate().catch(() => {});
-  broadcastPlaylist();
-  res.json({ ok: true, playlist: PLAYLIST });
-});
-app.post("/api/playlist/reorder", async (req, res) => {
-  const { order } = req.body || {};
-  if (!Array.isArray(order)) return res.status(400).json({ error: "order must be an array" });
-  const normalized = order.map((n) => normalizeRelName(n)).filter(Boolean);
-  PLAYLIST.items = ensureUniqueOrder(normalized);
-  // Clamp currentIndex
-  if (!PLAYLIST.items.length) PLAYLIST.currentIndex = -1;
-  else if (typeof PLAYLIST.currentIndex === 'number') PLAYLIST.currentIndex = Math.max(-1, Math.min(PLAYLIST.items.length - 1, PLAYLIST.currentIndex));
-  PLAYLIST.updatedAt = Date.now();
-  await savePlaylistImmediate().catch(() => {});
-  broadcastPlaylist();
-  res.json({ ok: true, playlist: PLAYLIST });
-});
-app.post("/api/playlist", async (req, res) => {
-  const { items, currentIndex, name } = req.body || {};
-  if (!Array.isArray(items)) return res.status(400).json({ error: "items must be an array" });
-  const normalized = items.map((n) => normalizeRelName(n)).filter(Boolean);
-  PLAYLIST.items = ensureUniqueOrder(normalized);
-  PLAYLIST.currentIndex = Number.isInteger(currentIndex) ? Math.max(-1, Math.min(PLAYLIST.items.length - 1, currentIndex)) : (PLAYLIST.items.length ? 0 : -1);
-  PLAYLIST.name = typeof name === 'string' ? name : PLAYLIST.name || null;
-  PLAYLIST.updatedAt = Date.now();
-  await savePlaylistImmediate().catch(() => {});
-  broadcastPlaylist();
-  res.json({ ok: true, playlist: PLAYLIST });
-});
-app.post("/api/playlist/current", async (req, res) => {
-  const { index } = req.body || {};
-  if (!Number.isInteger(index)) return res.status(400).json({ error: "index must be integer" });
-  PLAYLIST.currentIndex = Math.max(-1, Math.min(PLAYLIST.items.length - 1, index));
-  PLAYLIST.updatedAt = Date.now();
-  await savePlaylistImmediate().catch(() => {});
-  broadcastPlaylist();
-  res.json({ ok: true, playlist: PLAYLIST });
-});
 /* ---------------- Sheets API (enhanced with pagination) ---------------- */
 app.get("/api/sheets", async (req, res) => {
   try {
