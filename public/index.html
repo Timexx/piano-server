@@ -5213,19 +5213,31 @@
       }
       function connectPlaylistEvents() {
         try { playlist.es?.close?.(); } catch {}
+        
+        console.log('[SSE] Connecting to /api/playlists/events...');
         const es = new EventSource('/api/playlists/events');
+        
+        es.onopen = () => {
+          console.log('[SSE] ✅ Connected to playlist events');
+        };
+        
         es.onmessage = (ev) => {
           try {
             const data = JSON.parse(ev.data);
+            console.log('[SSE] 📨 Received playlist update:', data);
             applyPlaylistState(data, { silent: true });
           } catch (err) {
-            console.warn('Playlist SSE parse failed', err);
+            console.warn('[SSE] ⚠️ Parse failed:', err);
           }
         };
-        es.onerror = () => {
+        
+        es.onerror = (err) => {
+          console.error('[SSE] ❌ Connection error:', err, 'ReadyState:', es.readyState);
           try { es.close(); } catch {}
+          console.log('[SSE] Reconnecting in 2.5s...');
           setTimeout(connectPlaylistEvents, 2500);
         };
+        
         playlist.es = es;
       }
       function applyPlaylistState(data, { silent = false } = {}) {

@@ -2042,9 +2042,11 @@ app.get("/api/auth/session", (req, res) => {
 
   const { sessionId, session, user } = req.auth;
   
-  // SECURITY: Generate or retrieve CSRF token for this session
+  // SECURITY: Retrieve CSRF token for this session (always use existing token)
   let csrfToken = csrfTokens.get(sessionId)?.token;
   if (!csrfToken) {
+    // This should rarely happen - only if token was cleaned up or server restarted
+    console.warn('[SECURITY] CSRF token missing for session, regenerating:', sessionId);
     csrfToken = generateCsrfToken(sessionId);
   }
   
@@ -2222,10 +2224,12 @@ app.get("/api/playlists/events", (req, res) => {
   
   const userId = req.auth.user.id;
   
-  res.setHeader("Content-Type", "text/event-stream");
-  res.setHeader("Cache-Control", "no-store");
+  // SSE headers - critical for proxy compatibility
+  res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
   res.setHeader("Connection", "keep-alive");
-  if (res.flushHeaders) res.flushHeaders();
+  res.setHeader("X-Accel-Buffering", "no"); // Disable nginx buffering
+  res.flushHeaders();
 
   // Send initial data
   try {
@@ -2237,10 +2241,10 @@ app.get("/api/playlists/events", (req, res) => {
   // Register with SSE manager
   sseManager.subscribe(userId, "playlist-state", res);
 
-  // Keep-alive
+  // Keep-alive - shorter interval for proxy compatibility (15s < typical 60s timeout)
   const keepAlive = setInterval(() => {
     sseManager.ping(userId, "playlist-state");
-  }, 25000);
+  }, 15000);
 
   req.on("close", () => {
     clearInterval(keepAlive);
@@ -2265,10 +2269,12 @@ app.get("/api/playlist/events", (req, res) => {
   
   const userId = req.auth.user.id;
   
-  res.setHeader("Content-Type", "text/event-stream");
-  res.setHeader("Cache-Control", "no-store");
+  // SSE headers - critical for proxy compatibility
+  res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
   res.setHeader("Connection", "keep-alive");
-  if (res.flushHeaders) res.flushHeaders();
+  res.setHeader("X-Accel-Buffering", "no"); // Disable nginx buffering
+  res.flushHeaders();
 
   // Send initial data
   try {
@@ -2280,10 +2286,10 @@ app.get("/api/playlist/events", (req, res) => {
   // Register with SSE manager
   sseManager.subscribe(userId, "playlist-active", res);
 
-  // Keep-alive
+  // Keep-alive - shorter interval for proxy compatibility (15s < typical 60s timeout)
   const keepAlive = setInterval(() => {
     sseManager.ping(userId, "playlist-active");
-  }, 25000);
+  }, 15000);
 
   req.on("close", () => {
     clearInterval(keepAlive);
@@ -4694,9 +4700,17 @@ function recordSuccessfulLogin(email) {
 // =============================================================================
 const csrfTokens = new Map(); // sessionId -> { token, createdAt }
 
-function generateCsrfToken(sessionId) {
+function generateCsrfToken(sessionId, force = false) {
+  // Check if token already exists (don't regenerate unless forced)
+  const existing = csrfTokens.get(sessionId);
+  if (existing && !force) {
+    console.log('[CSRF] Reusing existing token for session:', sessionId);
+    return existing.token;
+  }
+  
   const token = randomUUID();
   csrfTokens.set(sessionId, { token, createdAt: Date.now() });
+  console.log('[CSRF] Generated new token for session:', sessionId, token.substring(0, 8) + '...');
   return token;
 }
 
@@ -4734,18 +4748,28 @@ function csrfProtection(req, res, next) {
     console.warn('[SECURITY] CSRF token missing:', { 
       method: req.method, 
       path: req.path, 
-      sessionId 
+      sessionId,
+      headers: Object.keys(req.headers).filter(h => h.toLowerCase().includes('csrf') || h.toLowerCase().includes('x-'))
     });
     return res.status(403).json({ error: 'CSRF token missing' });
   }
   
-  if (!validateCsrfToken(sessionId, csrfToken)) {
+  const isValid = validateCsrfToken(sessionId, csrfToken);
+  if (!isValid) {
     console.warn('[SECURITY] Invalid CSRF token:', { 
       method: req.method, 
       path: req.path, 
-      sessionId 
+      sessionId,
+      receivedToken: csrfToken ? csrfToken.substring(0, 8) + '...' : 'null',
+      expectedToken: csrfTokens.get(sessionId) ? csrfTokens.get(sessionId).token.substring(0, 8) + '...' : 'none'
     });
     return res.status(403).json({ error: 'Invalid CSRF token' });
+  }
+  
+  // Send fresh CSRF token in response header for client to update
+  const freshToken = csrfTokens.get(sessionId)?.token;
+  if (freshToken) {
+    res.setHeader('X-CSRF-Token', freshToken);
   }
   
   next();
