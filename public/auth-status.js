@@ -91,7 +91,8 @@
     } finally {
       authState.user = null;
       authState.session = null;
-      render();
+      // Redirect to login page after logout
+      window.location.href = "/login.html";
     }
   }
 

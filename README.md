@@ -93,6 +93,17 @@ npm run start:memory
 
 The server starts on http://localhost:3000 by default. Place your PDFs under `sheets/` and open the app in your browser.
 
+### One-time data migration
+
+Older Installationen speichern Favoriten, Kategorien und Playlists in `data/*.json`.  
+Bevor du auf den neuen Admin-/User-Workflow wechselst, führe einmal die Migration aus:
+
+```bash
+npm run migrate:data
+```
+
+Der Befehl importiert `config.json`, `playlists.json` sowie alle PDFs aus `sheets/` in die verschlüsselte SQLite-Datenbank (`data/auth.sqlite`). Für jede Datei wird ein Besitz-Eintrag für den initialen Admin angelegt; danach werden die ursprünglichen JSON-Dateien mit einem Zeitstempel-Backup `.bak-<ts>` versehen. Der Run ist idempotent – weitere Aufrufe erkennen die bereits durchgeführte Migration.
+
 ## Client features
 
 - Library (grid/list) with:

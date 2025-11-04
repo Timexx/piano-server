@@ -33,11 +33,8 @@
       if (!response.ok) return;
       const data = await response.json();
       if (!data || !data.ok || !data.user) return;
-      if (data.user.role === "admin") {
-        window.location.href = "/admin.html";
-      } else {
-        window.location.href = "/";
-      }
+      // Redirect all users (including admins) to the main page
+      window.location.href = "/";
     } catch {
       // ignore connectivity errors and stay on login page
     }

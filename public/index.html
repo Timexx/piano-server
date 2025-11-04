@@ -3489,6 +3489,34 @@
       const currentFile = params.get("file"); // encoded
       
       (async function init() {
+        // Check authentication first
+        try {
+          const sessionRes = await fetch("/api/auth/session", { 
+            method: "GET", 
+            credentials: "include",
+            cache: "no-store" 
+          });
+          
+          if (!sessionRes.ok || sessionRes.status === 401) {
+            // Not authenticated - redirect to login
+            window.location.href = "/login.html";
+            return;
+          }
+          
+          const sessionData = await sessionRes.json();
+          if (!sessionData || !sessionData.ok || !sessionData.user) {
+            // Invalid session - redirect to login
+            window.location.href = "/login.html";
+            return;
+          }
+          
+          // User is authenticated - proceed with initialization
+        } catch (err) {
+          console.error("Auth check failed:", err);
+          window.location.href = "/login.html";
+          return;
+        }
+        
         // Initialize playlist sync early for UI affordances
         try { await fetchPlaylists(); } catch {}
         connectPlaylistEvents();
@@ -3509,10 +3537,15 @@
           const res = await fetch("/api/prefs", { cache: "no-store" });
           if (!res.ok) return;
           const prefs = await res.json();
+          console.log('[DEBUG] loadPrefsFromBackend - prefs:', prefs);
+          console.log('[DEBUG] loadPrefsFromBackend - prefs.favorites:', prefs.favorites);
           if (Array.isArray(prefs.favorites)) {
             state.library.favorites = new Set(prefs.favorites);
+            console.log('[DEBUG] loadPrefsFromBackend - state.library.favorites after set:', state.library.favorites);
           }
-        } catch {}
+        } catch (err) {
+          console.error('[DEBUG] loadPrefsFromBackend error:', err);
+        }
       }
       async function setFavoriteOnBackend(name, favorite) {
         try {
@@ -6282,6 +6315,7 @@
         // Wire interactions
         const favBtn = overlay.querySelector('.fav');
         const favActive = state.library.favorites.has(item.name);
+        console.log('[DEBUG] renderCard - item.name:', item.name, 'favActive:', favActive, 'favorites:', Array.from(state.library.favorites));
         if (favBtn) {
           favBtn.setAttribute('aria-pressed', String(favActive));
           setFavVisual(favBtn, favActive);

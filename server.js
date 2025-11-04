@@ -8,8 +8,10 @@ const os = require("os");
 const { pipeline } = require("stream/promises");
 const { Transform } = require("stream");
 const { randomUUID } = require("crypto");
+const { AsyncLocalStorage } = require("async_hooks");
 const { PDFDocument } = require("pdf-lib");
 const { createAuthService } = require("./lib/auth");
+const { createDataStore } = require("./lib/data-store");
 
 // Optional middlewares (used if installed; otherwise skipped)
 let helmet = null, morgan = null, compression = null;
@@ -679,7 +681,16 @@ function ensureUniqueCategoryId(candidate, existing) {
 }
 
 function getCategoryById(id) {
-  return CONFIG.categories.find((cat) => cat.id === id);
+  try {
+    const store = userContext?.getRequestContext();
+    if (store) {
+      const { CONFIG } = userContext;
+      return CONFIG.categories.find((cat) => cat.id === id);
+    }
+  } catch {
+    // No user context - return null
+  }
+  return null;
 }
 
 function sanitizeCategoryIds(ids) {
@@ -701,49 +712,73 @@ function sanitizeCategoryIds(ids) {
 function refreshIndexCategoriesForFile(relPath) {
   const idx = indexCache.items.findIndex((entry) => entry && entry.name === relPath);
   if (idx === -1) return;
-  const fileCfg = CONFIG.files[relPath] || {};
-  const catIds = sanitizeCategoryIds(fileCfg.categories || []);
-  const categoriesDetailed = catIds
-    .map((id) => {
-      const cat = getCategoryById(id);
-      return cat ? { ...cat } : null;
-    })
-    .filter(Boolean);
-  indexCache.items[idx] = {
-    ...indexCache.items[idx],
-    categoryIds: catIds,
-    categories: categoriesDetailed,
-  };
-}
-
-function refreshIndexCategoryMetadata(catId) {
-  indexCache.items = indexCache.items.map((item) => {
-    if (!item || !Array.isArray(item.categoryIds) || !item.categoryIds.includes(catId)) {
-      return item;
-    }
-    const catIds = sanitizeCategoryIds(item.categoryIds);
+  
+  try {
+    const store = userContext?.getRequestContext();
+    if (!store) return; // No user context
+    
+    const { CONFIG } = userContext;
+    const fileCfg = CONFIG.files[relPath] || {};
+    const catIds = sanitizeCategoryIds(fileCfg.categories || []);
     const categoriesDetailed = catIds
       .map((id) => {
         const cat = getCategoryById(id);
         return cat ? { ...cat } : null;
       })
       .filter(Boolean);
-    return { ...item, categoryIds: catIds, categories: categoriesDetailed };
-  });
+    indexCache.items[idx] = {
+      ...indexCache.items[idx],
+      categoryIds: catIds,
+      categories: categoriesDetailed,
+    };
+  } catch {
+    // No user context - skip refresh
+  }
+}
+
+function refreshIndexCategoryMetadata(catId) {
+  try {
+    const store = userContext?.getRequestContext();
+    if (!store) return; // No user context
+    
+    indexCache.items = indexCache.items.map((item) => {
+      if (!item || !Array.isArray(item.categoryIds) || !item.categoryIds.includes(catId)) {
+        return item;
+      }
+      const catIds = sanitizeCategoryIds(item.categoryIds);
+      const categoriesDetailed = catIds
+        .map((id) => {
+          const cat = getCategoryById(id);
+          return cat ? { ...cat } : null;
+        })
+        .filter(Boolean);
+      return { ...item, categoryIds: catIds, categories: categoriesDetailed };
+    });
+  } catch {
+    // No user context - skip refresh
+  }
 }
 
 function removeCategoryFromFiles(catId) {
-  for (const [rel, cfg] of Object.entries(CONFIG.files)) {
-    if (!cfg || !Array.isArray(cfg.categories)) continue;
-    const filtered = cfg.categories.filter((id) => id !== catId);
-    if (filtered.length !== cfg.categories.length) {
-      cfg.categories = filtered;
-      const hasMarkers = Array.isArray(cfg.jumpMarkers) && cfg.jumpMarkers.length > 0;
-      if (!filtered.length && !cfg.secsPerPage && !hasMarkers) {
-        delete CONFIG.files[rel];
+  try {
+    const store = userContext?.getRequestContext();
+    if (!store) return; // No user context
+    
+    const { CONFIG } = userContext;
+    for (const [rel, cfg] of Object.entries(CONFIG.files)) {
+      if (!cfg || !Array.isArray(cfg.categories)) continue;
+      const filtered = cfg.categories.filter((id) => id !== catId);
+      if (filtered.length !== cfg.categories.length) {
+        cfg.categories = filtered;
+        const hasMarkers = Array.isArray(cfg.jumpMarkers) && cfg.jumpMarkers.length > 0;
+        if (!filtered.length && !cfg.secsPerPage && !hasMarkers) {
+          delete CONFIG.files[rel];
+        }
+        refreshIndexCategoriesForFile(rel);
       }
-      refreshIndexCategoriesForFile(rel);
     }
+  } catch {
+    // No user context - skip
   }
 }
 
@@ -781,6 +816,7 @@ fs.mkdirSync(THUMBS_DIR, { recursive: true }); // Create thumbnail directory
 
 const MAX_UPLOAD_BYTES = 200 * 1024 * 1024; // 200 MB
 const annotationLocks = new Map();
+const requestState = new AsyncLocalStorage();
 class SizeLimiter extends Transform {
   constructor(limitBytes) {
     super();
@@ -1039,105 +1075,247 @@ async function ensureVendors() {
   await Promise.all(tasks);
 }
 
-/* ---------------- Config persistence (queued writes) ---------------- */
-function loadConfig() {
-  try {
-    const raw = fs.readFileSync(CONFIG_FILE, "utf8");
-    const j = JSON.parse(raw);
-    const favoritesRaw = Array.isArray(j.favorites) ? j.favorites : [];
-    
-    // Clean up favorites: only keep ones that actually exist as files
-    const favorites = favoritesRaw
-      .map((name) => {
-        const info = resolvePdfName(name, { requireExists: true }); // Changed to requireExists: true
-        return info ? info.rel : null;
-      })
-      .filter(Boolean);
-    
-    // Auto-cleanup: if some favorites were removed, mark config as dirty to save cleaned version
-    const removedCount = favoritesRaw.length - favorites.length;
-    const needsCleanup = removedCount > 0;
-    if (needsCleanup) {
-      // console.log(`[Config] Removed ${removedCount} non-existent favorite(s) from config`);
-    }
+/* ---------------- User-scoped config & playlists (database-backed) ---------------- */
+const DEFAULT_CONFIG = { favorites: [], files: {}, categories: [] };
 
-    const categoriesRaw = Array.isArray(j.categories) ? j.categories : [];
-    const seenIds = new Set();
-    const categories = [];
-    for (const entry of categoriesRaw) {
-      if (!entry || typeof entry !== "object") continue;
-      const name = typeof entry.name === "string" ? entry.name.trim() : "";
-      if (!name) continue;
-      const baseId = entry.id && typeof entry.id === "string" ? entry.id.trim() : slugifyCategoryId(name);
-      const uniqueId = ensureUniqueCategoryId(slugifyCategoryId(baseId || name), seenIds);
-      seenIds.add(uniqueId);
-      categories.push({
-        id: uniqueId,
-        name,
-        color: sanitizeHexColor(entry.color || DEFAULT_CATEGORY_COLOR),
-        icon: sanitizeCategoryIcon(entry.icon),
-      });
-    }
+function normalizeConfig(rawInput) {
+  const source = rawInput && typeof rawInput === "object" ? rawInput : {};
+  const favoritesRaw = Array.isArray(source.favorites) ? source.favorites : [];
+  const favorites = favoritesRaw
+    .map((name) => {
+      const info = resolvePdfName(name, { requireExists: true });
+      return info ? info.rel : null;
+    })
+    .filter(Boolean);
 
-    const validCatIds = new Set(categories.map((c) => c.id));
+  const categoriesRaw = Array.isArray(source.categories) ? source.categories : [];
+  const seenIds = new Set();
+  const categories = [];
+  for (const entry of categoriesRaw) {
+    if (!entry || typeof entry !== "object") continue;
+    const name = typeof entry.name === "string" ? entry.name.trim() : "";
+    if (!name) continue;
+    const baseId = entry.id && typeof entry.id === "string" ? entry.id.trim() : slugifyCategoryId(name);
+    const uniqueId = ensureUniqueCategoryId(slugifyCategoryId(baseId || name), seenIds);
+    seenIds.add(uniqueId);
+    categories.push({
+      id: uniqueId,
+      name,
+      color: sanitizeHexColor(entry.color || DEFAULT_CATEGORY_COLOR),
+      icon: sanitizeCategoryIcon(entry.icon),
+    });
+  }
 
-    const files = {};
-    if (j.files && typeof j.files === "object") {
-      for (const [key, value] of Object.entries(j.files)) {
-        const info = resolvePdfName(key, { requireExists: false });
-        if (info && value && typeof value === "object") {
-          const entry = {};
-          if (value.secsPerPage) {
-            const secs = Number(value.secsPerPage);
-            if (Number.isFinite(secs) && secs >= 5 && secs <= 600) entry.secsPerPage = secs;
-          }
-          if (Array.isArray(value.categories)) {
-            entry.categories = value.categories
-              .map((id) => (typeof id === "string" ? id.trim() : null))
-              .filter((id) => id && validCatIds.has(id));
-          }
-          if (Array.isArray(value.jumpMarkers)) {
-            const markers = sanitizeJumpMarkers(value.jumpMarkers);
-            if (markers.length) entry.jumpMarkers = markers;
-          }
-          if (Object.keys(entry).length) {
-            files[info.rel] = entry;
-          }
-        }
+  const validCatIds = new Set(categories.map((cat) => cat.id));
+
+  const files = {};
+  if (source.files && typeof source.files === "object") {
+    for (const [key, value] of Object.entries(source.files)) {
+      const info = resolvePdfName(key, { requireExists: false });
+      if (!info || !value || typeof value !== "object") continue;
+      const entry = {};
+      if (value.secsPerPage) {
+        const secs = Number(value.secsPerPage);
+        if (Number.isFinite(secs) && secs >= 5 && secs <= 600) entry.secsPerPage = secs;
+      }
+      if (Array.isArray(value.categories)) {
+        entry.categories = value.categories
+          .map((id) => (typeof id === "string" ? id.trim() : null))
+          .filter((id) => id && validCatIds.has(id));
+      }
+      if (Array.isArray(value.jumpMarkers)) {
+        const markers = sanitizeJumpMarkers(value.jumpMarkers);
+        if (markers.length) entry.jumpMarkers = markers;
+      }
+      if (Object.keys(entry).length) {
+        files[info.rel] = entry;
       }
     }
-
-    const favList = Array.from(new Set(favorites)).sort((a, b) =>
-      a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" })
-    );
-
-    return { favorites: favList, files, categories, needsCleanup };
-  } catch {
-    return { favorites: [], files: {}, categories: [], needsCleanup: false };
   }
-}
-let CONFIG = loadConfig();
-let _configDirty = CONFIG.needsCleanup || false; // Mark dirty if cleanup happened
-let _configVersion = 0;
-let _saveInProgress = null;
-let configFileState = (() => {
-  try {
-    const stat = fs.statSync(CONFIG_FILE);
-    return { mtimeMs: stat.mtimeMs, size: stat.size };
-  } catch {
-    return null;
-  }
-})();
 
-// Auto-save cleaned config if favorites were removed
-if (CONFIG.needsCleanup) {
-  delete CONFIG.needsCleanup; // Remove flag before saving
-  setTimeout(() => {
-    saveConfigImmediate().catch(err => console.error('[Config] Auto-cleanup save failed:', err));
-  }, 1000);
+  const favList = Array.from(new Set(favorites)).sort((a, b) =>
+    a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" })
+  );
+
+  return {
+    favorites: favList,
+    files,
+    categories,
+  };
 }
 
-/* ---------------- Playlist persistence ---------------- */
+function createDefaultPlaylistState() {
+  const initialPlaylist = createPlaylist({ name: "Setlist" });
+  return {
+    playlists: [initialPlaylist],
+    activeId: initialPlaylist.id,
+    updatedAt: initialPlaylist.updatedAt,
+  };
+}
+
+const userConfigCache = new Map();
+const userPlaylistCache = new Map();
+const userDocumentCache = new Map();
+
+async function ensureUserConfig(userId) {
+  let entry = userConfigCache.get(userId);
+  if (entry) return entry;
+  if (!dataStore) throw new Error("Data store not initialised");
+  const raw = await dataStore.getUserConfig(userId);
+  const normalized = normalizeConfig(raw);
+  entry = { config: normalized, dirty: false };
+  userConfigCache.set(userId, entry);
+  return entry;
+}
+
+async function ensureUserPlaylists(userId) {
+  let entry = userPlaylistCache.get(userId);
+  if (entry) return entry;
+  if (!dataStore) throw new Error("Data store not initialised");
+  let normalized = sanitizePlaylistsState(await dataStore.getUserPlaylists(userId));
+  if (!normalized) {
+    normalized = createDefaultPlaylistState();
+  }
+  entry = { state: normalized, dirty: false };
+  userPlaylistCache.set(userId, entry);
+  return entry;
+}
+
+async function ensureUserDocuments(userId) {
+  let set = userDocumentCache.get(userId);
+  if (set) return set;
+  if (!dataStore) throw new Error("Data store not initialised");
+  const relPaths = await dataStore.listUserDocumentRelPaths(userId);
+  set = new Set(Array.isArray(relPaths) ? relPaths : []);
+  userDocumentCache.set(userId, set);
+  return set;
+}
+
+function addDocumentsToUserCache(userId, relPaths) {
+  if (!Array.isArray(relPaths) || !relPaths.length) return;
+  const set = userDocumentCache.get(userId);
+  if (!set) return;
+  relPaths.forEach((rel) => {
+    if (typeof rel === "string" && rel) set.add(rel);
+  });
+}
+
+function getRequestContext() {
+  return requestState.getStore() || null;
+}
+
+function requireUserContext() {
+  const store = getRequestContext();
+  if (!store || !store.configEntry || !store.playlistEntry) {
+    throw new Error("User context not initialised for this request");
+  }
+  return store;
+}
+
+function markConfigDirty() {
+  const store = getRequestContext();
+  if (store?.configEntry) {
+    store.configEntry.dirty = true;
+  }
+}
+
+async function saveConfigImmediate() {
+  const store = getRequestContext();
+  if (!store || !store.configEntry || !store.configEntry.dirty) return;
+  await dataStore.saveUserConfig(store.userId, store.configEntry.config);
+  store.configEntry.dirty = false;
+}
+
+async function persistConfigNow() {
+  markConfigDirty();
+  await saveConfigImmediate();
+}
+
+async function ensureConfigFresh() {
+  // Config is loaded per request via middleware.
+}
+
+function markPlaylistsDirty() {
+  const store = getRequestContext();
+  if (store?.playlistEntry) {
+    store.playlistEntry.dirty = true;
+    store.playlistEntry.state.updatedAt = Date.now();
+  }
+}
+
+async function savePlaylistsImmediate() {
+  const store = getRequestContext();
+  if (!store || !store.playlistEntry || !store.playlistEntry.dirty) return;
+  await dataStore.saveUserPlaylists(store.userId, store.playlistEntry.state);
+  store.playlistEntry.dirty = false;
+}
+
+async function flushConfigBeforeExit() {
+  if (!dataStore) return;
+  for (const [userId, entry] of userConfigCache.entries()) {
+    if (entry?.dirty) {
+      try {
+        await dataStore.saveUserConfig(userId, entry.config);
+        entry.dirty = false;
+      } catch (err) {
+        console.error(`Failed to flush config for ${userId}:`, err?.message || err);
+      }
+    }
+  }
+  for (const [userId, entry] of userPlaylistCache.entries()) {
+    if (entry?.dirty) {
+      try {
+        await dataStore.saveUserPlaylists(userId, entry.state);
+        entry.dirty = false;
+      } catch (err) {
+        console.error(`Failed to flush playlists for ${userId}:`, err?.message || err);
+      }
+    }
+  }
+}
+
+const CONFIG = new Proxy({}, {
+  get(_target, prop) {
+    const store = requireUserContext();
+    return store.configEntry.config[prop];
+  },
+  set(_target, prop, value) {
+    const store = requireUserContext();
+    store.configEntry.config[prop] = value;
+    store.configEntry.dirty = true;
+    return true;
+  },
+  deleteProperty(_target, prop) {
+    const store = requireUserContext();
+    delete store.configEntry.config[prop];
+    store.configEntry.dirty = true;
+    return true;
+  }
+});
+
+const PLAYLIST_STATE = new Proxy({}, {
+  get(_target, prop) {
+    const store = requireUserContext();
+    return store.playlistEntry.state[prop];
+  },
+  set(_target, prop, value) {
+    const store = requireUserContext();
+    store.playlistEntry.state[prop] = value;
+    store.playlistEntry.dirty = true;
+    return true;
+  },
+  deleteProperty(_target, prop) {
+    const store = requireUserContext();
+    delete store.playlistEntry.state[prop];
+    store.playlistEntry.dirty = true;
+    return true;
+  }
+});
+
+// REMOVED: Old SSE client management - now handled by sseManager
+// const playlistActiveClients = new Map();
+// const playlistStateClients = new Map();
+
 const PLAYLIST_ICON_FALLBACK = "🎵";
 const PLAYLIST_COLOR_PALETTE = [
   "#6366F1",
@@ -1295,7 +1473,8 @@ function loadPlaylists() {
   return initial;
 }
 
-let PLAYLIST_STATE = loadPlaylists();
+// REMOVED: Old global PLAYLIST_STATE - now managed per-user via userContext
+// let PLAYLIST_STATE = loadPlaylists();
 let _playlistSaveInProgress = null;
 
 function clonePlaylist(playlist) {
@@ -1321,6 +1500,7 @@ function serializePlaylistState(state) {
 }
 
 function getActivePlaylist() {
+  const { PLAYLIST_STATE } = userContext;
   return PLAYLIST_STATE.playlists.find((pl) => pl.id === PLAYLIST_STATE.activeId) || PLAYLIST_STATE.playlists[0] || null;
 }
 
@@ -1344,6 +1524,7 @@ function serializeActivePlaylist() {
 }
 
 function ensureActivePlaylistPresent() {
+  const { PLAYLIST_STATE } = userContext;
   if (!PLAYLIST_STATE.playlists.length) {
     const created = createPlaylist({ name: "Setlist" });
     PLAYLIST_STATE.playlists.push(created);
@@ -1361,6 +1542,7 @@ async function savePlaylistsImmediate() {
   if (_playlistSaveInProgress) {
     try { await _playlistSaveInProgress; } catch {}
   }
+  const { PLAYLIST_STATE } = userContext;
   const snapshot = serializePlaylistState(PLAYLIST_STATE);
   const task = (async () => {
     try {
@@ -1379,28 +1561,45 @@ async function savePlaylistsImmediate() {
   return task;
 }
 
-const playlistActiveClients = new Set();
-const playlistStateClients = new Set();
+// REMOVED: Old SSE client sets - now handled by sseManager
+// const playlistActiveClients = new Set();
+// const playlistStateClients = new Set();
 
 function broadcastPlaylists() {
-  const activePayload = `data: ${JSON.stringify(serializeActivePlaylist())}\n\n`;
-  const statePayload = `data: ${JSON.stringify(serializePlaylistState(PLAYLIST_STATE))}\n\n`;
-  for (const res of playlistActiveClients) {
-    try { res.write(activePayload); } catch {}
+  // Broadcast to current user only via sseManager
+  if (!userContext || !sseManager) {
+    console.warn("broadcastPlaylists called but userContext or sseManager not initialized");
+    return;
   }
-  for (const res of playlistStateClients) {
-    try { res.write(statePayload); } catch {}
+  
+  const store = userContext.getRequestContext();
+  if (!store || !store.userId) {
+    console.warn("broadcastPlaylists called without user context");
+    return;
+  }
+  
+  try {
+    const { PLAYLIST_STATE } = userContext;
+    const activePayload = serializeActivePlaylist();
+    const statePayload = serializePlaylistState(PLAYLIST_STATE);
+    
+    sseManager.broadcast(store.userId, "playlist-active", activePayload);
+    sseManager.broadcast(store.userId, "playlist-state", statePayload);
+  } catch (err) {
+    console.error("Broadcast failed:", err);
   }
 }
 
 function updatePlaylistTimestamp(playlist) {
   const now = Date.now();
   playlist.updatedAt = now;
+  const { PLAYLIST_STATE } = userContext;
   PLAYLIST_STATE.updatedAt = now;
 }
 
 function buildDefaultPlaylistName() {
   const base = "Playlist";
+  const { PLAYLIST_STATE } = userContext;
   const seen = new Set(PLAYLIST_STATE.playlists.map((pl) => pl.name.toLowerCase()));
   let idx = PLAYLIST_STATE.playlists.length + 1;
   let candidate = `${base} ${idx}`;
@@ -1468,6 +1667,7 @@ function setPlaylistCurrentIndex(playlist, index) {
 }
 
 function removePlaylistById(id) {
+  const { PLAYLIST_STATE } = userContext;
   const idx = PLAYLIST_STATE.playlists.findIndex((pl) => pl.id === id);
   if (idx === -1) return false;
   PLAYLIST_STATE.playlists.splice(idx, 1);
@@ -1487,6 +1687,7 @@ function removePlaylistById(id) {
 
 function findPlaylistOrFail(id) {
   ensureActivePlaylistPresent();
+  const { PLAYLIST_STATE } = userContext;
   return PLAYLIST_STATE.playlists.find((pl) => pl.id === id) || null;
 }
 
@@ -1494,43 +1695,60 @@ function findPlaylistOrFail(id) {
 // CRITICAL: JSON body parser middleware must come BEFORE routes that need it
 app.use(express.json({ limit: "20mb" }));
 
-app.use((req, res, next) => {
-  if (!authService) return next();
-  const cookies = parseCookies(req);
-  const sessionId = cookies[SESSION_COOKIE_NAME];
-  if (!sessionId) return next();
+/* ---------------- Index Cache (Global) ---------------- */
+let indexCache = { at: 0, items: [], scanInProgress: false };
 
-  try {
-    const context = authService.getSessionWithUser(sessionId);
-    if (!context) {
-      clearSessionCookie(res);
-      return next();
+async function statSafe(full) {
+  try { return await fs.promises.stat(full); } catch { return null; }
+}
+
+// Function to register auth middleware and all API routes - called after initialization
+function registerApiRoutes() {
+  // Session middleware - extracts session from cookie and sets req.auth
+  // Must run BEFORE user context middleware
+  app.use((req, res, next) => {
+    if (!authService) return next();
+    const cookies = parseCookies(req);
+    const sessionId = cookies[SESSION_COOKIE_NAME];
+    if (!sessionId) return next();
+
+    try {
+      const context = authService.getSessionWithUser(sessionId);
+      if (!context) {
+        clearSessionCookie(res);
+        return next();
+      }
+
+      const expiryMs = new Date(context.session.expiresAt).getTime();
+      if (!Number.isFinite(expiryMs) || expiryMs <= Date.now()) {
+        authService.deleteSession(sessionId);
+        clearSessionCookie(res);
+        return next();
+      }
+
+      if (!context.user.isActive) {
+        authService.deleteSession(sessionId);
+        clearSessionCookie(res);
+        return next();
+      }
+
+      req.auth = {
+        sessionId,
+        session: context.session,
+        user: authService.toPublicUser(context.user),
+      };
+    } catch (err) {
+      console.error("Session lookup failed:", err);
     }
 
-    const expiryMs = new Date(context.session.expiresAt).getTime();
-    if (!Number.isFinite(expiryMs) || expiryMs <= Date.now()) {
-      authService.deleteSession(sessionId);
-      clearSessionCookie(res);
-      return next();
-    }
+    next();
+  });
 
-    if (!context.user.isActive) {
-      authService.deleteSession(sessionId);
-      clearSessionCookie(res);
-      return next();
-    }
+  // User context middleware - loads user data based on req.auth.user
+  // Must run AFTER session middleware, BEFORE routes
+  app.use(userContext.middleware);
 
-    req.auth = {
-      sessionId,
-      session: context.session,
-      user: authService.toPublicUser(context.user),
-    };
-  } catch (err) {
-    console.error("Session lookup failed:", err);
-  }
-
-  next();
-});
+  // API routes defined below execute after both middlewares
 
 app.post("/api/auth/login", (req, res) => {
   if (!authService) {
@@ -1707,55 +1925,96 @@ app.delete("/api/admin/users/:id", (req, res) => {
 });
 
 app.get("/api/playlists", (req, res) => {
+  if (!ensureAuthenticated(req, res)) return;
+  const { PLAYLIST_STATE } = userContext;
+  
   res.setHeader("Cache-Control", "no-store");
   res.json(serializePlaylistState(PLAYLIST_STATE));
 });
 app.get("/api/playlists/events", (req, res) => {
+  if (!ensureAuthenticated(req, res)) return;
+  const { PLAYLIST_STATE } = userContext;
+  
+  // req.auth is set by session middleware
+  if (!req.auth || !req.auth.user) {
+    return res.status(401).json({ error: "AUTH_REQUIRED" });
+  }
+  
+  const userId = req.auth.user.id;
+  
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-store");
   res.setHeader("Connection", "keep-alive");
-  res.flushHeaders?.();
+  if (res.flushHeaders) res.flushHeaders();
 
-  try { res.write(`data: ${JSON.stringify(serializePlaylistState(PLAYLIST_STATE))}\n\n`); } catch {}
-  playlistStateClients.add(res);
+  // Send initial data
+  try {
+    res.write(`data: ${JSON.stringify(serializePlaylistState(PLAYLIST_STATE))}\n\n`);
+  } catch (err) {
+    console.error("Failed to send initial playlist state:", err);
+  }
 
+  // Register with SSE manager
+  sseManager.subscribe(userId, "playlist-state", res);
+
+  // Keep-alive
   const keepAlive = setInterval(() => {
-    try { res.write(`: ping\n\n`); } catch {}
+    sseManager.ping(userId, "playlist-state");
   }, 25000);
 
   req.on("close", () => {
     clearInterval(keepAlive);
-    playlistStateClients.delete(res);
     try { res.end(); } catch {}
   });
 });
 
 // Legacy active playlist endpoints (kept for backwards compatibility)
 app.get("/api/playlist", (req, res) => {
+  if (!ensureAuthenticated(req, res)) return;
+  
   res.setHeader("Cache-Control", "no-store");
   res.json(serializeActivePlaylist());
 });
 app.get("/api/playlist/events", (req, res) => {
+  if (!ensureAuthenticated(req, res)) return;
+  
+  // req.auth is set by session middleware
+  if (!req.auth || !req.auth.user) {
+    return res.status(401).json({ error: "AUTH_REQUIRED" });
+  }
+  
+  const userId = req.auth.user.id;
+  
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-store");
   res.setHeader("Connection", "keep-alive");
-  res.flushHeaders?.();
+  if (res.flushHeaders) res.flushHeaders();
 
-  try { res.write(`data: ${JSON.stringify(serializeActivePlaylist())}\n\n`); } catch {}
-  playlistActiveClients.add(res);
+  // Send initial data
+  try {
+    res.write(`data: ${JSON.stringify(serializeActivePlaylist())}\n\n`);
+  } catch (err) {
+    console.error("Failed to send initial active playlist:", err);
+  }
 
+  // Register with SSE manager
+  sseManager.subscribe(userId, "playlist-active", res);
+
+  // Keep-alive
   const keepAlive = setInterval(() => {
-    try { res.write(`: ping\n\n`); } catch {}
+    sseManager.ping(userId, "playlist-active");
   }, 25000);
 
   req.on("close", () => {
     clearInterval(keepAlive);
-    playlistActiveClients.delete(res);
     try { res.end(); } catch {}
   });
 });
 
 app.post("/api/playlists", async (req, res) => {
+  if (!ensureAuthenticated(req, res)) return;
+  const { PLAYLIST_STATE } = userContext;
+  
   const { name, icon, accentColor, items } = req.body || {};
   ensureActivePlaylistPresent();
   const playlist = createPlaylist({
@@ -1773,6 +2032,9 @@ app.post("/api/playlists", async (req, res) => {
 });
 
 app.post("/api/playlists/:id/activate", async (req, res) => {
+  if (!ensureAuthenticated(req, res)) return;
+  const { PLAYLIST_STATE } = userContext;
+  
   const { id } = req.params;
   const playlist = findPlaylistOrFail(id);
   if (!playlist) return res.status(404).json({ error: "Playlist not found" });
@@ -1784,6 +2046,8 @@ app.post("/api/playlists/:id/activate", async (req, res) => {
 });
 
 app.patch("/api/playlists/:id", async (req, res) => {
+  if (!ensureAuthenticated(req, res)) return;
+  
   const { id } = req.params;
   const playlist = findPlaylistOrFail(id);
   if (!playlist) return res.status(404).json({ error: "Playlist not found" });
@@ -1801,6 +2065,9 @@ app.patch("/api/playlists/:id", async (req, res) => {
 });
 
 app.delete("/api/playlists/:id", async (req, res) => {
+  if (!ensureAuthenticated(req, res)) return;
+  const { PLAYLIST_STATE } = userContext;
+  
   const { id } = req.params;
   if (!removePlaylistById(id)) {
     return res.status(404).json({ error: "Playlist not found" });
@@ -1812,6 +2079,8 @@ app.delete("/api/playlists/:id", async (req, res) => {
 });
 
 app.post("/api/playlists/:id/items/add", async (req, res) => {
+  if (!ensureAuthenticated(req, res)) return;
+  
   const { id } = req.params;
   const playlist = findPlaylistOrFail(id);
   if (!playlist) return res.status(404).json({ error: "Playlist not found" });
@@ -1827,6 +2096,8 @@ app.post("/api/playlists/:id/items/add", async (req, res) => {
 });
 
 app.post("/api/playlists/:id/items/remove", async (req, res) => {
+  if (!ensureAuthenticated(req, res)) return;
+  
   const { id } = req.params;
   const playlist = findPlaylistOrFail(id);
   if (!playlist) return res.status(404).json({ error: "Playlist not found" });
@@ -1842,6 +2113,8 @@ app.post("/api/playlists/:id/items/remove", async (req, res) => {
 });
 
 app.post("/api/playlists/:id/items/clear", async (req, res) => {
+  if (!ensureAuthenticated(req, res)) return;
+  
   const { id } = req.params;
   const playlist = findPlaylistOrFail(id);
   if (!playlist) return res.status(404).json({ error: "Playlist not found" });
@@ -1854,6 +2127,8 @@ app.post("/api/playlists/:id/items/clear", async (req, res) => {
 });
 
 app.post("/api/playlists/:id/items/reorder", async (req, res) => {
+  if (!ensureAuthenticated(req, res)) return;
+  
   const { id } = req.params;
   const playlist = findPlaylistOrFail(id);
   if (!playlist) return res.status(404).json({ error: "Playlist not found" });
@@ -1867,6 +2142,8 @@ app.post("/api/playlists/:id/items/reorder", async (req, res) => {
 });
 
 app.post("/api/playlists/:id/items/set", async (req, res) => {
+  if (!ensureAuthenticated(req, res)) return;
+  
   const { id } = req.params;
   const playlist = findPlaylistOrFail(id);
   if (!playlist) return res.status(404).json({ error: "Playlist not found" });
@@ -1880,6 +2157,8 @@ app.post("/api/playlists/:id/items/set", async (req, res) => {
 });
 
 app.post("/api/playlists/:id/items/current", async (req, res) => {
+  if (!ensureAuthenticated(req, res)) return;
+  
   const { id } = req.params;
   const playlist = findPlaylistOrFail(id);
   if (!playlist) return res.status(404).json({ error: "Playlist not found" });
@@ -1892,6 +2171,9 @@ app.post("/api/playlists/:id/items/current", async (req, res) => {
 });
 
 app.post("/api/playlists/items/assign", async (req, res) => {
+  if (!ensureAuthenticated(req, res)) return;
+  const { PLAYLIST_STATE } = userContext;
+  
   console.log('========================================');
   console.log('POST /api/playlists/items/assign RECEIVED');
   console.log('req.body type:', typeof req.body);
@@ -1981,6 +2263,8 @@ app.post("/api/playlists/items/assign", async (req, res) => {
 
 // Legacy convenience endpoints targeting the active playlist
 app.post("/api/playlist/add", async (req, res) => {
+  if (!ensureAuthenticated(req, res)) return;
+  
   const active = ensureActivePlaylistPresent();
   const { name } = req.body || {};
   const rel = normalizeRelName(name);
@@ -1993,6 +2277,8 @@ app.post("/api/playlist/add", async (req, res) => {
   res.json({ ok: true, playlist: serializeActivePlaylist() });
 });
 app.post("/api/playlist/remove", async (req, res) => {
+  if (!ensureAuthenticated(req, res)) return;
+  
   const active = ensureActivePlaylistPresent();
   const { name } = req.body || {};
   const rel = normalizeRelName(name);
@@ -2005,6 +2291,8 @@ app.post("/api/playlist/remove", async (req, res) => {
   res.json({ ok: true, playlist: serializeActivePlaylist() });
 });
 app.post("/api/playlist/clear", async (req, res) => {
+  if (!ensureAuthenticated(req, res)) return;
+  
   const active = ensureActivePlaylistPresent();
   const changed = clearPlaylistItems(active);
   if (changed) {
@@ -2014,6 +2302,8 @@ app.post("/api/playlist/clear", async (req, res) => {
   res.json({ ok: true, playlist: serializeActivePlaylist() });
 });
 app.post("/api/playlist/reorder", async (req, res) => {
+  if (!ensureAuthenticated(req, res)) return;
+  
   const active = ensureActivePlaylistPresent();
   const { order } = req.body || {};
   if (!Array.isArray(order)) return res.status(400).json({ error: "order must be an array" });
@@ -2024,6 +2314,8 @@ app.post("/api/playlist/reorder", async (req, res) => {
   res.json({ ok: true, playlist: serializeActivePlaylist() });
 });
 app.post("/api/playlist", async (req, res) => {
+  if (!ensureAuthenticated(req, res)) return;
+  
   const active = ensureActivePlaylistPresent();
   const { items, currentIndex, name } = req.body || {};
   if (!Array.isArray(items)) return res.status(400).json({ error: "items must be an array" });
@@ -2035,6 +2327,7 @@ app.post("/api/playlist", async (req, res) => {
   res.json({ ok: true, playlist: serializeActivePlaylist() });
 });
 app.post("/api/playlist/current", async (req, res) => {
+  if (!ensureAuthenticated(req, res)) return;
   const active = ensureActivePlaylistPresent();
   const { index } = req.body || {};
   if (!Number.isInteger(index)) return res.status(400).json({ error: "index must be integer" });
@@ -2043,139 +2336,6 @@ app.post("/api/playlist/current", async (req, res) => {
   broadcastPlaylists();
   res.json({ ok: true, playlist: serializeActivePlaylist() });
 });
-
-function refreshIndexFromConfig() {
-  if (!indexCache || !Array.isArray(indexCache.items) || !indexCache.items.length) return;
-  indexCache.items = indexCache.items.map((item) => {
-    if (!item || !item.name) return item;
-    const fileCfg = CONFIG.files[item.name] || {};
-    const catIds = sanitizeCategoryIds(fileCfg.categories || []);
-    const categoriesDetailed = catIds
-      .map((id) => {
-        const cat = getCategoryById(id);
-        return cat ? { ...cat } : null;
-      })
-      .filter(Boolean);
-    return { ...item, categoryIds: catIds, categories: categoriesDetailed };
-  });
-}
-
-async function ensureConfigFresh() {
-  if (_configDirty) return;
-  if (_saveInProgress) {
-    try {
-      await _saveInProgress;
-    } catch {
-      // ignore write errors here; stat below will re-evaluate
-    }
-  }
-  try {
-    const stat = await fs.promises.stat(CONFIG_FILE);
-    const changed = !configFileState || stat.mtimeMs !== configFileState.mtimeMs || stat.size !== configFileState.size;
-    if (!changed) return;
-    CONFIG = loadConfig();
-    configFileState = { mtimeMs: stat.mtimeMs, size: stat.size };
-    refreshIndexFromConfig();
-    _configDirty = false;
-  } catch (err) {
-    if (err && err.code === "ENOENT") {
-      CONFIG = { favorites: [], files: {}, categories: [] };
-      configFileState = null;
-      refreshIndexFromConfig();
-      _configDirty = false;
-    } else {
-      console.error("ensureConfigFresh failed:", err);
-    }
-  }
-}
-
-function markConfigDirty() {
-  _configDirty = true;
-  _configVersion = (_configVersion + 1) >>> 0; // wrap safely within 32 bits
-}
-
-async function saveConfigImmediate() {
-  if (_saveInProgress) {
-    try {
-      await _saveInProgress;
-    } catch (e) {
-      // ignore and attempt fresh save below
-    }
-  }
-
-  if (!_configDirty && !_saveInProgress) {
-    return;
-  }
-
-  const saveVersion = _configVersion;
-
-  const task = (async () => {
-    try {
-      await fs.promises.mkdir(path.dirname(CONFIG_FILE), { recursive: true });
-      const tmp = CONFIG_FILE + ".tmp";
-      await fs.promises.writeFile(tmp, JSON.stringify(CONFIG, null, 2), "utf8");
-      await fs.promises.rename(tmp, CONFIG_FILE);
-      try {
-        const stat = await fs.promises.stat(CONFIG_FILE);
-        configFileState = { mtimeMs: stat.mtimeMs, size: stat.size };
-      } catch (statErr) {
-        console.warn("Unable to stat config after save:", statErr?.message || statErr);
-      }
-      if (_configVersion === saveVersion) {
-        _configDirty = false;
-      }
-      // console.log("Config persisted", { favorites: CONFIG.favorites.length, files: Object.keys(CONFIG.files).length });
-    } catch (e) {
-      _configDirty = true;
-      console.error("saveConfigImmediate failed:", e);
-      throw e;
-    } finally {
-      _saveInProgress = null;
-    }
-  })();
-
-  _saveInProgress = task;
-  return task;
-}
-
-async function persistConfigNow() {
-  markConfigDirty();
-  try {
-    await saveConfigImmediate();
-  } catch (err) {
-    console.error("persistConfigNow failed:", err);
-    try {
-      CONFIG = loadConfig();
-      const stat = await fs.promises.stat(CONFIG_FILE).catch(() => null);
-      if (stat) {
-        configFileState = { mtimeMs: stat.mtimeMs, size: stat.size };
-      }
-      refreshIndexFromConfig();
-      _configDirty = false;
-    } catch (reloadErr) {
-      console.error("persistConfigNow reload failed:", reloadErr);
-    }
-    throw err;
-  }
-}
-
-async function flushConfigBeforeExit() {
-  if (_saveInProgress) {
-    try {
-      await _saveInProgress;
-    } catch (e) {
-      console.error("Pending config save failed during shutdown:", e);
-    }
-  }
-
-  if (_configDirty) {
-    try {
-      await saveConfigImmediate();
-    } catch (e) {
-      console.error("Final config save failed:", e);
-    }
-  }
-}
 
 function isValidPdfName(name) {
   return Boolean(resolvePdfName(name));
@@ -2239,6 +2399,9 @@ app.get(/^\/vendor\/nosleep\.min\.js$/, async (req, res) => {
 
 /* ---------------- Serve Thumbnails (/thumbnails) ---------------- */
 app.get("/thumbnails/*", async (req, res) => {
+  if (!ensureAuthenticated(req, res)) return;
+  const { USER_DOCUMENTS } = userContext;
+  
   const sendFallback = () => {
     try {
       res.setHeader("Content-Type", "image/jpeg");
@@ -2258,6 +2421,11 @@ app.get("/thumbnails/*", async (req, res) => {
     const info = resolvePdfName(pdfRel);
     if (!info) {
       return sendFallback();
+    }
+    
+    // Check if user has access to this document
+    if (!USER_DOCUMENTS.has(info.rel)) {
+      return res.status(403).json({ error: "Access denied" });
     }
 
     const { thumbPath, thumbStat } = await ensureThumbnail(info);
@@ -2344,6 +2512,23 @@ app.use("/sheets", (req, res, next) => {
 
 app.use(
   "/sheets",
+  (req, res, next) => {
+    // Check authentication and document access for PDF files
+    if (!ensureAuthenticated(req, res)) return;
+    
+    const { USER_DOCUMENTS } = userContext;
+    const requestedPath = decodeURIComponent(req.path);
+    
+    // Extract relative path (remove leading slash)
+    const relPath = requestedPath.startsWith('/') ? requestedPath.slice(1) : requestedPath;
+    
+    // Check if user has access to this document
+    if (!USER_DOCUMENTS.has(relPath)) {
+      return res.status(403).json({ error: "Access denied to this document" });
+    }
+    
+    next();
+  },
   express.static(SHEETS_DIR, {
     maxAge: 0,
     etag: true,
@@ -2366,160 +2551,16 @@ app.use(
 );
 
 /* ---------------- Index + Listing helpers (memory-optimized) ---------------- */
-let indexCache = { at: 0, items: [], scanInProgress: false };
-
-async function statSafe(full) {
-  try { return await fs.promises.stat(full); } catch { return null; }
-}
-
-async function scanDir() {
-  // Prevent concurrent scans
-  if (indexCache.scanInProgress) {
-    return indexCache.items;
-  }
-  
-  indexCache.scanInProgress = true;
-  
-  try {
-    const discovered = [];
-    const stack = [""];
-
-    while (stack.length) {
-      const relDir = stack.pop();
-      const absDir = path.join(SHEETS_DIR, relDir);
-
-      let dirHandle;
-      try {
-        dirHandle = await fs.promises.opendir(absDir);
-      } catch (err) {
-        console.warn(`scanDir: unable to open ${absDir}:`, err.message);
-        continue;
-      }
-
-      for await (const entry of dirHandle) {
-        if (!entry || entry.name === "." || entry.name === "..") continue;
-        const relPath = relDir ? `${relDir}/${entry.name}` : entry.name;
-
-        if (entry.name.startsWith(".")) continue;
-
-        if (entry.isDirectory()) {
-          stack.push(relPath);
-          continue;
-        }
-
-        if (entry.isFile() && entry.name.toLowerCase().endsWith(".pdf")) {
-          discovered.push(toPosixPath(relPath));
-        }
-      }
-    }
-
-    const results = [];
-    const concurrency = Math.min(
-      MEMORY_SETTINGS.maxStatConcurrency,
-      Math.max(2, CPU_COUNT * 2)
-    );
-    let cursor = 0;
-
-    const workerCount = Math.min(concurrency, Math.max(1, discovered.length));
-    const workers = [];
-    for (let i = 0; i < workerCount; i++) {
-      workers.push((async () => {
-      while (true) {
-        const currentIndex = cursor++;
-        if (currentIndex >= discovered.length) break;
-        const rel = discovered[currentIndex];
-        const abs = path.join(SHEETS_DIR, rel);
-        const st = await statSafe(abs);
-        if (!st) continue;
-
-        const folder = rel.includes("/") ? rel.slice(0, rel.lastIndexOf("/")) : "";
-        const displayName = path.basename(rel);
-        const encodedRel = encodePathSegments(rel);
-        const encodedThumb = encodePathSegments(thumbnailRelPath(rel));
-        const fileCfg = CONFIG.files[rel] || {};
-        const catIds = sanitizeCategoryIds(fileCfg.categories || []);
-        const categoriesDetailed = catIds
-          .map((id) => {
-            const cat = getCategoryById(id);
-            return cat ? { ...cat } : null;
-          })
-          .filter(Boolean);
-
-        results.push({
-          id: encodeURIComponent(rel),
-          name: rel,
-          displayName,
-          folder,
-          url: `/sheets/${encodedRel}`,
-          thumbnail: `/thumbnails/${encodedThumb}`,
-          size: st.size,
-          mtime: st.mtimeMs,
-          categoryIds: catIds,
-          categories: categoriesDetailed,
-        });
-      }
-      })());
-    }
-
-    await Promise.all(workers);
-
-    const items = results.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }));
-    indexCache = { at: Date.now(), items, scanInProgress: false };
-
-    // console.log(`Scanned ${items.length} PDF files (recursive)`);
-    return items;
-  } catch (e) {
-    console.error("scanDir failed:", e);
-    return indexCache.items; // Return cached items on error
-  } finally {
-    indexCache.scanInProgress = false;
-  }
-}
-
-async function getIndex() {
-  if (Date.now() - indexCache.at > MEMORY_SETTINGS.maxIndexCacheAge || !indexCache.items.length) {
-    try { 
-      await scanDir(); 
-    } catch (e) { 
-      console.error("getIndex -> scanDir failed:", e); 
-    }
-  }
-  return indexCache.items;
-}
-function applySort(items, sort, order) {
-  const o = (order || "asc").toLowerCase() === "desc" ? -1 : 1;
-  switch ((sort || "name").toLowerCase()) {
-    case "mtime": return items.slice().sort((a, b) => (a.mtime - b.mtime) * o);
-    case "size":  return items.slice().sort((a, b) => (a.size - b.size) * o);
-    default:      return items.slice().sort((a, b) =>
-      (a.displayName || a.name || "").localeCompare(b.displayName || b.name || "", undefined, { numeric: true, sensitivity: "base" }) * o
-    );
-  }
-}
-
-function initSheetWatcher() {
-  if (typeof fs.watch !== "function") return null;
-  try {
-    let invalidateTimer = null;
-    const watcher = fs.watch(SHEETS_DIR, { recursive: true }, () => {
-      clearTimeout(invalidateTimer);
-      invalidateTimer = setTimeout(() => {
-        indexCache.at = 0;
-      }, 100);
-    });
-    watcher.on("error", (err) => {
-      console.warn("Sheet watcher error:", err.message);
-    });
-    console.log("Sheet watcher active (recursive)");
-    return watcher;
-  } catch (err) {
-    console.warn("Sheet watcher not available:", err.message);
-    return null;
-  }
-}
+// Note: indexCache, statSafe, scanDir, getIndex, applySort moved to global scope
+// to be accessible during server startup and outside registerApiRoutes()
 
 /* ---------------- Memory & System API ---------------- */
 app.get("/api/system/memory", (req, res) => {
+  if (!ensureAuthenticated(req, res)) return;
+  if (!req.auth || !req.auth.user || req.auth.user.role !== 'admin') {
+    return res.status(403).json({ error: "Admin access required" });
+  }
+  
   try {
     const mem = process.memoryUsage();
     const heapUsed = Math.round(mem.heapUsed / 1024 / 1024);
@@ -2540,6 +2581,11 @@ app.get("/api/system/memory", (req, res) => {
 });
 
 app.post("/api/system/gc", (req, res) => {
+  if (!ensureAuthenticated(req, res)) return;
+  if (!req.auth || !req.auth.user || req.auth.user.role !== 'admin') {
+    return res.status(403).json({ error: "Admin access required" });
+  }
+  
   try {
     if (global.gc) {
       global.gc();
@@ -2553,6 +2599,11 @@ app.post("/api/system/gc", (req, res) => {
 });
 
 app.post("/api/system/cache/clear", (req, res) => {
+  if (!ensureAuthenticated(req, res)) return;
+  if (!req.auth || !req.auth.user || req.auth.user.role !== 'admin') {
+    return res.status(403).json({ error: "Admin access required" });
+  }
+  
   try {
     indexCache = { at: 0, items: [], scanInProgress: false };
     res.json({ ok: true, message: "Cache cleared" });
@@ -2593,7 +2644,9 @@ function withAnnotationLock(rel, task) {
 /* ---------------- Sheets API (enhanced with pagination) ---------------- */
 app.get("/api/sheets", async (req, res) => {
   try {
-    await ensureConfigFresh();
+    if (!ensureAuthenticated(req, res)) return;
+    const { CONFIG, USER_DOCUMENTS } = userContext;
+    
     const q = (req.query.q || "").toString().trim().toLowerCase();
     const sort = (req.query.sort || "name").toString();
     const order = (req.query.order || "asc").toString();
@@ -2637,7 +2690,28 @@ app.get("/api/sheets", async (req, res) => {
     const onlyFav = favParam === "1" || favParam === "true";
 
     const all = await getIndex();
-    let filtered = all;
+    
+    // Filter by user's accessible documents and add user-specific category info
+    // USER_DOCUMENTS is a Proxy that wraps a Set, use it directly
+    let filtered = all
+      .filter(x => USER_DOCUMENTS.has(x.name))
+      .map(item => {
+        // Add user-specific category information
+        const fileCfg = CONFIG.files[item.name] || {};
+        const catIds = sanitizeCategoryIds(fileCfg.categories || []);
+        const categoriesDetailed = catIds
+          .map((id) => {
+            const cat = getCategoryById(id);
+            return cat ? { ...cat } : null;
+          })
+          .filter(Boolean);
+        
+        return {
+          ...item,
+          categoryIds: catIds,
+          categories: categoriesDetailed,
+        };
+      });
 
     if (onlyFav) {
       const favSet = new Set(CONFIG.favorites);
@@ -2686,6 +2760,8 @@ app.get("/api/sheets", async (req, res) => {
 
 // Improved upload endpoint (accepts PDF by MIME or .pdf filename)
 app.post("/api/upload", async (req, res) => {
+  if (!ensureAuthenticated(req, res)) return;
+  
   const limitMb = Math.round(MAX_UPLOAD_BYTES / 1024 / 1024);
   const contentType = ((req.headers["content-type"] || "").toString().toLowerCase());
   const metaHeader = decodeUploadHeader(req.headers["x-upload-meta"]);
@@ -2759,7 +2835,7 @@ app.post("/api/upload", async (req, res) => {
   };
 
   try {
-    await ensureConfigFresh();
+    const { CONFIG } = userContext;
     const categoryIds = sanitizeCategoryIds(Array.isArray(meta.categories) ? meta.categories : []);
 
     let secsPerPage = null;
@@ -2805,11 +2881,21 @@ app.post("/api/upload", async (req, res) => {
       CONFIG.favorites = Array.from(favSet).sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
     }
 
-    markConfigDirty();
+    userContext.markConfigDirty();
     try {
-      await saveConfigImmediate();
+      await userContext.saveConfigImmediate();
     } catch (saveErr) {
       console.error("Failed to persist config after upload:", saveErr);
+    }
+    
+    // Register document ownership
+    try {
+      const userId = req.auth.user.id;
+      await dataStore.assignDocumentsToUser(userId, [rel], "owner");
+      userContext.addDocumentsToUserCache(userId, [rel]);
+    } catch (err) {
+      console.error("Failed to register document:", err);
+      // Continue - file is uploaded, just not registered
     }
 
     const categoriesDetailed = categoryIds
@@ -2850,16 +2936,21 @@ app.post("/api/upload", async (req, res) => {
 
 /* ---------------- Config API (favorites + per-file secsPerPage) ---------------- */
 app.get("/api/prefs", async (req, res) => {
-  await ensureConfigFresh();
+  if (!ensureAuthenticated(req, res)) return;
+  const store = userContext.requireUserContext();
+  const config = store.configEntry.config;
+  console.log('[DEBUG] /api/prefs - config:', JSON.stringify(config, null, 2));
+  console.log('[DEBUG] /api/prefs - config.favorites:', config.favorites);
   res.setHeader("Cache-Control", "no-store");
-  res.json(CONFIG);
+  res.json(config);
 });
 
 app.post("/api/prefs/favorites", async (req, res) => {
+  if (!ensureAuthenticated(req, res)) return;
+  const { CONFIG } = userContext;
   const { name, favorite } = req.body || {};
   const info = resolvePdfName(name);
   if (!info) return res.status(400).json({ error: "Invalid file name" });
-  await ensureConfigFresh();
   
   const originalFavorites = [...CONFIG.favorites];
   const set = new Set(CONFIG.favorites);
@@ -2867,7 +2958,7 @@ app.post("/api/prefs/favorites", async (req, res) => {
   CONFIG.favorites = Array.from(set).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
   
   try {
-    await persistConfigNow();
+    await userContext.persistConfigNow();
   } catch (err) {
     CONFIG.favorites = originalFavorites;
     console.error("Failed to persist favorites:", err);
@@ -2877,10 +2968,11 @@ app.post("/api/prefs/favorites", async (req, res) => {
 });
 
 app.get("/api/prefs/file", async (req, res) => {
+  if (!ensureAuthenticated(req, res)) return;
+  const { CONFIG } = userContext;
   const name = (req.query.name || "").toString();
   const info = resolvePdfName(name, { requireExists: false });
   if (!info) return res.status(400).json({ error: "Invalid file name" });
-  await ensureConfigFresh();
   const entry = CONFIG.files[info.rel] || {};
   const categoryIds = sanitizeCategoryIds(entry.categories || []);
   const categories = categoryIds
@@ -2894,11 +2986,12 @@ app.get("/api/prefs/file", async (req, res) => {
 });
 
 app.post("/api/prefs/file", async (req, res) => {
+  if (!ensureAuthenticated(req, res)) return;
+  const { CONFIG } = userContext;
   const { name, secsPerPage, categories, jumpMarkers } = req.body || {};
   const info = resolvePdfName(name);
   if (!info) return res.status(400).json({ error: "Invalid file name" });
 
-  await ensureConfigFresh();
   const current = { ...(CONFIG.files[info.rel] || {}) };
 
   if (secsPerPage !== undefined) {
@@ -2936,7 +3029,7 @@ app.post("/api/prefs/file", async (req, res) => {
   }
 
   try {
-    await persistConfigNow();
+    await userContext.persistConfigNow();
   } catch (err) {
     // Rollback
     if (hadEntry && originalEntry) {
@@ -2972,10 +3065,18 @@ app.post("/api/prefs/file", async (req, res) => {
 });
 
 app.get("/api/annotations", async (req, res) => {
+  if (!ensureAuthenticated(req, res)) return;
+  const { USER_DOCUMENTS } = userContext;
+  
   const name = (req.query.name || "").toString();
   const info = resolvePdfName(name);
   if (!info) {
     return res.status(400).json({ error: "Invalid file name" });
+  }
+  
+  // Check if user has access to this document
+  if (!USER_DOCUMENTS.has(info.rel)) {
+    return res.status(403).json({ error: "Access denied" });
   }
 
   try {
@@ -3006,10 +3107,18 @@ app.get("/api/annotations", async (req, res) => {
 });
 
 app.post("/api/annotations/save", async (req, res) => {
+  if (!ensureAuthenticated(req, res)) return;
+  const { USER_DOCUMENTS } = userContext;
+  
   const { name, overlays } = req.body || {};
   const info = resolvePdfName(name);
   if (!info) {
     return res.status(400).json({ error: "Invalid file name" });
+  }
+  
+  // Check if user has access to this document
+  if (!USER_DOCUMENTS.has(info.rel)) {
+    return res.status(403).json({ error: "Access denied" });
   }
 
   if (!Array.isArray(overlays)) {
@@ -3103,10 +3212,18 @@ app.post("/api/annotations/save", async (req, res) => {
 });
 
 app.post("/api/annotations/undo", async (req, res) => {
+  if (!ensureAuthenticated(req, res)) return;
+  const { USER_DOCUMENTS } = userContext;
+  
   const { name } = req.body || {};
   const info = resolvePdfName(name);
   if (!info) {
     return res.status(400).json({ error: "Invalid file name" });
+  }
+  
+  // Check if user has access to this document
+  if (!USER_DOCUMENTS.has(info.rel)) {
+    return res.status(403).json({ error: "Access denied" });
   }
 
   let result = null;
@@ -3195,10 +3312,18 @@ app.post("/api/annotations/undo", async (req, res) => {
 });
 
 app.post("/api/annotations/reset", async (req, res) => {
+  if (!ensureAuthenticated(req, res)) return;
+  const { USER_DOCUMENTS } = userContext;
+  
   const { name } = req.body || {};
   const info = resolvePdfName(name);
   if (!info) {
     return res.status(400).json({ error: "Invalid file name" });
+  }
+  
+  // Check if user has access to this document
+  if (!USER_DOCUMENTS.has(info.rel)) {
+    return res.status(403).json({ error: "Access denied" });
   }
 
   try {
@@ -3254,19 +3379,22 @@ app.post("/api/annotations/reset", async (req, res) => {
 });
 
 app.get("/api/categories", async (req, res) => {
-  await ensureConfigFresh();
+  if (!ensureAuthenticated(req, res)) return;
+  const { CONFIG } = userContext;
   res.setHeader("Cache-Control", "no-store");
   res.json({ categories: CONFIG.categories.map((cat) => ({ ...cat })) });
 });
 
 app.post("/api/categories", async (req, res) => {
+  if (!ensureAuthenticated(req, res)) return;
+  const { CONFIG } = userContext;
+  
   const { name, color, icon } = req.body || {};
   const trimmedName = typeof name === "string" ? name.trim() : "";
   if (!trimmedName) {
     return res.status(400).json({ error: "Name required" });
   }
 
-  await ensureConfigFresh();
   const existingIds = new Set(CONFIG.categories.map((cat) => cat.id));
   const baseId = slugifyCategoryId(trimmedName);
   const id = ensureUniqueCategoryId(baseId, existingIds);
@@ -3281,7 +3409,7 @@ app.post("/api/categories", async (req, res) => {
   CONFIG.categories.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }));
   
   try {
-    await persistConfigNow();
+    await userContext.persistConfigNow();
   } catch (err) {
     // Rollback: remove the category we just added
     const idx = CONFIG.categories.findIndex((cat) => cat.id === id);
@@ -3294,9 +3422,11 @@ app.post("/api/categories", async (req, res) => {
 });
 
 app.put("/api/categories/:id", async (req, res) => {
+  if (!ensureAuthenticated(req, res)) return;
+  const { CONFIG } = userContext;
+  
   const id = (req.params.id || "").toString();
 
-  await ensureConfigFresh();
   const target = getCategoryById(id);
   if (!target) return res.status(404).json({ error: "Category not found" });
 
@@ -3323,7 +3453,7 @@ app.put("/api/categories/:id", async (req, res) => {
   CONFIG.categories.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }));
   
   try {
-    await persistConfigNow();
+    await userContext.persistConfigNow();
   } catch (err) {
     // Rollback changes
     target.name = originalName;
@@ -3340,8 +3470,10 @@ app.put("/api/categories/:id", async (req, res) => {
 });
 
 app.delete("/api/categories/:id", async (req, res) => {
+  if (!ensureAuthenticated(req, res)) return;
+  const { CONFIG } = userContext;
+  
   const id = (req.params.id || "").toString();
-  await ensureConfigFresh();
   const idx = CONFIG.categories.findIndex((cat) => cat.id === id);
   if (idx === -1) return res.status(404).json({ error: "Category not found" });
 
@@ -3360,7 +3492,7 @@ app.delete("/api/categories/:id", async (req, res) => {
   removeCategoryFromFiles(id);
   
   try {
-    await persistConfigNow();
+    await userContext.persistConfigNow();
   } catch (err) {
     // Rollback: restore category and file associations
     CONFIG.categories.splice(idx, 0, removedCategory);
@@ -3378,7 +3510,7 @@ app.delete("/api/categories/:id", async (req, res) => {
   res.json({ ok: true, categories: CONFIG.categories.map((cat) => ({ ...cat })) });
 });
 
-/* ---------------- Health & SPA fallback ---------------- */
+/* ---------------- Health endpoint ---------------- */
 app.get("/healthz", async (req, res) => {
   try {
     const okSheets = fs.existsSync(SHEETS_DIR);
@@ -3404,12 +3536,161 @@ app.get("/healthz", async (req, res) => {
   }
 });
 
+/* ---------------- SPA Fallback - MUST be last route ---------------- */
 app.get("*", (req, res) => {
   res.sendFile(path.join(PUBLIC_DIR, "index.html"));
 });
+} // End of registerApiRoutes()
 
+/* ---------------- Index & Scanning (Memory-optimized) ---------------- */
+async function scanDir() {
+  // Prevent concurrent scans
+  if (indexCache.scanInProgress) {
+    return indexCache.items;
+  }
+  
+  indexCache.scanInProgress = true;
+  
+  try {
+    const discovered = [];
+    const stack = [""];
+
+    while (stack.length) {
+      const relDir = stack.pop();
+      const absDir = path.join(SHEETS_DIR, relDir);
+
+      let dirHandle;
+      try {
+        dirHandle = await fs.promises.opendir(absDir);
+      } catch (err) {
+        console.warn(`scanDir: unable to open ${absDir}:`, err.message);
+        continue;
+      }
+
+      for await (const entry of dirHandle) {
+        if (!entry || entry.name === "." || entry.name === "..") continue;
+        const relPath = relDir ? `${relDir}/${entry.name}` : entry.name;
+
+        if (entry.name.startsWith(".")) continue;
+
+        if (entry.isDirectory()) {
+          stack.push(relPath);
+          continue;
+        }
+
+        if (entry.isFile() && entry.name.toLowerCase().endsWith(".pdf")) {
+          discovered.push(toPosixPath(relPath));
+        }
+      }
+    }
+
+    const results = [];
+    const concurrency = Math.min(
+      MEMORY_SETTINGS.maxStatConcurrency,
+      Math.max(2, CPU_COUNT * 2)
+    );
+    let cursor = 0;
+
+    const workerCount = Math.min(concurrency, Math.max(1, discovered.length));
+    const workers = [];
+    for (let i = 0; i < workerCount; i++) {
+      workers.push((async () => {
+      while (true) {
+        const currentIndex = cursor++;
+        if (currentIndex >= discovered.length) break;
+        const rel = discovered[currentIndex];
+        const abs = path.join(SHEETS_DIR, rel);
+        const st = await statSafe(abs);
+        if (!st) continue;
+
+        const folder = rel.includes("/") ? rel.slice(0, rel.lastIndexOf("/")) : "";
+        const displayName = path.basename(rel);
+        const encodedRel = encodePathSegments(rel);
+        const encodedThumb = encodePathSegments(thumbnailRelPath(rel));
+        
+        // Note: Category info is user-specific and will be added dynamically in /api/sheets
+        // We don't store it in the global cache
+        results.push({
+          id: encodeURIComponent(rel),
+          name: rel,
+          displayName,
+          folder,
+          url: `/sheets/${encodedRel}`,
+          thumbnail: `/thumbnails/${encodedThumb}`,
+          size: st.size,
+          mtime: st.mtimeMs,
+          categoryIds: [],
+          categories: [],
+        });
+      }
+      })());
+    }
+
+    await Promise.all(workers);
+
+    const items = results.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }));
+    indexCache = { at: Date.now(), items, scanInProgress: false };
+
+    // console.log(`Scanned ${items.length} PDF files (recursive)`);
+    return items;
+  } catch (e) {
+    console.error("scanDir failed:", e);
+    return indexCache.items; // Return cached items on error
+  } finally {
+    indexCache.scanInProgress = false;
+  }
+}
+
+async function getIndex() {
+  if (Date.now() - indexCache.at > MEMORY_SETTINGS.maxIndexCacheAge || !indexCache.items.length) {
+    try { 
+      await scanDir(); 
+    } catch (e) { 
+      console.error("getIndex -> scanDir failed:", e); 
+    }
+  }
+  return indexCache.items;
+}
+
+function applySort(items, sort, order) {
+  const o = (order || "asc").toLowerCase() === "desc" ? -1 : 1;
+  switch ((sort || "name").toLowerCase()) {
+    case "mtime": return items.slice().sort((a, b) => (a.mtime - b.mtime) * o);
+    case "size":  return items.slice().sort((a, b) => (a.size - b.size) * o);
+    default:      return items.slice().sort((a, b) =>
+      (a.displayName || a.name || "").localeCompare(b.displayName || b.name || "", undefined, { numeric: true, sensitivity: "base" }) * o
+    );
+  }
+}
+
+/* ---------------- Sheet Watcher (File System Monitor) ---------------- */
+function initSheetWatcher() {
+  if (typeof fs.watch !== "function") return null;
+  try {
+    let invalidateTimer = null;
+    const watcher = fs.watch(SHEETS_DIR, { recursive: true }, () => {
+      clearTimeout(invalidateTimer);
+      invalidateTimer = setTimeout(() => {
+        indexCache.at = 0;
+      }, 100);
+    });
+    watcher.on("error", (err) => {
+      console.warn("Sheet watcher error:", err.message);
+    });
+    console.log("Sheet watcher active (recursive)");
+    return watcher;
+  } catch (err) {
+    console.warn("Sheet watcher not available:", err.message);
+    return null;
+  }
+}
+
+/* ---------------- Server Initialization ---------------- */
 let server = null;
 let authService = null;
+let dataStore = null;
+let userContext = null;
+let sseManager = null;
 let sheetWatcher = null;
 (async () => {
   try { 
@@ -3419,8 +3700,23 @@ let sheetWatcher = null;
   }
   try {
     authService = await createAuthService({ dataDir: DATA_DIR, logger: console });
+    dataStore = await createDataStore({ authService, dataDir: DATA_DIR, sheetsDir: SHEETS_DIR, logger: console });
+    await dataStore.ensureInitialMigration();
+    
+    // Initialize user context middleware and SSE manager
+    const { createUserContextMiddleware } = require("./lib/user-context-middleware");
+    const { UserSSEManager } = require("./lib/user-sse-manager");
+    
+    userContext = createUserContextMiddleware({ dataStore, logger: console });
+    sseManager = new UserSSEManager({ logger: console });
+    
+    // Register middleware and all API routes after userContext is initialized
+    // NOTE: registerApiRoutes() adds session middleware BEFORE user context middleware
+    registerApiRoutes();
+    
+    console.log("User context middleware, SSE manager, and API routes initialized");
   } catch (err) {
-    console.error("Failed to initialize authentication store:", err);
+    console.error("Failed to initialize authentication/data store:", err);
     process.exit(1);
   }
   sheetWatcher = initSheetWatcher();
@@ -3490,11 +3786,9 @@ async function shutdown(sig) {
 process.on("SIGINT", () => shutdown("SIGINT"));
 process.on("SIGTERM", () => shutdown("SIGTERM"));
 process.on("beforeExit", () => {
-  if (_configDirty || _saveInProgress) {
-    flushConfigBeforeExit().catch((err) => {
-      console.error("beforeExit flush failed:", err);
-    });
-  }
+  flushConfigBeforeExit().catch((err) => {
+    console.error("beforeExit flush failed:", err);
+  });
 });
 process.on("uncaughtException", (e) => { console.error("uncaughtException", e); });
 process.on("unhandledRejection", (e) => { console.error("unhandledRejection", e); });
