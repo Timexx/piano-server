@@ -639,6 +639,21 @@
         to { transform: rotate(360deg); }
       }
       
+      @keyframes slideUp {
+        from {
+          opacity: 0;
+          transform: translateY(20px) scale(0.95);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0) scale(1);
+        }
+      }
+      
+      .animate-fade-in {
+        animation: slideUp 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      }
+      
       .viewer-loading-text {
         font-size: 0.875rem;
         color: #9ca3af;
@@ -6251,6 +6266,9 @@
 
         renderViewport();
         if (resetScroll) scroller.scrollTop = 0;
+        
+        // Check auth and show delete buttons for authorized users
+        setTimeout(() => checkAuthAndShowActions(), 100);
       }
 
       function renderCategoryBadges(item) {
@@ -6308,6 +6326,7 @@
             <button type="button" aria-label="Als Favorit markieren" title="Favorit" class="fav icon-btn"></button>
             <button type="button" aria-label="Zur Playlist hinzufügen" title="Zur Playlist hinzufügen" data-name="${item.name}" class="add-playlist icon-btn">${SVG_PLAYLIST_ADD}</button>
             <button type="button" aria-label="Kategorien" title="Kategorien" class="assign-cat icon-btn">${SVG_CATEGORY_ADD}</button>
+            <button type="button" aria-label="PDF löschen" title="PDF löschen" class="delete-pdf icon-btn text-red-400 hover:text-red-300" style="display:none;" data-name="${item.name}">${SVG_TRASH_MINI}</button>
           </div>
         `;
         a.appendChild(overlay);
@@ -6342,6 +6361,15 @@
           ev.preventDefault(); ev.stopPropagation();
           openPlaylistAssignmentDialog(item.name);
         });
+        
+        // Delete button handler
+        const deleteBtn = overlay.querySelector('.delete-pdf');
+        deleteBtn?.addEventListener('click', async (ev) => {
+          ev.preventDefault(); ev.stopPropagation();
+          await confirmAndDeletePdf(item);
+        });
+        
+        // Show delete button only for admin users (will be enabled by checkAuthAndShowActions)
         // Ensure playlist icons reflect current state
         queueMicrotask(() => updateLibraryPlaylistButtons());
 
@@ -8851,6 +8879,118 @@
           showToast(extra, 1800);
         }
       }
+      
+      // ===== PDF Delete Functionality =====
+      async function confirmAndDeletePdf(item) {
+        // Create confirmation modal
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `
+          <div class="glass-panel p-6 max-w-md w-full animate-fade-in" style="animation: slideUp 0.3s ease-out;">
+            <h3 class="text-xl font-bold mb-4 text-red-400">PDF löschen?</h3>
+            <p class="text-neutral-300 mb-4">
+              Möchten Sie "<strong>${item.displayName || item.name}</strong>" wirklich löschen?
+            </p>
+            <p class="text-sm text-red-300 mb-6">
+              ⚠️ Diese Aktion kann nicht rückgängig gemacht werden. Das PDF wird unwiderruflich gelöscht, 
+              inklusive aller Annotationen, Favoriten-Markierungen und Playlist-Zuordnungen.
+            </p>
+            <div class="flex gap-3 justify-end">
+              <button id="cancelDelete" class="btn btn-secondary">
+                Abbrechen
+              </button>
+              <button id="confirmDelete" class="btn" style="background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); border-color: #ef4444; color: white;">
+                Endgültig löschen
+              </button>
+            </div>
+          </div>
+        `;
+        
+        document.body.appendChild(backdrop);
+        
+        // Handle cancel
+        const cancelBtn = backdrop.querySelector('#cancelDelete');
+        const confirmBtn = backdrop.querySelector('#confirmDelete');
+        
+        cancelBtn.addEventListener('click', () => {
+          backdrop.remove();
+        });
+        
+        // Handle backdrop click to close
+        backdrop.addEventListener('click', (e) => {
+          if (e.target === backdrop) {
+            backdrop.remove();
+          }
+        });
+        
+        // Handle confirm
+        confirmBtn.addEventListener('click', async () => {
+          confirmBtn.disabled = true;
+          confirmBtn.textContent = 'Lösche...';
+          
+          try {
+            const response = await fetch(`/api/sheets/${encodeURIComponent(item.name)}`, {
+              method: 'DELETE',
+              credentials: 'include',
+              headers: {
+                'Content-Type': 'application/json'
+              }
+            });
+            
+            if (!response.ok) {
+              const errorData = await response.json().catch(() => ({}));
+              throw new Error(errorData.error || errorData.details || 'Löschen fehlgeschlagen');
+            }
+            
+            backdrop.remove();
+            showToast('PDF erfolgreich gelöscht', 3000);
+            
+            // Remove from local state
+            state.library.favorites.delete(item.name);
+            state.library.items = state.library.items.filter(i => i.name !== item.name);
+            
+            // Refresh library view - trigger a complete reload
+            renderLibrary();
+            
+          } catch (error) {
+            console.error('Delete failed:', error);
+            backdrop.remove();
+            showToast(error.message || 'Fehler beim Löschen', 4000);
+          }
+        });
+      }
+      
+      // Check authentication and show delete buttons for authorized users
+      async function checkAuthAndShowActions() {
+        try {
+          const response = await fetch('/api/auth/session', {
+            credentials: 'include',
+            cache: 'no-store'
+          });
+          
+          if (!response.ok) return;
+          
+          const data = await response.json();
+          if (!data || !data.ok || !data.user) return;
+          
+          const isAdmin = data.user.role === 'admin';
+          
+          // Show delete buttons for admin users
+          if (isAdmin) {
+            document.querySelectorAll('.delete-pdf').forEach(btn => {
+              btn.style.display = 'inline-flex';
+            });
+          }
+          
+        } catch (error) {
+          console.error('Auth check failed:', error);
+        }
+      }
+      
+      // Call auth check after library is loaded
+      window.addEventListener('DOMContentLoaded', () => {
+        setTimeout(checkAuthAndShowActions, 500);
+      });
       
       // ===== Fullscreen & Wake Lock =====
       async function toggleFullscreen() {

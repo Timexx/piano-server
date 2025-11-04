@@ -3713,6 +3713,235 @@ app.delete("/api/categories/:id", async (req, res) => {
   res.json({ ok: true, categories: CONFIG.categories.map((cat) => ({ ...cat })) });
 });
 
+/* ---------------- Delete PDF ---------------- */
+app.delete("/api/sheets/:name", async (req, res) => {
+  if (!ensureAuthenticated(req, res)) return;
+  
+  const { name } = req.params;
+  const info = resolvePdfName(name);
+  
+  if (!info) {
+    return res.status(404).json({ error: "PDF nicht gefunden" });
+  }
+  
+  const userId = req.auth.user.id;
+  const userRole = req.auth.user.role;
+  
+  // Check ownership: only owner or admin can delete
+  const ownedDocs = dataStore.listOwnedDocumentRelPaths(userId);
+  const isOwner = ownedDocs.includes(info.rel);
+  const isAdmin = userRole === "admin";
+  
+  if (!isOwner && !isAdmin) {
+    return res.status(403).json({ 
+      error: "Keine Berechtigung", 
+      details: "Nur der Besitzer oder ein Administrator kann dieses PDF löschen."
+    });
+  }
+  
+  try {
+    // 1. Delete physical PDF file
+    await fs.promises.unlink(info.abs).catch((err) => {
+      if (err?.code !== "ENOENT") throw err;
+    });
+    
+    // 2. Delete thumbnail
+    const thumbPath = path.join(THUMBS_DIR, thumbnailRelPath(info.rel));
+    await fs.promises.unlink(thumbPath).catch((err) => {
+      if (err?.code !== "ENOENT") {
+        logError("Failed to delete thumbnail", err, { rel: info.rel });
+      }
+    });
+    
+    // 3. Delete annotation directory (includes all versions and base PDF)
+    const annotationDir = getAnnotationDir(info.rel);
+    await fs.promises.rm(annotationDir, { recursive: true, force: true }).catch((err) => {
+      logError("Failed to delete annotations", err, { rel: info.rel });
+    });
+    
+    // 4. Remove from ALL users' configs (favorites, file configs)
+    // Admin deletion affects all users
+    if (isAdmin) {
+      const allUsers = authService.listUsers();
+      for (const user of allUsers) {
+        try {
+          const userConfigEntry = await dataStore.getUserConfig(user.id);
+          let configChanged = false;
+          
+          // Remove from favorites
+          if (Array.isArray(userConfigEntry.favorites)) {
+            const originalLength = userConfigEntry.favorites.length;
+            userConfigEntry.favorites = userConfigEntry.favorites.filter(fav => fav !== info.rel);
+            if (userConfigEntry.favorites.length !== originalLength) {
+              configChanged = true;
+            }
+          }
+          
+          // Remove from file config
+          if (userConfigEntry.files && userConfigEntry.files[info.rel]) {
+            delete userConfigEntry.files[info.rel];
+            configChanged = true;
+          }
+          
+          if (configChanged) {
+            await dataStore.saveUserConfig(user.id, userConfigEntry);
+          }
+        } catch (err) {
+          logError("Failed to clean user config after delete", err, { userId: user.id, rel: info.rel });
+        }
+      }
+    } else {
+      // Owner deletion: only affect their own config
+      const { CONFIG } = userContext;
+      
+      // Remove from favorites
+      const favSet = new Set(CONFIG.favorites);
+      if (favSet.has(info.rel)) {
+        favSet.delete(info.rel);
+        CONFIG.favorites = Array.from(favSet).sort((a, b) => 
+          a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" })
+        );
+        userContext.markConfigDirty();
+      }
+      
+      // Remove from file config
+      if (CONFIG.files[info.rel]) {
+        delete CONFIG.files[info.rel];
+        userContext.markConfigDirty();
+      }
+      
+      await userContext.saveConfigImmediate().catch((err) => {
+        logError("Failed to save config after delete", err);
+      });
+    }
+    
+    // 5. Remove from ALL users' playlists
+    if (isAdmin) {
+      const allUsers = authService.listUsers();
+      for (const user of allUsers) {
+        try {
+          const userPlaylistsEntry = await dataStore.getUserPlaylists(user.id);
+          let playlistsChanged = false;
+          
+          if (Array.isArray(userPlaylistsEntry.playlists)) {
+            userPlaylistsEntry.playlists.forEach((playlist) => {
+              if (Array.isArray(playlist.items)) {
+                const originalLength = playlist.items.length;
+                playlist.items = playlist.items.filter(item => item !== info.rel);
+                
+                if (playlist.items.length !== originalLength) {
+                  playlistsChanged = true;
+                  // Adjust currentIndex if needed
+                  if (playlist.currentIndex >= playlist.items.length) {
+                    playlist.currentIndex = playlist.items.length ? playlist.items.length - 1 : -1;
+                  }
+                  playlist.updatedAt = Date.now();
+                }
+              }
+            });
+          }
+          
+          if (playlistsChanged) {
+            userPlaylistsEntry.updatedAt = Date.now();
+            await dataStore.saveUserPlaylists(user.id, userPlaylistsEntry);
+          }
+        } catch (err) {
+          logError("Failed to clean user playlists after delete", err, { userId: user.id, rel: info.rel });
+        }
+      }
+    } else {
+      // Owner deletion: only affect their own playlists
+      const { PLAYLIST_STATE } = userContext;
+      let playlistsChanged = false;
+      
+      PLAYLIST_STATE.playlists.forEach((playlist) => {
+        const originalLength = playlist.items.length;
+        playlist.items = playlist.items.filter(item => item !== info.rel);
+        
+        if (playlist.items.length !== originalLength) {
+          playlistsChanged = true;
+          // Adjust currentIndex if needed
+          if (playlist.currentIndex >= playlist.items.length) {
+            playlist.currentIndex = playlist.items.length ? playlist.items.length - 1 : -1;
+          }
+          updatePlaylistTimestamp(playlist);
+        }
+      });
+      
+      if (playlistsChanged) {
+        await savePlaylistsImmediate().catch((err) => {
+          logError("Failed to save playlists after delete", err);
+        });
+        broadcastPlaylists();
+      }
+    }
+    
+    // 6. Remove from index cache
+    indexCache.items = indexCache.items.filter(item => item && item.name !== info.rel);
+    indexCache.at = Date.now();
+    
+    // 7. Remove from database (user_documents table)
+    // This is handled by removing the document entry itself if no other users reference it
+    try {
+      // For admin: remove document entirely from all users
+      // For owner: only remove their association (but keep if others have access)
+      if (isAdmin) {
+        // Admin can delete the document entirely - remove all user associations
+        const db = authService.query;
+        const docRow = db.get(`SELECT id FROM documents WHERE rel_path = ?`, [info.rel]);
+        if (docRow) {
+          // Remove all user_documents entries
+          authService.transactional(({ run }) => {
+            run(`DELETE FROM user_documents WHERE document_id = ?`, [docRow.id]);
+            run(`DELETE FROM documents WHERE id = ?`, [docRow.id]);
+          });
+        }
+      } else {
+        // Owner: only remove their own association
+        const db = authService.query;
+        const docRow = db.get(`SELECT id FROM documents WHERE rel_path = ?`, [info.rel]);
+        if (docRow) {
+          authService.transactional(({ run }) => {
+            run(`DELETE FROM user_documents WHERE user_id = ? AND document_id = ?`, [userId, docRow.id]);
+            
+            // Check if any other users still reference this document
+            const remainingRefs = db.get(
+              `SELECT COUNT(*) as count FROM user_documents WHERE document_id = ?`,
+              [docRow.id]
+            );
+            
+            // If no other references, delete the document itself
+            if (remainingRefs && remainingRefs.count === 0) {
+              run(`DELETE FROM documents WHERE id = ?`, [docRow.id]);
+            }
+          });
+        }
+      }
+      
+      // Update user document cache
+      const userDocSet = userDocumentCache.get(userId);
+      if (userDocSet) {
+        userDocSet.delete(info.rel);
+      }
+    } catch (err) {
+      logError("Failed to remove document from database", err, { rel: info.rel });
+      // Continue - file is already deleted
+    }
+    
+    console.log(`PDF deleted successfully: ${info.rel} by user ${userId} (${isAdmin ? 'admin' : 'owner'})`);
+    
+    res.json({ 
+      ok: true, 
+      message: "PDF erfolgreich gelöscht",
+      deletedFile: info.rel
+    });
+    
+  } catch (err) {
+    logError("PDF deletion failed", err, { rel: info.rel, userId });
+    return sendError(res, 500, "Fehler beim Löschen des PDFs", err, "Delete PDF");
+  }
+});
+
 /* ---------------- Health endpoint ---------------- */
 app.get("/healthz", async (req, res) => {
   try {
@@ -3888,6 +4117,185 @@ function initSheetWatcher() {
   }
 }
 
+/* ---------------- Database Cleanup Helper ---------------- */
+/**
+ * Cleans up orphaned document entries from the database.
+ * Removes documents that no longer have corresponding PDF files in the sheets directory.
+ * This handles cases where files were deleted manually without using the API.
+ */
+async function cleanupOrphanedDocuments() {
+  if (!authService || !dataStore) {
+    console.warn("Cannot cleanup orphaned documents: services not initialized");
+    return;
+  }
+
+  try {
+    console.log("🔍 Starting database cleanup check...");
+    
+    // Get all documents from database
+    const allDocumentsInDb = authService.query.all(
+      `SELECT id, rel_path FROM documents`
+    );
+    
+    if (!allDocumentsInDb || allDocumentsInDb.length === 0) {
+      console.log("✅ Database cleanup: No documents in database");
+      return;
+    }
+    
+    console.log(`📊 Found ${allDocumentsInDb.length} documents in database`);
+    
+    // Check which ones still exist in filesystem
+    const orphanedDocs = [];
+    
+    for (const doc of allDocumentsInDb) {
+      const absPath = path.join(SHEETS_DIR, doc.rel_path);
+      
+      try {
+        await fs.promises.access(absPath, fs.constants.F_OK);
+        // File exists - all good
+      } catch (err) {
+        // File does not exist - this is an orphaned entry
+        orphanedDocs.push(doc);
+      }
+    }
+    
+    if (orphanedDocs.length === 0) {
+      console.log("✅ Database cleanup: All document entries are valid");
+      return;
+    }
+    
+    console.log(`🗑️  Found ${orphanedDocs.length} orphaned document(s) to clean up:`);
+    orphanedDocs.forEach(doc => {
+      console.log(`   - ${doc.rel_path} (ID: ${doc.id})`);
+    });
+    
+    // Clean up orphaned entries
+    let cleanedCount = 0;
+    
+    for (const doc of orphanedDocs) {
+      try {
+        // Remove from database using transactional
+        authService.transactional(({ run }) => {
+          // Remove user_documents associations
+          run(`DELETE FROM user_documents WHERE document_id = ?`, [doc.id]);
+          // Remove document itself
+          run(`DELETE FROM documents WHERE id = ?`, [doc.id]);
+        });
+        
+        cleanedCount++;
+        console.log(`   ✓ Cleaned up: ${doc.rel_path}`);
+        
+        // Also clean up related files (thumbnails, annotations)
+        try {
+          // Remove thumbnail
+          const thumbPath = path.join(THUMBS_DIR, thumbnailRelPath(doc.rel_path));
+          await fs.promises.unlink(thumbPath).catch(() => {});
+          
+          // Remove annotation directory
+          const annotationDir = getAnnotationDir(doc.rel_path);
+          await fs.promises.rm(annotationDir, { recursive: true, force: true }).catch(() => {});
+        } catch (cleanupErr) {
+          // Non-critical - just log
+          console.log(`   ⚠️  Could not clean up related files for ${doc.rel_path}`);
+        }
+        
+      } catch (err) {
+        logError("Failed to cleanup orphaned document", err, { docId: doc.id, relPath: doc.rel_path });
+      }
+    }
+    
+    console.log(`✅ Database cleanup complete: Removed ${cleanedCount} orphaned document(s)`);
+    
+    // Also clean up user configs - remove references to deleted files
+    await cleanupUserConfigs(orphanedDocs.map(d => d.rel_path));
+    
+  } catch (err) {
+    logError("Database cleanup failed", err);
+    console.warn("⚠️  Database cleanup encountered errors - continuing startup");
+  }
+}
+
+/**
+ * Removes references to deleted files from all user configs
+ */
+async function cleanupUserConfigs(deletedRelPaths) {
+  if (!deletedRelPaths || deletedRelPaths.length === 0) return;
+  
+  try {
+    const deletedSet = new Set(deletedRelPaths);
+    const allUsers = authService.listUsers();
+    let cleanedUsers = 0;
+    
+    for (const user of allUsers) {
+      try {
+        const userConfig = await dataStore.getUserConfig(user.id);
+        let configChanged = false;
+        
+        // Remove from favorites
+        if (Array.isArray(userConfig.favorites)) {
+          const originalLength = userConfig.favorites.length;
+          userConfig.favorites = userConfig.favorites.filter(fav => !deletedSet.has(fav));
+          if (userConfig.favorites.length !== originalLength) {
+            configChanged = true;
+          }
+        }
+        
+        // Remove from file configs
+        if (userConfig.files && typeof userConfig.files === 'object') {
+          for (const relPath of deletedRelPaths) {
+            if (userConfig.files[relPath]) {
+              delete userConfig.files[relPath];
+              configChanged = true;
+            }
+          }
+        }
+        
+        if (configChanged) {
+          await dataStore.saveUserConfig(user.id, userConfig);
+          cleanedUsers++;
+        }
+        
+        // Clean up playlists
+        const userPlaylists = await dataStore.getUserPlaylists(user.id);
+        let playlistsChanged = false;
+        
+        if (Array.isArray(userPlaylists.playlists)) {
+          userPlaylists.playlists.forEach((playlist) => {
+            if (Array.isArray(playlist.items)) {
+              const originalLength = playlist.items.length;
+              playlist.items = playlist.items.filter(item => !deletedSet.has(item));
+              
+              if (playlist.items.length !== originalLength) {
+                playlistsChanged = true;
+                // Adjust currentIndex if needed
+                if (playlist.currentIndex >= playlist.items.length) {
+                  playlist.currentIndex = playlist.items.length ? playlist.items.length - 1 : -1;
+                }
+                playlist.updatedAt = Date.now();
+              }
+            }
+          });
+        }
+        
+        if (playlistsChanged) {
+          userPlaylists.updatedAt = Date.now();
+          await dataStore.saveUserPlaylists(user.id, userPlaylists);
+        }
+        
+      } catch (err) {
+        logError("Failed to cleanup user config", err, { userId: user.id });
+      }
+    }
+    
+    if (cleanedUsers > 0) {
+      console.log(`   ✓ Cleaned ${cleanedUsers} user config(s)`);
+    }
+    
+  } catch (err) {
+    logError("Failed to cleanup user configs", err);
+  }
+}
+
 /* ---------------- Server Initialization ---------------- */
 let server = null;
 let authService = null;
@@ -3922,6 +4330,9 @@ let sheetWatcher = null;
     console.error("Failed to initialize authentication/data store:", err);
     process.exit(1);
   }
+  // Database cleanup: Remove orphaned document entries
+  await cleanupOrphanedDocuments();
+  
   sheetWatcher = initSheetWatcher();
   
   server = app.listen(PORT, () => {
