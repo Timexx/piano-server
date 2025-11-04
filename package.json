@@ -7,6 +7,7 @@
     "start": "node server.js",
     "start:optimized": "./start-optimized.sh",
     "start:memory": "node --max-old-space-size=1024 --expose-gc server.js",
+    "start:proxy": "TRUST_PROXY=true node server.js",
     "dev": "node --inspect server.js",
     "install:deps": "npm install pdfjs-dist@2.16.105 canvas@^2.11.2 sharp@^0.33.5",
     "migrate:data": "node scripts/migrate-data.js"

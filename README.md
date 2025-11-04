@@ -7,8 +7,9 @@ Lightweight sheet-music library and viewer, optimized for iPad and mobile Safari
 - Fast library (grid/list) with search, favorites, categories, and pagination
 - Server-side thumbnail generation and caching for instant browsing
 - Mobile-first viewer with single Play/Pause button (includes Screen-On behavior)
-- Auto-scroll per page with per-file “seconds per page” setting
+- Auto-scroll per page with per-file "seconds per page" setting
 - iPad-optimized wake lock and scrolling behavior, resilient under low memory
+- **Reverse Proxy Support** - Run behind nginx, Apache, npm proxy, etc.
 
 ## Target devices
 
@@ -91,7 +92,31 @@ Explicit memory sizing:
 npm run start:memory
 ```
 
+**Reverse Proxy mode** (see [PROXY_SETUP.md](PROXY_SETUP.md) for details):
+
+```bash
+npm run start:proxy
+```
+
 The server starts on http://localhost:3000 by default. Place your PDFs under `sheets/` and open the app in your browser.
+
+### Running behind a Reverse Proxy
+
+The server now supports running behind reverse proxies (nginx, Apache, npm proxy, etc.). See the detailed [Proxy Setup Guide](PROXY_SETUP.md) for configuration examples.
+
+Quick setup with npm proxy:
+```bash
+# Terminal 1: Start the server with proxy support
+npm run start:proxy
+
+# Terminal 2: Start your proxy (example)
+proxy --config proxy-config.example.json
+```
+
+Environment variables:
+- `TRUST_PROXY=true` - Trust all proxy headers (for cloud setups)
+- `TRUST_PROXY=loopback` - Trust localhost proxies only (default)
+- `TRUST_PROXY=false` - Disable proxy support
 
 ### One-time data migration
 

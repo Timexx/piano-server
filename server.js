@@ -58,6 +58,18 @@ try {
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// =============================================================================
+// PROXY SUPPORT: Trust proxy headers for reverse proxy setups
+// =============================================================================
+// Enable if running behind nginx, Apache, npm proxy, Cloudflare, etc.
+// This allows Express to correctly read X-Forwarded-* headers
+if (process.env.TRUST_PROXY !== 'false') {
+  // 'loopback' trusts localhost proxies (127.0.0.1, ::1)
+  // Can also use true (trust all), number of hops, or specific IP addresses
+  app.set('trust proxy', process.env.TRUST_PROXY || 'loopback');
+  console.log('[PROXY] Trust proxy enabled:', app.get('trust proxy'));
+}
+
 const ROOT = __dirname;
 const PUBLIC_DIR = path.join(ROOT, "public");
 const SHEETS_DIR = path.join(ROOT, "sheets");
