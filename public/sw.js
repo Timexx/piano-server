@@ -1,6 +1,6 @@
 // Service Worker für Piano Sheets PWA
-// Version für Cache-Invalidierung
-const CACHE_VERSION = 'v2';
+// Version für Cache-Invalidierung - UPDATED: Fix für unendliche Reload-Loop offline
+const CACHE_VERSION = 'v5-offline-reload-fix';
 const STATIC_CACHE = `piano-static-${CACHE_VERSION}`;
 const DYNAMIC_CACHE = `piano-dynamic-${CACHE_VERSION}`;
 const PDF_CACHE = `piano-pdfs-${CACHE_VERSION}`;
@@ -11,9 +11,11 @@ const API_CACHE = `piano-api-${CACHE_VERSION}`;
 const STATIC_ASSETS = [
   '/',
   '/index.html',
-  '/app.js',
+  '/base-path.js',
+  '/csrf-protection.js',
   '/annotation-tools.js',
   '/jump-markers.js',
+  '/auth-status.js',
   '/pdf.js',
   '/scroll-with-markers.js',
   '/manifest.json',
@@ -55,7 +57,7 @@ self.addEventListener('install', (event) => {
             console.warn('[SW] Batch cache failed, trying individual caching', err);
             return Promise.all(
               precacheAssets.map((url) =>
-                cache.add(url).catch((e) => console.warn(`[SW] Failed to cache ${url}:`, e))
+                cache.add(url).catch((e) => console.warn('[SW] Failed to cache ' + url + ':', e))
               )
             );
           });
@@ -109,6 +111,12 @@ self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
 
+  // WICHTIG: Ignoriere externe Domains (CDN, etc.)
+  if (url.origin !== self.location.origin) {
+    // Lass externe Requests direkt durch (keine Caching-Logik)
+    return;
+  }
+
   if (request.mode === 'navigate' && url.origin === self.location.origin) {
     event.respondWith(handleNavigationRequest(event));
     return;
@@ -160,25 +168,37 @@ async function handleStaticRequest(request) {
       return cached;
     }
 
-    const response = await fetch(request);
+    const response = await fetch(request, {
+      signal: AbortSignal.timeout ? AbortSignal.timeout(5000) : undefined
+    });
     if (response && response.ok) {
       const cache = await caches.open(STATIC_CACHE);
       await cache.put(request, response.clone());
     }
     return response;
   } catch (error) {
-    console.warn('[SW] Static request failed:', error);
+    console.log('[SW] Static request failed (offline):', request.url);
     const cached = await caches.match(request);
     if (cached) {
+      console.log('[SW] Serving from cache:', request.url);
       return cached;
     }
     // Fallback für HTML: Offline-Seite
     if (request.destination === 'document') {
+      console.warn('[SW] No cached document, serving offline page');
       return new Response(getOfflinePage(), {
-        headers: { 'Content-Type': 'text/html' }
+        status: 200,
+        statusText: 'OK',
+        headers: { 'Content-Type': 'text/html; charset=utf-8' }
       });
     }
-    throw error;
+    // Für andere Ressourcen: gib einen leeren Response zurück statt zu werfen
+    console.warn('[SW] Resource not cached and offline:', request.url);
+    return new Response('', { 
+      status: 503, 
+      statusText: 'Service Unavailable',
+      headers: { 'Content-Type': 'text/plain' }
+    });
   }
 }
 
@@ -193,7 +213,9 @@ async function handleNavigationRequest(event) {
   }
 
   try {
-    const networkResponse = await fetch(event.request);
+    const networkResponse = await fetch(event.request, { 
+      signal: AbortSignal.timeout ? AbortSignal.timeout(5000) : undefined 
+    });
     if (networkResponse && networkResponse.ok) {
       try {
         const cache = await caches.open(STATIC_CACHE);
@@ -204,13 +226,17 @@ async function handleNavigationRequest(event) {
     }
     return networkResponse;
   } catch (error) {
-    console.warn('[SW] Navigation request failed, serving cached shell:', error);
+    console.log('[SW] Navigation request failed (offline), serving cached shell:', error.message);
     const cachedShell = await caches.match('/index.html');
     if (cachedShell) {
+      console.log('[SW] Serving cached index.html for offline navigation');
       return cachedShell;
     }
+    console.warn('[SW] No cached shell available, serving offline page');
     return new Response(getOfflinePage(), {
-      headers: { 'Content-Type': 'text/html' }
+      status: 200,
+      statusText: 'OK',
+      headers: { 'Content-Type': 'text/html; charset=utf-8' }
     });
   }
 }
@@ -240,7 +266,20 @@ async function handlePDFRequest(request) {
   const cached = await caches.match(request);
   if (cached) {
     console.log('[SW] Serving PDF from cache:', request.url);
-    return cached;
+    // Ensure proper headers for offline PDF viewing
+    const headers = new Headers(cached.headers);
+    if (!headers.has('Content-Type')) {
+      headers.set('Content-Type', 'application/pdf');
+    }
+    if (!headers.has('Accept-Ranges')) {
+      headers.set('Accept-Ranges', 'bytes');
+    }
+    
+    return new Response(cached.body, {
+      status: cached.status,
+      statusText: cached.statusText,
+      headers: headers
+    });
   }
 
   try {
@@ -249,8 +288,22 @@ async function handlePDFRequest(request) {
     
     if (response && response.ok) {
       const cache = await caches.open(PDF_CACHE);
-      // Clone vor dem Cachen (Response kann nur einmal gelesen werden)
-      await cache.put(request, response.clone());
+      // Clone first to read body twice
+      const clonedResponse = response.clone();
+      
+      // Ensure proper headers before caching
+      const responseBlob = await clonedResponse.blob();
+      const headers = new Headers(response.headers);
+      headers.set('Content-Type', 'application/pdf');
+      headers.set('Accept-Ranges', 'bytes');
+      
+      const responseToCache = new Response(responseBlob, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: headers
+      });
+      
+      await cache.put(request, responseToCache);
       console.log('[SW] PDF cached:', request.url);
     }
     

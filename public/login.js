@@ -34,6 +34,12 @@
       if (!response.ok) return;
       const data = await response.json();
       if (!data || !data.ok || !data.user) return;
+      
+      // SECURITY: Store CSRF token from session check
+      if (data.csrfToken) {
+        sessionStorage.setItem('csrfToken', data.csrfToken);
+      }
+      
       // Redirect all users (including admins) to the main page
       window.location.href = "/";
     } catch {
@@ -73,6 +79,11 @@
       if (!data || !data.user) {
         showError("Anmeldung derzeit nicht möglich.");
         return;
+      }
+
+      // SECURITY: Store CSRF token for future requests
+      if (data.csrfToken) {
+        sessionStorage.setItem('csrfToken', data.csrfToken);
       }
 
       // Redirect all users (including admins) to the main page

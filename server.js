@@ -1,5 +1,14 @@
 // server.js — Piano Sheets (server-side thumbnail generation for performance)
 
+// Load environment variables from .env file (if exists)
+try {
+  require('dotenv').config();
+  console.log('[CONFIG] Environment variables loaded from .env file');
+} catch (err) {
+  // dotenv not installed or .env file missing - use system environment variables
+  console.log('[CONFIG] Using system environment variables (dotenv not available)');
+}
+
 const express = require("express");
 const fs = require("fs");
 const path = require("path");
@@ -57,6 +66,7 @@ try {
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const BASE_PATH = process.env.BASE_PATH || ''; // e.g., '/music' for proxy setups
 
 // =============================================================================
 // PROXY SUPPORT: Trust proxy headers for reverse proxy setups
@@ -64,10 +74,29 @@ const PORT = process.env.PORT || 3000;
 // Enable if running behind nginx, Apache, npm proxy, Cloudflare, etc.
 // This allows Express to correctly read X-Forwarded-* headers
 if (process.env.TRUST_PROXY !== 'false') {
-  // 'loopback' trusts localhost proxies (127.0.0.1, ::1)
-  // Can also use true (trust all), number of hops, or specific IP addresses
-  app.set('trust proxy', process.env.TRUST_PROXY || 'loopback');
+  // Parse TRUST_PROXY value correctly
+  let trustProxyValue = process.env.TRUST_PROXY || 'loopback';
+  
+  // Convert string "true" to boolean true
+  if (trustProxyValue === 'true') {
+    trustProxyValue = true;
+  } 
+  // Convert string "false" to boolean false
+  else if (trustProxyValue === 'false') {
+    trustProxyValue = false;
+  }
+  // Convert numeric strings to numbers (hop count)
+  else if (!isNaN(trustProxyValue)) {
+    trustProxyValue = parseInt(trustProxyValue, 10);
+  }
+  // Otherwise keep as string (IP address, subnet, or 'loopback')
+  
+  app.set('trust proxy', trustProxyValue);
   console.log('[PROXY] Trust proxy enabled:', app.get('trust proxy'));
+}
+
+if (BASE_PATH) {
+  console.log(`[PROXY] Base path configured: ${BASE_PATH}`);
 }
 
 const ROOT = __dirname;
@@ -182,9 +211,15 @@ function buildSessionCookie(value, maxAgeSeconds) {
   segments.push("Path=/");
   segments.push("HttpOnly");
   segments.push("SameSite=Lax");
-  if (process.env.NODE_ENV === "production") {
+  
+  // Use SESSION_SECURE from .env, fallback to NODE_ENV check
+  const shouldBeSecure = process.env.SESSION_SECURE === 'true' || 
+                         (process.env.SESSION_SECURE !== 'false' && process.env.NODE_ENV === 'production');
+  
+  if (shouldBeSecure) {
     segments.push("Secure");
   }
+  
   return segments.join("; ");
 }
 
@@ -1895,6 +1930,10 @@ function registerApiRoutes() {
     app.use('/api/', apiLimiter);
   }
 
+// =============================================================================
+// AUTH ENDPOINTS (BEFORE CSRF Protection!)
+// =============================================================================
+
 app.post("/api/auth/login", loginLimiter || ((req, res, next) => next()), (req, res) => {
   if (!authService) {
     return res.status(503).json({ error: "Auth service unavailable" });
@@ -1904,18 +1943,37 @@ app.post("/api/auth/login", loginLimiter || ((req, res, next) => next()), (req, 
     return res.status(400).json({ error: "INVALID_CREDENTIALS" });
   }
 
+  // SECURITY: User-based rate limiting check
+  const rateLimitCheck = checkRateLimit(email);
+  if (!rateLimitCheck.allowed) {
+    console.warn('[SECURITY] Login rate limit exceeded:', { 
+      email: email.substring(0, 3) + '***',
+      ip: req.ip 
+    });
+    return res.status(429).json({ 
+      error: "TOO_MANY_ATTEMPTS",
+      message: rateLimitCheck.reason
+    });
+  }
+
   const record = authService.getUserByEmail(email);
   if (!record) {
+    recordFailedLogin(email);
     return res.status(401).json({ error: "INVALID_CREDENTIALS" });
   }
   if (!record.isActive) {
+    recordFailedLogin(email);
     return res.status(403).json({ error: "USER_DISABLED" });
   }
 
   const valid = authService.verifyPassword(password, record.passwordEncrypted);
   if (!valid) {
+    recordFailedLogin(email);
     return res.status(401).json({ error: "INVALID_CREDENTIALS" });
   }
+  
+  // SECURITY: Clear failed login attempts on successful login
+  recordSuccessfulLogin(email);
 
   // SECURITY: Enhanced Session Fixation Prevention
   // Delete any existing session before creating new one, but validate ownership first
@@ -1954,9 +2012,12 @@ app.post("/api/auth/login", loginLimiter || ((req, res, next) => next()), (req, 
     return res.status(500).json({ error: "FAILED_TO_CREATE_SESSION" });
   }
 
+  // SECURITY: Generate CSRF token for this session
+  const csrfToken = generateCsrfToken(session.id);
+
   setSessionCookie(res, session.id, session.expiresAt);
   const user = authService.toPublicUser(record);
-  res.json({ ok: true, user });
+  res.json({ ok: true, user, csrfToken });
 });
 
 app.post("/api/auth/logout", (req, res) => {
@@ -1980,6 +2041,13 @@ app.get("/api/auth/session", (req, res) => {
   }
 
   const { sessionId, session, user } = req.auth;
+  
+  // SECURITY: Generate or retrieve CSRF token for this session
+  let csrfToken = csrfTokens.get(sessionId)?.token;
+  if (!csrfToken) {
+    csrfToken = generateCsrfToken(sessionId);
+  }
+  
   const timeLeft = new Date(session.expiresAt).getTime() - Date.now();
   if (timeLeft < SESSION_RENEW_THRESHOLD_MS) {
     const refreshed = authService.touchSession(sessionId);
@@ -1989,8 +2057,18 @@ app.get("/api/auth/session", (req, res) => {
     }
   }
 
-  res.json({ ok: true, user, session });
+  res.json({ ok: true, user, session, csrfToken });
 });
+
+// =============================================================================
+// CSRF PROTECTION (Applied AFTER Auth Endpoints)
+// =============================================================================
+// All /api/* routes below this point require CSRF tokens (except GET)
+app.use('/api/', csrfProtection);
+
+// =============================================================================
+// ADMIN & USER API ENDPOINTS
+// =============================================================================
 
 app.get("/api/admin/users", async (req, res) => {
   if (!ensureAdmin(req, res)) return;
@@ -2522,10 +2600,53 @@ function isValidPdfName(name) {
 /* ---------------- App-level middlewares (optimized) ---------------- */
 if (helmet) {
   app.use(helmet({
-    // Avoid CSP here to not break inline module script in index.html
-    contentSecurityPolicy: false,
-    crossOriginEmbedderPolicy: false,
+    // SECURITY: Stricter Content Security Policy
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: [
+          "'self'",
+          "'unsafe-inline'", // Required for inline module scripts in index.html
+          "'unsafe-eval'", // Required for PDF.js worker
+          "blob:", // Required for PDF.js blob workers
+          "https://cdn.tailwindcss.com", // Tailwind CSS CDN
+        ],
+        styleSrc: ["'self'", "'unsafe-inline'"], // inline styles in HTML
+        imgSrc: ["'self'", "data:", "blob:"], // PDF thumbnails use data URLs
+        fontSrc: ["'self'", "data:"],
+        connectSrc: ["'self'"], // SSE connections
+        objectSrc: ["'none'"],
+        mediaSrc: ["'self'"],
+        frameSrc: ["'none'"],
+        workerSrc: ["'self'", "blob:"], // PDF.js workers
+        childSrc: ["'self'", "blob:"],
+        formAction: ["'self'"],
+        frameAncestors: ["'none'"], // Prevent clickjacking
+        baseUri: ["'self'"],
+        upgradeInsecureRequests: [], // Force HTTPS in production
+      },
+    },
+    crossOriginEmbedderPolicy: false, // Required for PDF.js SharedArrayBuffer
+    crossOriginOpenerPolicy: { policy: "same-origin" },
+    crossOriginResourcePolicy: { policy: "same-origin" },
+    dnsPrefetchControl: { allow: false },
+    frameguard: { action: "deny" },
+    hidePoweredBy: true,
+    hsts: {
+      maxAge: 31536000, // 1 year
+      includeSubDomains: true,
+      preload: true,
+    },
+    ieNoOpen: true,
+    noSniff: true,
+    originAgentCluster: true,
+    permittedCrossDomainPolicies: { permittedPolicies: "none" },
+    referrerPolicy: { policy: "strict-origin-when-cross-origin" },
+    xssFilter: true,
   }));
+  console.log('[SECURITY] Helmet security headers enabled with strict CSP');
+} else {
+  console.warn('[SECURITY] Helmet not installed - security headers disabled');
 }
 
 if (compression && MEMORY_SETTINGS.enableGzipCompression) {
@@ -2546,6 +2667,52 @@ if (morgan) app.use(morgan("tiny"));
 
 // Add memory monitoring middleware
 /* ---------------- Front-end (SPA) ---------------- */
+
+// Middleware to inject BASE_PATH into HTML files
+app.use((req, res, next) => {
+  // Only handle HTML requests, not API routes
+  if (req.path.startsWith('/api/')) {
+    return next();
+  }
+  
+  const isHtmlRequest = req.path.endsWith('.html') || 
+                        req.path === '/' || 
+                        req.path === '/admin' ||
+                        req.path === '/login';
+  
+  if (!isHtmlRequest) {
+    return next();
+  }
+  
+  // Determine which HTML file to serve
+  let fileName = 'index.html';
+  if (req.path === '/admin' || req.path === '/admin.html') {
+    fileName = 'admin.html';
+  } else if (req.path === '/login' || req.path === '/login.html') {
+    fileName = 'login.html';
+  } else if (req.path.endsWith('.html')) {
+    fileName = path.basename(req.path);
+  }
+  
+  const filePath = path.join(PUBLIC_DIR, fileName);
+  
+  fs.readFile(filePath, 'utf8', (err, html) => {
+    if (err) {
+      console.warn('[HTML Injection] Failed to read:', filePath);
+      return next();
+    }
+    
+    // Inject base path as global variable before any other scripts
+    const injectedHtml = html.replace(
+      /<head>/i,
+      `<head>\n    <script>window.__BASE_PATH__ = '${BASE_PATH}';</script>`
+    );
+    
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(injectedHtml);
+  });
+});
+
 app.use(express.static(PUBLIC_DIR, { etag: true, lastModified: true, maxAge: "1d" }));
 
 /* ---------------- Serve local vendors ---------------- */
@@ -4465,6 +4632,124 @@ let dataStore = null;
 let userContext = null;
 let sseManager = null;
 let sheetWatcher = null;
+
+// =============================================================================
+// SECURITY: User-based Rate Limiting System (Global Scope)
+// =============================================================================
+const loginAttempts = new Map(); // email -> { count, firstAttempt, lockUntil }
+
+function checkRateLimit(email) {
+  const now = Date.now();
+  const record = loginAttempts.get(email);
+  
+  if (!record) return { allowed: true };
+  
+  // Check if locked
+  if (record.lockUntil && now < record.lockUntil) {
+    const remainingMinutes = Math.ceil((record.lockUntil - now) / 60000);
+    return { 
+      allowed: false, 
+      reason: `Account temporarily locked. Try again in ${remainingMinutes} minute(s).`,
+      lockUntil: record.lockUntil
+    };
+  }
+  
+  // Reset if window expired (15 minutes)
+  if (now - record.firstAttempt > 15 * 60 * 1000) {
+    loginAttempts.delete(email);
+    return { allowed: true };
+  }
+  
+  return { allowed: true };
+}
+
+function recordFailedLogin(email) {
+  const now = Date.now();
+  const record = loginAttempts.get(email) || { count: 0, firstAttempt: now };
+  
+  record.count++;
+  record.lastAttempt = now;
+  
+  // Progressive lockout
+  if (record.count >= 20) {
+    record.lockUntil = now + 24 * 60 * 60 * 1000; // 24 hours (permanent)
+    console.warn('[SECURITY] Account locked (20+ failed attempts):', { email });
+  } else if (record.count >= 10) {
+    record.lockUntil = now + 60 * 60 * 1000; // 1 hour
+    console.warn('[SECURITY] Account locked (10+ failed attempts):', { email });
+  } else if (record.count >= 5) {
+    record.lockUntil = now + 15 * 60 * 1000; // 15 minutes
+    console.warn('[SECURITY] Account locked (5+ failed attempts):', { email });
+  }
+  
+  loginAttempts.set(email, record);
+}
+
+function recordSuccessfulLogin(email) {
+  loginAttempts.delete(email);
+}
+
+// =============================================================================
+// SECURITY: CSRF Protection System (Global Scope)
+// =============================================================================
+const csrfTokens = new Map(); // sessionId -> { token, createdAt }
+
+function generateCsrfToken(sessionId) {
+  const token = randomUUID();
+  csrfTokens.set(sessionId, { token, createdAt: Date.now() });
+  return token;
+}
+
+function validateCsrfToken(sessionId, token) {
+  const record = csrfTokens.get(sessionId);
+  if (!record) return false;
+  
+  // Tokens expire after 24 hours
+  if (Date.now() - record.createdAt > 24 * 60 * 60 * 1000) {
+    csrfTokens.delete(sessionId);
+    return false;
+  }
+  
+  return record.token === token;
+}
+
+function csrfProtection(req, res, next) {
+  // Skip CSRF for GET, HEAD, OPTIONS
+  if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
+    return next();
+  }
+  
+  // Skip CSRF for login endpoint (no session yet)
+  if (req.path === '/api/auth/login') {
+    return next();
+  }
+  
+  const sessionId = parseCookies(req)[SESSION_COOKIE_NAME];
+  if (!sessionId) {
+    return res.status(403).json({ error: 'No session' });
+  }
+  
+  const csrfToken = req.headers['x-csrf-token'] || req.body?._csrf;
+  if (!csrfToken) {
+    console.warn('[SECURITY] CSRF token missing:', { 
+      method: req.method, 
+      path: req.path, 
+      sessionId 
+    });
+    return res.status(403).json({ error: 'CSRF token missing' });
+  }
+  
+  if (!validateCsrfToken(sessionId, csrfToken)) {
+    console.warn('[SECURITY] Invalid CSRF token:', { 
+      method: req.method, 
+      path: req.path, 
+      sessionId 
+    });
+    return res.status(403).json({ error: 'Invalid CSRF token' });
+  }
+  
+  next();
+}
 (async () => {
   try { 
     await ensureVendors(); 
@@ -4483,11 +4768,31 @@ let sheetWatcher = null;
     userContext = createUserContextMiddleware({ dataStore, logger: console });
     sseManager = new UserSSEManager({ logger: console });
     
+    // Start cleanup intervals for rate limiting and CSRF tokens
+    setInterval(() => {
+      const now = Date.now();
+      const CLEANUP_THRESHOLD = 24 * 60 * 60 * 1000; // 24 hours
+      
+      // Cleanup rate limiting records
+      for (const [email, record] of loginAttempts.entries()) {
+        if (now - record.lastAttempt > CLEANUP_THRESHOLD) {
+          loginAttempts.delete(email);
+        }
+      }
+      
+      // Cleanup expired CSRF tokens
+      for (const [sessionId, record] of csrfTokens.entries()) {
+        if (now - record.createdAt > CLEANUP_THRESHOLD) {
+          csrfTokens.delete(sessionId);
+        }
+      }
+    }, 60 * 60 * 1000);
+    
     // Register middleware and all API routes after userContext is initialized
     // NOTE: registerApiRoutes() adds session middleware BEFORE user context middleware
     registerApiRoutes();
     
-    console.log("User context middleware, SSE manager, and API routes initialized");
+    console.log("User context middleware, SSE manager, CSRF protection, and API routes initialized");
   } catch (err) {
     console.error("Failed to initialize authentication/data store:", err);
     process.exit(1);

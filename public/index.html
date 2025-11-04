@@ -4,6 +4,9 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>Piano Sheets</title>
+    
+    <!-- CRITICAL: Base Path Helper - MUST be loaded FIRST -->
+    <script src="/base-path.js"></script>
     <link rel="icon" href="/icon-maskable.svg" type="image/svg+xml">
     <link rel="shortcut icon" href="/icon-maskable.svg" type="image/svg+xml">
     
@@ -1787,6 +1790,9 @@
       </div>
     </div>
 
+    <!-- SECURITY: CSRF Protection -->
+    <script src="/csrf-protection.js"></script>
+
     <!-- App logic embedded as module -->
     <script type="module">
       // ===== PWA Service Worker Registration =====
@@ -1814,12 +1820,15 @@
               console.warn('❌ Service Worker registration failed:', error);
             });
           
-          // Reload wenn neuer SW aktiviert wird
+          // Reload wenn neuer SW aktiviert wird (aber nicht im Offline-Modus)
           let refreshing = false;
           navigator.serviceWorker.addEventListener('controllerchange', () => {
-            if (!refreshing) {
+            if (!refreshing && navigator.onLine) {
               refreshing = true;
+              console.log('[SW] New service worker activated, reloading...');
               window.location.reload();
+            } else if (!navigator.onLine) {
+              console.log('[SW] New service worker activated, but offline - skipping reload');
             }
           });
         });
@@ -6437,6 +6446,8 @@
 
         const actionsContainer = overlay.querySelector('.card-actions');
         if (actionsContainer) {
+          // TODO: Offline-Button reaktivieren wenn Download-Funktion fertig ist
+          /*
           const offlineBtn = document.createElement('button');
           offlineBtn.type = 'button';
           offlineBtn.className = 'icon-btn btn-offline';
@@ -6449,6 +6460,7 @@
           });
           actionsContainer.appendChild(offlineBtn);
           updateOfflineButtonAppearance(offlineBtn, item.name);
+          */
         }
 
         updateOfflineIndicatorForElement(a);
@@ -6565,6 +6577,8 @@
         
         const actions = a.querySelector('.flex.items-center.gap-2');
         if (actions) {
+          // TODO: Offline-Button reaktivieren wenn Download-Funktion fertig ist
+          /*
           const offlineBtn = document.createElement('button');
           offlineBtn.type = 'button';
           offlineBtn.className = 'icon-btn btn-offline h-9 w-9 grid place-items-center rounded-full border border-neutral-700 text-neutral-200 bg-neutral-800/70 hover:bg-neutral-700';
@@ -6577,6 +6591,7 @@
           });
           actions.appendChild(offlineBtn);
           updateOfflineButtonAppearance(offlineBtn, item.name);
+          */
         }
         updateOfflineIndicatorForElement(a);
 

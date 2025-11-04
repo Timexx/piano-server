@@ -4,6 +4,10 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Piano Sheets – Adminbereich</title>
+    
+    <!-- CRITICAL: Base Path Helper - MUST be loaded FIRST -->
+    <script src="/base-path.js"></script>
+    
     <link rel="icon" href="/icon-maskable.svg" type="image/svg+xml">
     <link rel="shortcut icon" href="/icon-maskable.svg" type="image/svg+xml">
     <script src="https://cdn.tailwindcss.com"></script>
@@ -116,6 +120,8 @@
         </div>
       </section>
     </div>
+    <!-- SECURITY: CSRF Protection -->
+    <script src="/csrf-protection.js"></script>
     <script src="/admin.js" defer></script>
   </body>
 </html>
