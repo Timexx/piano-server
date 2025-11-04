@@ -1917,16 +1917,36 @@ app.post("/api/auth/login", loginLimiter || ((req, res, next) => next()), (req, 
     return res.status(401).json({ error: "INVALID_CREDENTIALS" });
   }
 
-  // SECURITY: Session Fixation Prevention - Delete any existing session before creating new one
+  // SECURITY: Enhanced Session Fixation Prevention
+  // Delete any existing session before creating new one, but validate ownership first
   const oldSessionId = req.auth?.sessionId || parseCookies(req)[SESSION_COOKIE_NAME];
   if (oldSessionId) {
     try {
-      authService.deleteSession(oldSessionId);
-      console.log('[SECURITY] Deleted old session during login for user:', email);
+      const oldSession = authService.getSessionWithUser(oldSessionId);
+      
+      // Only delete if session belongs to the same user or is invalid
+      if (!oldSession || oldSession.user.email === email) {
+        authService.deleteSession(oldSessionId);
+        console.log('[SECURITY] Deleted old session during login');
+      } else {
+        // Session belongs to different user - potential session adoption attack!
+        console.warn('[SECURITY] Session adoption attempt blocked:', {
+          requestedEmail: email.substring(0, 3) + '***',
+          sessionUserEmail: oldSession.user.email.substring(0, 3) + '***',
+          ip: req.ip
+        });
+        // Clear the malicious cookie
+        clearSessionCookie(res);
+      }
     } catch (err) {
-      console.warn('[SECURITY] Failed to delete old session:', err?.message);
+      console.warn('[SECURITY] Failed to validate old session:', err?.message);
+      // On error, clear cookie to be safe
+      clearSessionCookie(res);
     }
   }
+  
+  // Always clear cookie before setting new one (defense in depth)
+  clearSessionCookie(res);
 
   // Create new session with fresh random ID
   const session = authService.createSession(record.id);
