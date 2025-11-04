@@ -13,16 +13,24 @@
     "migrate:data": "node scripts/migrate-data.js"
   },
   "dependencies": {
+    "canvas": "^2.11.2",
     "express": "^4.21.1",
     "express-rate-limit": "^7.1.5",
-    "pdfjs-dist": "2.16.105",
+    "file-type": "^16.5.4",
     "pdf-lib": "^1.17.1",
-    "canvas": "^2.11.2",
-    "sharp": "^0.33.5",
-    "file-type": "^16.5.4"
+    "pdfjs-dist": "2.16.105",
+    "sharp": "^0.33.5"
   },
   "engines": {
     "node": ">=16.0.0"
   },
-  "keywords": ["music", "pdf", "sheets", "piano", "mobile", "performance", "thumbnails"]
+  "keywords": [
+    "music",
+    "pdf",
+    "sheets",
+    "piano",
+    "mobile",
+    "performance",
+    "thumbnails"
+  ]
 }

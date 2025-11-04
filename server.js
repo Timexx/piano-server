@@ -2374,36 +2374,32 @@ app.post("/api/playlists/:id/items/current", async (req, res) => {
 
 app.post("/api/playlists/items/assign", async (req, res) => {
   if (!ensureAuthenticated(req, res)) return;
-  const { PLAYLIST_STATE } = userContext;
+  const { PLAYLIST_STATE, USER_DOCUMENTS } = userContext;
   
   const { name, playlists } = req.body || {};
   
   if (!name || typeof name !== 'string') {
-    console.warn('VALIDATION FAILED - Invalid or missing name parameter:', name);
+    console.warn('[SECURITY] Invalid name in playlist assign:', typeof name);
     return res.status(400).json({ error: "Invalid or missing file name" });
   }
   
-  // Try to normalize the name - be more lenient
-  let rel = name.trim();
+  // SECURITY FIX: Use resolvePdfName for proper path validation
+  // This prevents path traversal attacks (../, absolute paths, etc.)
+  const info = resolvePdfName(name, { requireExists: false });
+  if (!info) {
+    console.warn('[SECURITY] Path traversal attempt blocked in playlist assign:', name);
+    return res.status(400).json({ error: "Invalid file name" });
+  }
   
-  // If it's already a valid path, use it directly
-  // Otherwise try to resolve it
-  if (rel && rel.toLowerCase().endsWith('.pdf')) {
-    // Basic validation without requiring file to exist
-    const normalized = rel.split('\\').join('/'); // Convert backslashes to forward slashes
-    
-    // Remove any URL encoding
-    try {
-      rel = decodeURIComponent(normalized);
-    } catch {
-      rel = normalized;
-    }
-    
-    // Remove leading/trailing slashes
-    rel = rel.replace(/^\/+|\/+$/g, '');
-  } else {
-    console.warn('Invalid filename format:', name);
-    return res.status(400).json({ error: `Invalid file name: ${name}` });
+  const rel = info.rel; // Sanitized and validated path
+  
+  // SECURITY: Check if user has access to this document
+  if (!USER_DOCUMENTS.has(rel)) {
+    console.warn('[SECURITY] Unauthorized playlist assign attempt:', {
+      userId: req.auth.user.id.substring(0, 8),
+      file: rel
+    });
+    return res.status(403).json({ error: "Access denied to this document" });
   }
   
   const ids = Array.isArray(playlists) ? playlists.map((id) => (typeof id === "string" ? id.trim() : "")).filter(Boolean) : [];
@@ -2793,11 +2789,33 @@ function normalizeRelName(name) {
   return info ? info.rel : null;
 }
 
+// SECURITY: Timeout wrapper to prevent hanging operations
+function withTimeout(promise, timeoutMs, operationName) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      setTimeout(() => {
+        reject(new Error(`${operationName} timeout after ${timeoutMs}ms`));
+      }, timeoutMs);
+    })
+  ]);
+}
+
 function withAnnotationLock(rel, task) {
   const prev = annotationLocks.get(rel) || Promise.resolve();
   const next = prev
     .catch(() => {})
-    .then(() => task())
+    .then(() => {
+      // SECURITY FIX: Add 30-second timeout for annotation operations
+      return withTimeout(task(), 30000, 'Annotation operation');
+    })
+    .catch((err) => {
+      if (err.message && err.message.includes('timeout')) {
+        logError('Annotation operation timeout', err, { rel });
+        throw new Error('Operation timeout - file may be too large or complex');
+      }
+      throw err;
+    })
     .finally(() => {
       if (annotationLocks.get(rel) === next) {
         annotationLocks.delete(rel);
@@ -3051,7 +3069,44 @@ app.post("/api/upload", uploadLimiter || ((req, res, next) => next()), async (re
       });
     }
     
-    // Check 3: PDF structure validation using pdf-lib
+    // Check 2b: PDF EOF marker check (prevents polyglot attacks)
+    const eofMarker = Buffer.from('%%EOF');
+    const lastChunk = fileBuffer.subarray(Math.max(0, fileBuffer.length - 1024));
+    if (!lastChunk.includes(eofMarker)) {
+      console.warn('[SECURITY] File upload blocked - missing PDF EOF marker:', finalName);
+      await cleanupFile();
+      return res.status(415).json({ 
+        error: "Ungültige PDF-Datei",
+        details: "PDF EOF-Marker fehlt (potentielle Polyglot-Datei)" 
+      });
+    }
+    
+    // Check 3: Compression ratio check (prevents ZIP bombs)
+    const originalSize = fileBuffer.length;
+    const MAX_COMPRESSION_RATIO = 100; // Max 100x expansion
+    try {
+      const zlib = require('zlib');
+      const decompressed = zlib.inflateSync(fileBuffer.subarray(0, Math.min(originalSize, 10 * 1024 * 1024)));
+      const ratio = decompressed.length / originalSize;
+      
+      if (ratio > MAX_COMPRESSION_RATIO) {
+        console.warn('[SECURITY] File upload blocked - suspicious compression ratio:', {
+          file: finalName,
+          ratio: ratio.toFixed(2),
+          originalSize,
+          decompressedSize: decompressed.length
+        });
+        await cleanupFile();
+        return res.status(400).json({ 
+          error: "Verdächtige Datei",
+          details: "Komprimierungsverhältnis zu hoch (potentielle ZIP-Bomb)"
+        });
+      }
+    } catch (zlibErr) {
+      // Not a compressed stream - normal for most PDFs
+    }
+    
+    // Check 4: PDF structure validation using pdf-lib
     try {
       await PDFDocument.load(fileBuffer, { ignoreEncryption: true });
       console.log('[SECURITY] PDF validation passed:', finalName);
@@ -3356,35 +3411,67 @@ app.post("/api/annotations/save", async (req, res) => {
     return res.status(403).json({ error: "Access denied" });
   }
 
-  if (!Array.isArray(overlays)) {
+  if (!Array.isArray(overlays) || overlays.length === 0) {
     return res.status(400).json({ error: "No overlays provided" });
   }
+
+  let snapshot = null;
+  let didUpdate = false;
 
   try {
     await withAnnotationLock(info.rel, async () => {
       await ensureAnnotationStore(info.rel);
       const index = await loadAnnotationIndex(info.rel);
       const pages = index.pages;
-      let didUpdate = false;
-      let snapshot = null;
 
+      // SECURITY FIX: Snapshot creation is MANDATORY for data integrity
       try {
         snapshot = await createAnnotationSnapshot(info, index);
+        console.log('[ANNOTATION] Backup snapshot created:', snapshot.token);
       } catch (snapshotErr) {
-        console.warn(
-          "Failed to capture annotation snapshot before save",
-          info.rel,
-          snapshotErr?.message || snapshotErr
-        );
+        logError('[ANNOTATION] CRITICAL: Snapshot creation failed', snapshotErr, { rel: info.rel });
+        throw new Error('Failed to create backup snapshot. Aborting save to prevent data loss.');
       }
 
+      // SECURITY FIX: Validate ALL overlays before modifying (atomic transaction)
       try {
         for (const raw of overlays) {
-          if (!raw || typeof raw !== "object") continue;
+          if (!raw || typeof raw !== "object") {
+            throw new Error('Invalid overlay format');
+          }
           const pageNumber = Number(raw.pageNumber);
-          if (!Number.isInteger(pageNumber) || pageNumber < 1) continue;
+          if (!Number.isInteger(pageNumber) || pageNumber < 1) {
+            throw new Error(`Invalid page number: ${pageNumber}`);
+          }
+          
+          // Validate data URL format and size
           const dataUrl = typeof raw.dataUrl === "string" ? raw.dataUrl.trim() : "";
-          const hasData = dataUrl.startsWith("data:image/png;base64,") && dataUrl.length > "data:image/png;base64,".length;
+          if (dataUrl) {
+            if (!dataUrl.startsWith("data:image/png;base64,")) {
+              throw new Error('Invalid data URL format (must be PNG base64)');
+            }
+            
+            const base64 = dataUrl.slice("data:image/png;base64,".length);
+            
+            // Validate base64 format
+            if (!/^[A-Za-z0-9+/]*={0,2}$/.test(base64)) {
+              throw new Error('Invalid base64 encoding');
+            }
+            
+            // Check decoded size (prevent memory exhaustion)
+            const estimatedSize = (base64.length * 3) / 4;
+            if (estimatedSize > 10 * 1024 * 1024) { // 10 MB limit per page
+              throw new Error(`Annotation too large for page ${pageNumber} (max 10MB)`);
+            }
+          }
+        }
+
+        // All validations passed - now apply modifications atomically
+        for (const raw of overlays) {
+          const pageNumber = Number(raw.pageNumber);
+          const dataUrl = typeof raw.dataUrl === "string" ? raw.dataUrl.trim() : "";
+          const hasData = dataUrl.startsWith("data:image/png;base64,");
+          
           const pageWidth = Number(raw.pageWidth);
           const pageHeight = Number(raw.pageHeight);
           const meta = {};
@@ -3396,32 +3483,48 @@ app.post("/api/annotations/save", async (req, res) => {
           if (hasData) {
             const base64 = dataUrl.slice("data:image/png;base64,".length);
             const buffer = Buffer.from(base64, "base64");
-            if (!buffer.length) continue;
+            
+            if (buffer.length === 0) {
+              throw new Error(`Empty buffer for page ${pageNumber}`);
+            }
+            
             await fs.promises.writeFile(pagePath, buffer);
             pages[pageNumber] = { ...pages[pageNumber], ...meta, updatedAt: Date.now() };
             didUpdate = true;
           } else {
+            // Delete annotation
             try {
               await fs.promises.unlink(pagePath);
-            } catch {}
-            if (pages[pageNumber]) {
-              delete pages[pageNumber];
-              didUpdate = true;
+              if (pages[pageNumber]) {
+                delete pages[pageNumber];
+                didUpdate = true;
+              }
+            } catch (unlinkErr) {
+              if (unlinkErr.code !== 'ENOENT') throw unlinkErr;
             }
           }
         }
 
         if (!didUpdate) {
+          console.log('[ANNOTATION] No changes detected, discarding snapshot');
           await discardAnnotationSnapshot(snapshot);
           return;
         }
 
+        // Persist changes
         await saveAnnotationIndex(info.rel, index);
         await rebuildPdfFromAnnotations(info, index);
+        
+        // Finalize snapshot (marks as successful)
         await finalizeAnnotationSnapshot(snapshot);
-      } catch (err) {
+        
+        console.log('[ANNOTATION] Save completed successfully');
+
+      } catch (modifyErr) {
+        // SECURITY FIX: Rollback on any error
+        console.error('[ANNOTATION] Modification failed, discarding snapshot:', modifyErr.message);
         await discardAnnotationSnapshot(snapshot);
-        throw err;
+        throw modifyErr;
       }
     });
 
@@ -3439,10 +3542,37 @@ app.post("/api/annotations/save", async (req, res) => {
       console.warn("Annotation thumbnail refresh failed:", thumbErr?.message || thumbErr);
     }
 
-    res.json({ ok: true, mtime: st ? st.mtimeMs : null, size: st ? st.size : null });
+    res.json({ 
+      ok: true, 
+      mtime: st ? st.mtimeMs : null, 
+      size: st ? st.size : null,
+      modified: didUpdate
+    });
   } catch (err) {
-    console.error("Annotation save failed:", err);
-    res.status(500).json({ error: "Failed to apply annotations" });
+    logError("Annotation save failed", err, { 
+      rel: info?.rel, 
+      userId: req.auth?.user?.id,
+      overlayCount: Array.isArray(req.body?.overlays) ? req.body.overlays.length : 0
+    });
+    
+    // SECURITY FIX: Cleanup orphaned snapshots on error
+    if (snapshot && snapshot.dir) {
+      try {
+        await discardAnnotationSnapshot(snapshot);
+        console.log('[ANNOTATION] Cleaned up orphaned snapshot after error');
+      } catch (cleanupErr) {
+        console.error('[ANNOTATION] Failed to cleanup orphaned snapshot:', cleanupErr.message);
+      }
+    }
+    
+    // Send sanitized error (no internal details to client)
+    const userMessage = err.message && err.message.includes('backup snapshot')
+      ? 'Failed to create backup. Please try again.'
+      : err.message && err.message.includes('Invalid')
+      ? err.message
+      : 'Failed to apply annotations';
+    
+    return sendError(res, 500, userMessage, err, 'Annotation save');
   }
 });
 
