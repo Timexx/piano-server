@@ -8,19 +8,20 @@
   function showError(message) {
     if (!errorBox) return;
     errorBox.textContent = message;
-    errorBox.classList.remove("hidden");
+    errorBox.style.display = "block";
   }
 
   function clearError() {
     if (!errorBox) return;
     errorBox.textContent = "";
-    errorBox.classList.add("hidden");
+    errorBox.style.display = "none";
   }
 
   function setLoading(isLoading) {
     if (!submitBtn) return;
     submitBtn.disabled = isLoading;
-    submitBtn.classList.toggle("opacity-60", isLoading);
+    submitBtn.style.opacity = isLoading ? "0.6" : "1";
+    submitBtn.textContent = isLoading ? "Einen Moment..." : "Los geht's";
   }
 
   async function checkExistingSession() {

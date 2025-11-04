@@ -8,38 +8,299 @@
     <link rel="shortcut icon" href="/icon-maskable.svg" type="image/svg+xml">
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
+      :root {
+        --accent-color: #6366f1;
+        --accent-glow: rgba(99, 102, 241, 0.4);
+      }
+      
+      * {
+        box-sizing: border-box;
+      }
+
       body {
+        margin: 0;
         min-height: 100vh;
-        background: radial-gradient(circle at top, rgba(99,102,241,0.25), rgba(9,9,12,1));
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+        background: #1a1a1e;
+        position: relative;
+        overflow-x: hidden;
+      }
+
+      /* Static gradient background */
+      .bg-animated {
+        position: fixed;
+        inset: 0;
+        z-index: 0;
+        background: 
+          radial-gradient(ellipse 80% 50% at 50% -20%, rgba(99, 102, 241, 0.18), transparent 70%),
+          radial-gradient(circle at 80% 80%, rgba(139, 92, 246, 0.1), transparent 60%),
+          radial-gradient(circle at 20% 50%, rgba(59, 130, 246, 0.08), transparent 50%),
+          linear-gradient(180deg, #1a1a1e 0%, #1c1c22 100%);
+      }
+
+      /* Static orbs for depth */
+      .orb {
+        position: absolute;
+        border-radius: 50%;
+        filter: blur(80px);
+        opacity: 0.35;
+      }
+
+      .orb-1 {
+        width: 400px;
+        height: 400px;
+        background: radial-gradient(circle, rgba(99, 102, 241, 0.35), transparent 70%);
+        top: -10%;
+        left: -10%;
+      }
+
+      .orb-2 {
+        width: 300px;
+        height: 300px;
+        background: radial-gradient(circle, rgba(139, 92, 246, 0.25), transparent 70%);
+        bottom: -5%;
+        right: -5%;
+      }
+
+      /* Glass panel effect */
+      .glass-panel {
+        backdrop-filter: blur(28px);
+        background: rgba(25, 25, 32, 0.8);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 24px;
+        box-shadow: 
+          0 24px 48px -16px rgba(0, 0, 0, 0.5),
+          inset 0 1px 0 rgba(255, 255, 255, 0.06);
+        position: relative;
+      }
+
+      /* Logo container */
+      .logo-container {
+        width: 80px;
+        height: 80px;
+        margin: 0 auto;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: linear-gradient(135deg, rgba(99, 102, 241, 0.14), rgba(139, 92, 246, 0.1));
+        border: 1px solid rgba(99, 102, 241, 0.22);
+        border-radius: 20px;
+        font-size: 2.5rem;
+        box-shadow: 0 8px 32px rgba(99, 102, 241, 0.2);
+      }
+
+      /* Input styling */
+      .input-glass {
+        background: rgba(30, 30, 38, 0.7);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 14px;
+        padding: 0.875rem 1rem;
+        color: #e5e7eb;
+        font-size: 0.9375rem;
+        width: 100%;
+        transition: all 0.3s ease;
+        outline: none;
+      }
+
+      .input-glass::placeholder {
+        color: rgba(156, 163, 175, 0.5);
+      }
+
+      .input-glass:focus {
+        background: rgba(30, 30, 38, 0.85);
+        border-color: rgba(99, 102, 241, 0.5);
+        box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1), 0 4px 12px rgba(99, 102, 241, 0.15);
+      }
+
+      .input-glass:hover:not(:focus) {
+        border-color: rgba(255, 255, 255, 0.14);
+      }
+
+      /* Button styling */
+      .btn-primary {
+        background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+        border: none;
+        border-radius: 14px;
+        padding: 0.875rem 1.5rem;
+        color: white;
+        font-size: 0.9375rem;
+        font-weight: 600;
+        width: 100%;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        box-shadow: 0 8px 24px rgba(99, 102, 241, 0.35);
+        position: relative;
+        overflow: hidden;
+      }
+
+      .btn-primary::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(135deg, rgba(255, 255, 255, 0.15), transparent);
+        opacity: 0;
+        transition: opacity 0.3s ease;
+      }
+
+      .btn-primary:hover::before {
+        opacity: 1;
+      }
+
+      .btn-primary:hover {
+        box-shadow: 0 12px 32px rgba(99, 102, 241, 0.45);
+      }
+
+      .btn-primary:active {
+        transform: scale(0.98);
+      }
+
+      .btn-primary:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+        transform: none;
+      }
+
+      /* Error message */
+      .error-message {
+        background: linear-gradient(135deg, rgba(239, 68, 68, 0.14), rgba(220, 38, 38, 0.1));
+        border: 1px solid rgba(239, 68, 68, 0.32);
+        border-radius: 12px;
+        padding: 0.75rem 1rem;
+        color: #fca5a5;
+        font-size: 0.875rem;
+      }
+
+      /* Label styling */
+      label {
+        display: block;
+        font-size: 0.875rem;
+        font-weight: 500;
+        color: rgba(229, 231, 235, 0.9);
+        margin-bottom: 0.5rem;
+        letter-spacing: 0.01em;
+      }
+
+      /* Main container */
+      .login-container {
+        position: relative;
+        z-index: 1;
+        min-height: 100vh;
         display: flex;
         align-items: center;
         justify-content: center;
         padding: 1.5rem;
       }
+
+      .login-card {
+        width: 100%;
+        max-width: 420px;
+        padding: 2.5rem;
+      }
+
+      @media (max-width: 640px) {
+        .login-card {
+          padding: 2rem 1.5rem;
+        }
+        .logo-container {
+          width: 70px;
+          height: 70px;
+          font-size: 2rem;
+        }
+      }
+
+      /* Welcome text */
+      .welcome-text {
+        text-align: center;
+        margin-top: 1.5rem;
+        margin-bottom: 2rem;
+      }
+
+      .welcome-text h1 {
+        font-size: 1.75rem;
+        font-weight: 700;
+        color: #ffffff;
+        margin: 0 0 0.5rem 0;
+        letter-spacing: -0.02em;
+      }
+
+      .welcome-text p {
+        font-size: 0.9375rem;
+        color: rgba(229, 231, 235, 0.7);
+        margin: 0;
+      }
+
+      /* Form spacing */
+      .form-group {
+        margin-bottom: 1.25rem;
+      }
+
+      .submit-group {
+        margin-top: 2rem;
+      }
     </style>
   </head>
   <body>
-    <main class="w-full max-w-md">
-      <div class="bg-neutral-900/80 backdrop-blur-xl border border-white/10 rounded-3xl shadow-2xl shadow-black/30 p-8">
-        <div class="text-center mb-8">
-          <div class="text-4xl mb-3">🎼</div>
-          <h1 class="text-2xl font-semibold text-white">Login</h1>
-          <p class="text-sm text-neutral-300 mt-1">Melde dich mit deinem Konto an.</p>
+    <!-- Animated background -->
+    <div class="bg-animated"></div>
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+
+    <!-- Login container -->
+    <div class="login-container">
+      <main class="login-card glass-panel">
+        <!-- Logo -->
+        <div class="logo-container">
+          🎼
         </div>
-        <form id="loginForm" class="space-y-6">
-          <div>
-            <label for="email" class="block text-sm font-medium text-neutral-200 mb-1">E-Mail</label>
-            <input id="email" name="email" type="email" required autocomplete="username" class="w-full rounded-xl border border-white/10 bg-neutral-900/70 px-4 py-3 text-neutral-100 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent" placeholder="admin@example.com" />
+
+        <!-- Welcome text -->
+        <div class="welcome-text">
+          <h1>Bereit zum Spielen?</h1>
+          <p>Melde dich an und spiel deine Noten</p>
+        </div>
+
+        <!-- Login form -->
+        <form id="loginForm">
+          <div class="form-group">
+            <label for="email">E-Mail</label>
+            <input 
+              id="email" 
+              name="email" 
+              type="email" 
+              required 
+              autocomplete="username" 
+              class="input-glass" 
+              placeholder="musiker@example.com"
+              spellcheck="false"
+            />
           </div>
-          <div>
-            <label for="password" class="block text-sm font-medium text-neutral-200 mb-1">Passwort</label>
-            <input id="password" name="password" type="password" required autocomplete="current-password" class="w-full rounded-xl border border-white/10 bg-neutral-900/70 px-4 py-3 text-neutral-100 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent" placeholder="••••••••" />
+
+          <div class="form-group">
+            <label for="password">Passwort</label>
+            <input 
+              id="password" 
+              name="password" 
+              type="password" 
+              required 
+              autocomplete="current-password" 
+              class="input-glass" 
+              placeholder="••••••••"
+            />
           </div>
-          <div id="loginError" class="hidden text-sm text-red-400 bg-red-500/10 border border-red-500/30 rounded-xl px-4 py-2"></div>
-          <button type="submit" class="w-full rounded-xl bg-indigo-500 hover:bg-indigo-400 active:bg-indigo-600 transition py-3 text-white font-medium shadow-lg shadow-indigo-500/40 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-300 focus:ring-offset-neutral-900">Anmelden</button>
+
+          <!-- Error message -->
+          <div id="loginError" class="error-message" style="display: none;"></div>
+
+          <!-- Submit button -->
+          <div class="submit-group">
+            <button type="submit" class="btn-primary">
+              Los geht's
+            </button>
+          </div>
         </form>
-      </div>
-    </main>
+      </main>
+    </div>
+
     <script src="/login.js" defer></script>
   </body>
 </html>
