@@ -203,9 +203,18 @@
         color: #e5e7eb;
         transition: background 0.2s ease, border-color 0.2s ease, transform 0.1s ease;
       }
+      .music-card .icon-btn svg {
+        display: block;
+        margin: 0 auto;
+      }
       .music-card .icon-btn:hover { background: rgba(255,255,255,0.16); border-color: rgba(255,255,255,0.26); }
       .music-card .icon-btn:active { transform: translateY(1px); }
       .music-card .card-actions { margin-top: 0.5rem; display: flex; align-items: center; justify-content: center; gap: 0.5rem; }
+      /* Ensure all SVGs in buttons with grid place-items-center are perfectly centered */
+      button.grid.place-items-center svg {
+        display: block;
+        margin: 0 auto;
+      }
   /* Ensure favorite star on cards turns yellow when active */
   .music-card .icon-btn.fav.text-yellow-400 { color: #facc15; }
   .music-card .icon-btn.fav.text-neutral-300 { color: #d1d5db; }
@@ -6440,6 +6449,9 @@
             <button class="assign-cat h-9 w-9 grid place-items-center rounded-full border border-neutral-700 text-neutral-200 bg-neutral-800/70 hover:bg-neutral-700" title="Kategorien hinzufügen" style="padding:0;" aria-label="Kategorien hinzufügen">
               ${SVG_CATEGORY_ADD}
             </button>
+            <button class="delete-pdf h-9 w-9 grid place-items-center rounded-full border border-red-700 text-red-400 bg-neutral-800/70 hover:bg-red-900/50 hover:text-red-300 transition-transform" data-name="${item.name}" title="PDF löschen" style="display:none;padding:0;" aria-label="PDF löschen">
+              ${SVG_TRASH_MINI}
+            </button>
           </div>
         `;
         const favBtnRow = a.querySelector('.fav');
@@ -6476,6 +6488,14 @@
           ev.preventDefault();
           ev.stopPropagation();
           openPlaylistAssignmentDialog(item.name);
+        });
+        
+        // Delete button handler
+        const deleteBtn = a.querySelector('.delete-pdf');
+        if (deleteBtn) deleteBtn.addEventListener('click', async (ev) => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          await confirmAndDeletePdf(item);
         });
         
         // Click-Handler für direktes Laden (ohne Page-Reload) + Wake Lock Aktivierung
