@@ -842,43 +842,61 @@ function toPosixPath(input) {
 function resolvePdfName(name, options = {}) {
   const { requireExists = true } = options;
   if (typeof name !== "string") {
-    console.log('resolvePdfName: name is not a string:', typeof name);
     return null;
   }
 
   let candidate = name.trim();
   if (!candidate) {
-    console.log('resolvePdfName: name is empty after trim');
     return null;
   }
   
+  // SECURITY: Decode URL-encoding (verhindert double-encoding bypass)
   const original = candidate;
-  try { candidate = decodeURIComponent(candidate); } catch (err) {
-    console.log('resolvePdfName: decodeURIComponent failed for:', original, err.message);
+  try { 
+    candidate = decodeURIComponent(candidate); 
+  } catch (err) {
+    console.warn('[SECURITY] Invalid URL encoding detected:', original);
+    return null;
   }
 
+  // SECURITY: Normalisiere Path
   const normalized = path.posix.normalize(toPosixPath(candidate));
   
-  console.log('resolvePdfName debug:', {
-    input: name,
-    trimmed: original,
-    decoded: candidate,
-    normalized,
-    requireExists
-  });
-  
-  if (!normalized || normalized === "." || normalized.startsWith("../") || path.isAbsolute(normalized)) {
-    console.log('resolvePdfName: invalid path structure');
+  // SECURITY: Block Windows drive letters (C:, D:, etc.)
+  if (/^[a-zA-Z]:/.test(normalized)) {
+    console.warn('[SECURITY] Windows absolute path blocked:', name);
     return null;
   }
+  
+  // SECURITY: Strikte Validierung gegen Path Traversal
+  if (!normalized || 
+      normalized === "." || 
+      normalized.startsWith("../") || 
+      normalized.includes("/../") ||  // CRITICAL: Block traversal in middle of path
+      normalized.includes("\\") ||    // Block Windows backslashes
+      path.isAbsolute(normalized)) {
+    console.warn('[SECURITY] Path traversal attempt blocked:', name);
+    return null;
+  }
+  
+  // SECURITY: Prüfe auf Null-Bytes (directory traversal bypass technique)
+  if (candidate.includes('\0') || normalized.includes('\0')) {
+    console.warn('[SECURITY] Null-byte injection attempt blocked:', name);
+    return null;
+  }
+  
+  // SECURITY: Nur PDF-Dateien erlauben
   if (!normalized.toLowerCase().endsWith(".pdf")) {
-    console.log('resolvePdfName: does not end with .pdf');
     return null;
   }
 
+  // SECURITY: Validiere absoluten Pfad
   const abs = path.resolve(path.join(SHEETS_DIR, normalized));
-  if (path.relative(SHEETS_DIR, abs).startsWith("..")) {
-    console.log('resolvePdfName: path escapes SHEETS_DIR');
+  
+  // SECURITY: CRITICAL - Stelle sicher dass Pfad innerhalb SHEETS_DIR bleibt
+  const relativePath = path.relative(SHEETS_DIR, abs);
+  if (relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
+    console.warn('[SECURITY] Path escape attempt blocked:', name, '-> abs:', abs);
     return null;
   }
 
@@ -886,16 +904,13 @@ function resolvePdfName(name, options = {}) {
     try {
       const st = fs.statSync(abs);
       if (!st.isFile()) {
-        console.log('resolvePdfName: exists but is not a file');
         return null;
       }
     } catch {
-      console.log('resolvePdfName: file does not exist:', abs);
       return null;
     }
   }
 
-  console.log('resolvePdfName: success ->', { rel: normalized, abs });
   return { rel: normalized, abs };
 }
 
@@ -1762,6 +1777,18 @@ app.post("/api/auth/login", (req, res) => {
     return res.status(401).json({ error: "INVALID_CREDENTIALS" });
   }
 
+  // SECURITY: Session Fixation Prevention - Delete any existing session before creating new one
+  const oldSessionId = req.auth?.sessionId || parseCookies(req)[SESSION_COOKIE_NAME];
+  if (oldSessionId) {
+    try {
+      authService.deleteSession(oldSessionId);
+      console.log('[SECURITY] Deleted old session during login for user:', email);
+    } catch (err) {
+      console.warn('[SECURITY] Failed to delete old session:', err?.message);
+    }
+  }
+
+  // Create new session with fresh random ID
   const session = authService.createSession(record.id);
   if (!session) {
     return res.status(500).json({ error: "FAILED_TO_CREATE_SESSION" });
@@ -2574,10 +2601,8 @@ app.use(
 
 /* ---------------- Memory & System API ---------------- */
 app.get("/api/system/memory", (req, res) => {
-  if (!ensureAuthenticated(req, res)) return;
-  if (!req.auth || !req.auth.user || req.auth.user.role !== 'admin') {
-    return res.status(403).json({ error: "Admin access required" });
-  }
+  // SECURITY: Use centralized admin check for consistency
+  if (!ensureAdmin(req, res)) return;
   
   try {
     const mem = process.memoryUsage();
@@ -2599,10 +2624,8 @@ app.get("/api/system/memory", (req, res) => {
 });
 
 app.post("/api/system/gc", (req, res) => {
-  if (!ensureAuthenticated(req, res)) return;
-  if (!req.auth || !req.auth.user || req.auth.user.role !== 'admin') {
-    return res.status(403).json({ error: "Admin access required" });
-  }
+  // SECURITY: Use centralized admin check for consistency
+  if (!ensureAdmin(req, res)) return;
   
   try {
     if (global.gc) {
@@ -2617,10 +2640,8 @@ app.post("/api/system/gc", (req, res) => {
 });
 
 app.post("/api/system/cache/clear", (req, res) => {
-  if (!ensureAuthenticated(req, res)) return;
-  if (!req.auth || !req.auth.user || req.auth.user.role !== 'admin') {
-    return res.status(403).json({ error: "Admin access required" });
-  }
+  // SECURITY: Use centralized admin check for consistency
+  if (!ensureAdmin(req, res)) return;
   
   try {
     indexCache = { at: 0, items: [], scanInProgress: false };
@@ -2801,8 +2822,22 @@ app.post("/api/upload", async (req, res) => {
   const rawName = (meta.originalName && typeof meta.originalName === "string")
     ? meta.originalName.trim()
     : (typeof req.headers["x-upload-name"] === "string" ? req.headers["x-upload-name"].trim() : "upload.pdf");
+  
+  // SECURITY: Validate filename against path traversal
+  if (rawName.includes('..') || rawName.includes('/') || rawName.includes('\\') || rawName.includes('\0')) {
+    console.warn('[SECURITY] Path traversal in upload filename blocked:', rawName);
+    return res.status(400).json({ error: "Ungültiger Dateiname" });
+  }
+  
   const baseName = path.basename(rawName || "upload", path.extname(rawName || "") || ".pdf");
   const finalName = generateUniquePdfFilename(baseName || "sheet");
+  
+  // SECURITY: Additional check - finalName must be a simple filename without path separators
+  if (finalName.includes('/') || finalName.includes('\\') || finalName.includes('..')) {
+    console.error('[SECURITY] Generated filename contains path separators:', finalName);
+    return res.status(500).json({ error: "Interner Fehler bei Dateinamen-Generierung" });
+  }
+  
   const finalPath = path.join(SHEETS_DIR, finalName);
   const rel = toPosixPath(finalName);
   const tempName = `.${Date.now()}-${Math.round(Math.random() * 1e6)}-${finalName}`;
