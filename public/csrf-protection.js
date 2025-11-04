@@ -45,7 +45,57 @@
     }
     
     // Call original fetch
-    const response = await originalFetch(url, options);
+    let response = await originalFetch(url, options);
+    
+    console.log('[CSRF] 📡 Response received:', method, url, response.status);
+    
+    // If CSRF failed (403), refresh token and retry once
+    if (response.status === 403 && needsCsrf && url.startsWith('/api/') && url !== '/api/auth/login') {
+      console.log('[CSRF] 🔍 Got 403, checking if CSRF error...', {needsCsrf, startsWithApi: url.startsWith('/api/'), notLogin: url !== '/api/auth/login'});
+      try {
+        const clonedResponse = response.clone();
+        const contentType = response.headers.get('content-type');
+        
+        if (contentType && contentType.includes('application/json')) {
+          const errorData = await clonedResponse.json();
+          console.log('[CSRF] 🔍 Error data:', errorData);
+          
+          if (errorData.error && (errorData.error.includes('CSRF') || errorData.error.includes('Invalid') || errorData.error.includes('token'))) {
+            console.warn('[CSRF] ⚠️ CSRF token rejected by server, refreshing and retrying...', url);
+            
+            // Force refresh token
+            sessionStorage.removeItem('csrfToken');
+            tokenPromise = null; // Reset promise
+            await retrieveCsrfToken();
+            
+            // Retry request with new token
+            const newToken = sessionStorage.getItem('csrfToken');
+            if (newToken) {
+              // Recreate options with new token
+              const retryOptions = { ...options };
+              retryOptions.headers = retryOptions.headers instanceof Headers 
+                ? new Headers(retryOptions.headers)
+                : { ...retryOptions.headers };
+              
+              if (retryOptions.headers instanceof Headers) {
+                retryOptions.headers.set('X-CSRF-Token', newToken);
+              } else {
+                retryOptions.headers['X-CSRF-Token'] = newToken;
+              }
+              
+              console.log('[CSRF] 🔄 Retrying with new token:', method, url, newToken.substring(0, 8) + '...');
+              response = await originalFetch(url, retryOptions);
+              console.log('[CSRF] ✅ Retry result:', response.status, response.statusText);
+            } else {
+              console.error('[CSRF] ❌ Failed to get new token for retry');
+            }
+          }
+        }
+      } catch (e) {
+        console.error('[CSRF] ❌ Error during retry logic:', e);
+        // If we can't parse the error, just return original response
+      }
+    }
     
     // Check if server sent a fresh CSRF token in response header
     if (response.headers) {
@@ -98,12 +148,20 @@
 
   // Auto-retrieve token on page load
   // Always retrieve fresh token on page load to ensure validity
+  console.log('[CSRF] 🚀 Initializing CSRF protection, readyState:', document.readyState);
+  
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', retrieveCsrfToken);
+    document.addEventListener('DOMContentLoaded', () => {
+      console.log('[CSRF] 🚀 DOMContentLoaded, retrieving token...');
+      retrieveCsrfToken();
+    });
   } else {
+    console.log('[CSRF] 🚀 Document ready, retrieving token immediately...');
     retrieveCsrfToken();
   }
   
   // Also expose function globally for manual refresh if needed
   window.refreshCsrfToken = retrieveCsrfToken;
+  
+  console.log('[CSRF] ✅ Protection initialized, window.fetch overridden');
 })();

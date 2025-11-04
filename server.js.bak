@@ -2230,7 +2230,6 @@ app.get("/api/playlists/events", (req, res) => {
   }
   
   const userId = req.auth.user.id;
-  console.log('[SSE] New client connecting:', userId, 'IP:', req.ip);
   
   // SSE headers - critical for proxy compatibility
   res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
@@ -2238,37 +2237,16 @@ app.get("/api/playlists/events", (req, res) => {
   res.setHeader("Connection", "keep-alive");
   res.setHeader("X-Accel-Buffering", "no"); // Disable nginx buffering
   res.flushHeaders();
-  console.log('[SSE] Headers sent, flushed');
-  
-  // Send an immediate comment to establish connection
-  res.write(': SSE connection established\n\n');
-  if (typeof res.flush === 'function') {
-    res.flush();
-  }
-  console.log('[SSE] Connection establishment comment sent');
 
   // Send initial data
   try {
-    const initialData = serializePlaylistState(PLAYLIST_STATE);
-    const message = `data: ${JSON.stringify(initialData)}\n\n`;
-    res.write(message);
-    
-    // Force flush to ensure data reaches client immediately
-    if (typeof res.flush === 'function') {
-      res.flush();
-    }
-    if (typeof res.flushHeaders === 'function') {
-      res.flushHeaders();
-    }
-    
-    console.log('[SSE] Initial data sent to', userId, 'Message length:', message.length);
+    res.write(`data: ${JSON.stringify(serializePlaylistState(PLAYLIST_STATE))}\n\n`);
   } catch (err) {
     logError("Failed to send initial playlist state", err);
   }
 
   // Register with SSE manager
   sseManager.subscribe(userId, "playlist-state", res);
-  console.log('[SSE] Client registered:', userId, 'Total subscribers:', sseManager.getSubscriberCount(userId));
 
   // Keep-alive - shorter interval for proxy compatibility (15s < typical 60s timeout)
   const keepAlive = setInterval(() => {
@@ -2342,7 +2320,7 @@ app.post("/api/playlists", async (req, res) => {
   PLAYLIST_STATE.activeId = playlist.id;
   updatePlaylistTimestamp(playlist);
   await savePlaylistsImmediate().catch(() => {});
-  broadcastPlaylists(req.auth?.user?.id);
+  broadcastPlaylists();
   res.status(201).json({ ok: true, playlist: clonePlaylist(playlist), state: serializePlaylistState(PLAYLIST_STATE) });
 });
 
@@ -2356,7 +2334,7 @@ app.post("/api/playlists/:id/activate", async (req, res) => {
   PLAYLIST_STATE.activeId = playlist.id;
   PLAYLIST_STATE.updatedAt = Date.now();
   await savePlaylistsImmediate().catch(() => {});
-  broadcastPlaylists(req.auth?.user?.id);
+  broadcastPlaylists();
   res.json({ ok: true, state: serializePlaylistState(PLAYLIST_STATE) });
 });
 
@@ -2375,7 +2353,7 @@ app.patch("/api/playlists/:id", async (req, res) => {
   }
   updatePlaylistTimestamp(playlist);
   await savePlaylistsImmediate().catch(() => {});
-  broadcastPlaylists(req.auth?.user?.id);
+  broadcastPlaylists();
   res.json({ ok: true, playlist: clonePlaylist(playlist) });
 });
 
@@ -2389,7 +2367,7 @@ app.delete("/api/playlists/:id", async (req, res) => {
   }
   ensureActivePlaylistPresent();
   await savePlaylistsImmediate().catch(() => {});
-  broadcastPlaylists(req.auth?.user?.id);
+  broadcastPlaylists();
   res.json({ ok: true, state: serializePlaylistState(PLAYLIST_STATE) });
 });
 
@@ -2405,7 +2383,7 @@ app.post("/api/playlists/:id/items/add", async (req, res) => {
   const changed = addItemToPlaylist(playlist, rel);
   if (changed) {
     await savePlaylistsImmediate().catch(() => {});
-    broadcastPlaylists(req.auth?.user?.id);
+    broadcastPlaylists();
   }
   res.json({ ok: true, playlist: clonePlaylist(playlist) });
 });
@@ -2422,7 +2400,7 @@ app.post("/api/playlists/:id/items/remove", async (req, res) => {
   const changed = removeItemFromPlaylist(playlist, rel);
   if (changed) {
     await savePlaylistsImmediate().catch(() => {});
-    broadcastPlaylists(req.auth?.user?.id);
+    broadcastPlaylists();
   }
   res.json({ ok: true, playlist: clonePlaylist(playlist) });
 });
@@ -2436,7 +2414,7 @@ app.post("/api/playlists/:id/items/clear", async (req, res) => {
   const changed = clearPlaylistItems(playlist);
   if (changed) {
     await savePlaylistsImmediate().catch(() => {});
-    broadcastPlaylists(req.auth?.user?.id);
+    broadcastPlaylists();
   }
   res.json({ ok: true, playlist: clonePlaylist(playlist) });
 });
@@ -2467,7 +2445,7 @@ app.post("/api/playlists/:id/items/set", async (req, res) => {
   const normalized = items.map((name) => normalizeRelName(name)).filter(Boolean);
   setPlaylistItems(playlist, normalized, currentIndex);
   await savePlaylistsImmediate().catch(() => {});
-  broadcastPlaylists(req.auth?.user?.id);
+  broadcastPlaylists();
   res.json({ ok: true, playlist: clonePlaylist(playlist) });
 });
 
@@ -2481,7 +2459,7 @@ app.post("/api/playlists/:id/items/current", async (req, res) => {
   if (!Number.isInteger(index)) return res.status(400).json({ error: "index must be integer" });
   setPlaylistCurrentIndex(playlist, index);
   await savePlaylistsImmediate().catch(() => {});
-  broadcastPlaylists(req.auth?.user?.id);
+  broadcastPlaylists();
   res.json({ ok: true, playlist: clonePlaylist(playlist) });
 });
 
@@ -2546,7 +2524,7 @@ app.post("/api/playlists/items/assign", async (req, res) => {
     await savePlaylistsImmediate().catch((err) => {
       logError('Failed to save playlists', err);
     });
-    broadcastPlaylists(req.auth?.user?.id);
+    broadcastPlaylists();
   }
 
   res.json({ ok: true, state: serializePlaylistState(PLAYLIST_STATE) });
@@ -2563,7 +2541,7 @@ app.post("/api/playlist/add", async (req, res) => {
   const changed = addItemToPlaylist(active, rel);
   if (changed) {
     await savePlaylistsImmediate().catch(() => {});
-    broadcastPlaylists(req.auth?.user?.id);
+    broadcastPlaylists();
   }
   res.json({ ok: true, playlist: serializeActivePlaylist() });
 });
@@ -2577,7 +2555,7 @@ app.post("/api/playlist/remove", async (req, res) => {
   const changed = removeItemFromPlaylist(active, rel);
   if (changed) {
     await savePlaylistsImmediate().catch(() => {});
-    broadcastPlaylists(req.auth?.user?.id);
+    broadcastPlaylists();
   }
   res.json({ ok: true, playlist: serializeActivePlaylist() });
 });
@@ -2588,7 +2566,7 @@ app.post("/api/playlist/clear", async (req, res) => {
   const changed = clearPlaylistItems(active);
   if (changed) {
     await savePlaylistsImmediate().catch(() => {});
-    broadcastPlaylists(req.auth?.user?.id);
+    broadcastPlaylists();
   }
   res.json({ ok: true, playlist: serializeActivePlaylist() });
 });
@@ -2601,7 +2579,7 @@ app.post("/api/playlist/reorder", async (req, res) => {
   const normalized = order.map((name) => normalizeRelName(name)).filter(Boolean);
   reorderPlaylistItems(active, normalized);
   await savePlaylistsImmediate().catch(() => {});
-  broadcastPlaylists(req.auth?.user?.id);
+  broadcastPlaylists();
   res.json({ ok: true, playlist: serializeActivePlaylist() });
 });
 app.post("/api/playlist", async (req, res) => {
@@ -2614,7 +2592,7 @@ app.post("/api/playlist", async (req, res) => {
   const normalized = items.map((item) => normalizeRelName(item)).filter(Boolean);
   setPlaylistItems(active, normalized, currentIndex);
   await savePlaylistsImmediate().catch(() => {});
-  broadcastPlaylists(req.auth?.user?.id);
+  broadcastPlaylists();
   res.json({ ok: true, playlist: serializeActivePlaylist() });
 });
 app.post("/api/playlist/current", async (req, res) => {
@@ -2624,7 +2602,7 @@ app.post("/api/playlist/current", async (req, res) => {
   if (!Number.isInteger(index)) return res.status(400).json({ error: "index must be integer" });
   setPlaylistCurrentIndex(active, index);
   await savePlaylistsImmediate().catch(() => {});
-  broadcastPlaylists(req.auth?.user?.id);
+  broadcastPlaylists();
   res.json({ ok: true, playlist: serializeActivePlaylist() });
 });
 
@@ -4236,7 +4214,7 @@ app.delete("/api/sheets/:name", async (req, res) => {
         await savePlaylistsImmediate().catch((err) => {
           logError("Failed to save playlists after delete", err);
         });
-        broadcastPlaylists(req.auth?.user?.id);
+        broadcastPlaylists();
       }
     }
     
