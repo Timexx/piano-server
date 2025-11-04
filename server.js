@@ -1538,28 +1538,7 @@ function ensureActivePlaylistPresent() {
   return PLAYLIST_STATE.playlists[0];
 }
 
-async function savePlaylistsImmediate() {
-  if (_playlistSaveInProgress) {
-    try { await _playlistSaveInProgress; } catch {}
-  }
-  const { PLAYLIST_STATE } = userContext;
-  const snapshot = serializePlaylistState(PLAYLIST_STATE);
-  const task = (async () => {
-    try {
-      await fs.promises.mkdir(path.dirname(PLAYLISTS_FILE), { recursive: true });
-      const tmp = `${PLAYLISTS_FILE}.tmp`;
-      await fs.promises.writeFile(tmp, JSON.stringify(snapshot, null, 2), "utf8");
-      await fs.promises.rename(tmp, PLAYLISTS_FILE);
-    } catch (err) {
-      console.error("savePlaylistsImmediate failed:", err);
-      throw err;
-    } finally {
-      _playlistSaveInProgress = null;
-    }
-  })();
-  _playlistSaveInProgress = task;
-  return task;
-}
+// REMOVED: Old savePlaylistsImmediate() function - now inside registerApiRoutes() using dataStore
 
 // REMOVED: Old SSE client sets - now handled by sseManager
 // const playlistActiveClients = new Set();
@@ -1634,6 +1613,17 @@ function clearPlaylistItems(playlist) {
   playlist.currentIndex = -1;
   updatePlaylistTimestamp(playlist);
   return true;
+}
+
+function ensureUniqueOrder(items) {
+  const seen = new Set();
+  const out = [];
+  for (const rel of items) {
+    if (!rel || seen.has(rel)) continue;
+    seen.add(rel);
+    out.push(rel);
+  }
+  return out;
 }
 
 function reorderPlaylistItems(playlist, rels) {
@@ -2643,16 +2633,6 @@ app.post("/api/system/cache/clear", (req, res) => {
 function normalizeRelName(name) {
   const info = resolvePdfName(name, { requireExists: false });
   return info ? info.rel : null;
-}
-function ensureUniqueOrder(items) {
-  const seen = new Set();
-  const out = [];
-  for (const rel of items) {
-    if (!rel || seen.has(rel)) continue;
-    seen.add(rel);
-    out.push(rel);
-  }
-  return out;
 }
 
 function withAnnotationLock(rel, task) {
