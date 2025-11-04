@@ -1815,10 +1815,38 @@ app.get("/api/auth/session", (req, res) => {
   res.json({ ok: true, user, session });
 });
 
-app.get("/api/admin/users", (req, res) => {
+app.get("/api/admin/users", async (req, res) => {
   if (!ensureAdmin(req, res)) return;
   const users = authService.listUsers();
-  res.json({ ok: true, users });
+  
+  // Calculate real statistics for each user from their documents
+  const usersWithStats = await Promise.all(users.map(async (user) => {
+    try {
+      const userDocs = dataStore.listUserDocumentRelPaths(user.id);
+      const pdfCount = userDocs.length;
+      
+      // Calculate storage by scanning all assigned PDFs
+      let storageBytes = 0;
+      const all = await getIndex();
+      const userDocSet = new Set(userDocs);
+      const userPdfs = all.filter(item => userDocSet.has(item.name));
+      
+      for (const pdf of userPdfs) {
+        storageBytes += pdf.size || 0;
+      }
+      
+      return {
+        ...user,
+        pdfCount,
+        storageBytes,
+      };
+    } catch (err) {
+      console.error(`Failed to calculate stats for user ${user.id}:`, err);
+      return user;
+    }
+  }));
+  
+  res.json({ ok: true, users: usersWithStats });
 });
 
 app.post("/api/admin/users", (req, res) => {

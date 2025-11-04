@@ -74,11 +74,8 @@
         return;
       }
 
-      if (data.user.role === "admin") {
-        window.location.href = "/admin.html";
-      } else {
-        window.location.href = "/";
-      }
+      // Redirect all users (including admins) to the main page
+      window.location.href = "/";
     } catch (err) {
       console.error("Login request failed:", err);
       showError("Netzwerkfehler. Bitte erneut versuchen.");

@@ -143,9 +143,6 @@
             <button data-action="reset-password" class="px-3 py-2 text-xs rounded-lg border border-amber-400/40 bg-amber-500/20 text-amber-100 hover:bg-amber-500/30 transition">
               Passwort
             </button>
-            <button data-action="edit-usage" class="px-3 py-2 text-xs rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 transition">
-              Statistik
-            </button>
             <button data-action="delete" class="px-3 py-2 text-xs rounded-lg border border-red-400/40 bg-red-500/15 text-red-100 hover:bg-red-500/25 transition">
               Löschen
             </button>
@@ -156,7 +153,6 @@
       row.querySelector("[data-action='toggle-active']")?.addEventListener("click", () => toggleUserActive(user));
       row.querySelector("[data-action='toggle-role']")?.addEventListener("click", () => toggleUserRole(user));
       row.querySelector("[data-action='reset-password']")?.addEventListener("click", () => resetPassword(user));
-      row.querySelector("[data-action='edit-usage']")?.addEventListener("click", () => editUsage(user));
       row.querySelector("[data-action='delete']")?.addEventListener("click", () => deleteUser(user));
 
       frag.appendChild(row);
