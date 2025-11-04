@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Piano Sheets – Adminbereich</title>
+    <link rel="icon" href="/icon-maskable.svg" type="image/svg+xml">
+    <link rel="shortcut icon" href="/icon-maskable.svg" type="image/svg+xml">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      body {
+        min-height: 100vh;
+        background: linear-gradient(145deg, rgba(15,15,25,1) 0%, rgba(10,10,18,1) 60%, rgba(4,4,10,1) 100%);
+      }
+      table tbody tr:hover {
+        background: rgba(99, 102, 241, 0.08);
+      }
+    </style>
+  </head>
+  <body class="text-neutral-100">
+    <div class="max-w-6xl mx-auto px-4 py-10 space-y-8">
+      <header class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 class="text-3xl font-semibold tracking-tight">Adminbereich</h1>
+          <p class="text-sm text-neutral-300">Verwalte Benutzerkonten, Speicherauslastung und Zugriff.</p>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+          <a href="/" class="px-4 py-2 rounded-xl border border-white/15 bg-white/5 text-sm hover:bg-white/10 transition">Zur App</a>
+          <button id="refreshUsers" type="button" class="px-4 py-2 rounded-xl border border-indigo-400/40 bg-indigo-500/20 text-sm text-indigo-100 hover:bg-indigo-500/30 transition">Aktualisieren</button>
+          <button id="logoutButton" type="button" class="px-4 py-2 rounded-xl border border-red-400/40 bg-red-500/20 text-sm text-red-100 hover:bg-red-500/30 transition">Abmelden</button>
+        </div>
+      </header>
+
+      <section class="grid gap-4 sm:grid-cols-3">
+        <article class="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg">
+          <h2 class="text-sm uppercase tracking-wide text-neutral-300">Angemeldet als</h2>
+          <p id="currentUserEmail" class="mt-2 text-lg font-medium">–</p>
+          <p id="currentUserRole" class="text-sm text-neutral-400">–</p>
+        </article>
+        <article class="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg">
+          <h2 class="text-sm uppercase tracking-wide text-neutral-300">Benutzer</h2>
+          <p id="userCount" class="mt-2 text-2xl font-semibold">0</p>
+          <p class="text-sm text-neutral-400">Konten insgesamt</p>
+        </article>
+        <article class="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg">
+          <h2 class="text-sm uppercase tracking-wide text-neutral-300">Datenvolumen</h2>
+          <p id="storageTotal" class="mt-2 text-2xl font-semibold">0 MB</p>
+          <p class="text-sm text-neutral-400">Summe aus PDF-Dateien</p>
+        </article>
+      </section>
+
+      <div id="statusMessage" class="hidden rounded-xl border px-4 py-3 text-sm"></div>
+
+      <section class="rounded-3xl border border-white/10 bg-white/5 p-6 shadow-xl space-y-6">
+        <header>
+          <h2 class="text-xl font-semibold tracking-tight">Neuen Benutzer anlegen</h2>
+          <p class="text-sm text-neutral-300">Lege neue Konten an. Passwörter werden verschlüsselt gespeichert.</p>
+        </header>
+        <form id="createUserForm" class="grid gap-4 sm:grid-cols-2">
+          <label class="flex flex-col gap-1 text-sm">
+            <span class="text-neutral-200">E-Mail</span>
+            <input name="email" type="email" required class="rounded-xl border border-white/10 bg-neutral-900/60 px-4 py-3 text-neutral-100 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent" placeholder="nutzer@example.com" />
+          </label>
+          <label class="flex flex-col gap-1 text-sm">
+            <span class="text-neutral-200">Passwort</span>
+            <input name="password" type="password" required minlength="6" class="rounded-xl border border-white/10 bg-neutral-900/60 px-4 py-3 text-neutral-100 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent" placeholder="Mindestens 6 Zeichen" />
+          </label>
+          <label class="flex flex-col gap-1 text-sm">
+            <span class="text-neutral-200">Rolle</span>
+            <select name="role" class="rounded-xl border border-white/10 bg-neutral-900/60 px-4 py-3 text-neutral-100 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent">
+              <option value="user">Benutzer</option>
+              <option value="admin">Admin</option>
+            </select>
+          </label>
+          <label class="flex items-center gap-2 text-sm text-neutral-200">
+            <input name="isActive" type="checkbox" class="h-4 w-4 rounded border-white/30 bg-neutral-900/60" checked />
+            Benutzer sofort aktivieren
+          </label>
+          <div class="sm:col-span-2 flex justify-end">
+            <button type="submit" class="inline-flex items-center gap-2 rounded-xl bg-indigo-500 hover:bg-indigo-400 active:bg-indigo-600 px-5 py-3 text-sm font-medium text-white shadow-lg shadow-indigo-500/40 transition">
+              Benutzer erstellen
+            </button>
+          </div>
+        </form>
+      </section>
+
+      <section class="rounded-3xl border border-white/10 bg-white/5 p-6 shadow-xl">
+        <header class="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-2 mb-6">
+          <div>
+            <h2 class="text-xl font-semibold tracking-tight">Benutzerübersicht</h2>
+            <p class="text-sm text-neutral-300">Status, Rollenzuordnung und genutzter Speicher je Konto.</p>
+          </div>
+          <div class="text-sm text-neutral-400">
+            Summe PDF-Dateien: <span id="pdfTotal">0</span>
+          </div>
+        </header>
+        <div class="overflow-x-auto rounded-2xl border border-white/10">
+          <table class="min-w-full text-sm">
+            <thead class="bg-white/10 uppercase text-xs tracking-wide text-neutral-300">
+              <tr>
+                <th class="px-4 py-3 text-left">E-Mail</th>
+                <th class="px-4 py-3 text-left">Rolle</th>
+                <th class="px-4 py-3 text-left">Status</th>
+                <th class="px-4 py-3 text-right">PDFs</th>
+                <th class="px-4 py-3 text-right">Speicher</th>
+                <th class="px-4 py-3 text-left">Aktualisiert</th>
+                <th class="px-4 py-3 text-right">Aktionen</th>
+              </tr>
+            </thead>
+            <tbody id="userTableBody" class="divide-y divide-white/5 bg-neutral-950/30">
+              <tr>
+                <td colspan="7" class="px-4 py-6 text-center text-neutral-400">Keine Benutzer geladen.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+    <script src="/admin.js" defer></script>
+  </body>
+</html>

@@ -109,6 +109,23 @@ The server starts on http://localhost:3000 by default. Place your PDFs under `sh
   - Seconds per page input (persisted per file)
   - Smooth mobile scrolling; auto-scroll recalibrates as pages render
 
+## Adminbereich & Benutzerverwaltung
+
+- Login unter `/login.html`, Admin-Dashboard unter `/admin.html`
+- Admin-Link erscheint automatisch in der Kopfzeile, sobald ein Admin angemeldet ist
+- Funktionen:
+  - Benutzer anlegen (Rolle, Status, Passwort)
+  - Nutzerstatistiken (PDF-Anzahl, belegter Speicher) anzeigen/aktualisieren
+  - Passwörter ändern, Konten deaktivieren oder löschen
+- Authentifizierung:
+  - Zugangsdaten werden mit scrypt gehasht und via AES-256-GCM verschlüsselt gespeichert
+  - Datenbank-Datei: `data/auth.sqlite` (wird automatisch erstellt)
+  - Verschlüsselungs-Key: `data/auth-key.txt` (automatisch generiert, kann via `AUTH_ENCRYPTION_KEY` vorgegeben werden)
+  - Sessions liegen im selben Datenbank-File (`sessions`-Tabelle), Cookie `ps_session` ist HttpOnly & SameSite=Lax
+- Erster Start:
+  - Standard-Admin `admin@example.com` / `ChangeMe123!` wird einmalig erzeugt, falls noch kein Admin existiert
+  - Bitte direkt nach dem ersten Login das Passwort wechseln oder einen neuen Admin anlegen
+
 ## APIs
 
 Public static:

@@ -9,6 +9,7 @@ const { pipeline } = require("stream/promises");
 const { Transform } = require("stream");
 const { randomUUID } = require("crypto");
 const { PDFDocument } = require("pdf-lib");
+const { createAuthService } = require("./lib/auth");
 
 // Optional middlewares (used if installed; otherwise skipped)
 let helmet = null, morgan = null, compression = null;
@@ -72,6 +73,83 @@ const FALLBACK_THUMB_BUFFER = Buffer.from(
   "/9j/4AAQSkZJRgABAQAAAQABAAD/2wCEAAkGBxISEhUTEhIVFRUVFxUXFhUVFxcYFRUVFRUXFxcYHSggGBolGxUVITEhJSkrLi4uFx8zODMsNygtLisBCgoKDg0OGxAQGy0lICUtNS0tLS0tLy0tLS0tLS0vLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tKy0tLS0tLS0tLf/AABEIAKgBLAMBIgACEQEDEQH/xAAbAAACAgMBAAAAAAAAAAAAAAADBAIFAQAGB//EADYQAAEDAgMFBQcEAgIDAAAAAAEAAgMEEQUSIRMxQVFhBhMicYEykaGxwdHwFCMzUvEkUmLR4fEjM1PSFiRT/8QAGQEBAAMBAQAAAAAAAAAAAAAAAAECAwQA/8QAJxEBAAICAgIBAwQDAAAAAAAAAAECAxEEIRIxQRNRYSJxBRRxkbH/2gAMAwEAAhEDEQA/AO6iIiICIiAiIgIiICIiAiIgIiICIiAiIgIiICIiAiIgIiICIiAiIgI//2Q==",
   "base64"
 );
+
+const SESSION_COOKIE_NAME = "ps_session";
+const SESSION_RENEW_THRESHOLD_MS = 1000 * 60 * 60 * 24; // 24 hours
+
+function parseCookies(req) {
+  const header = req.headers?.cookie;
+  if (!header) return {};
+  return header.split(";").reduce((acc, part) => {
+    const [key, ...rest] = part.split("=");
+    if (!key) return acc;
+    const value = rest.join("=");
+    acc[key.trim()] = decodeURIComponent((value || "").trim());
+    return acc;
+  }, {});
+}
+
+function appendSetCookie(res, value) {
+  const existing = res.getHeader("Set-Cookie");
+  if (!existing) {
+    res.setHeader("Set-Cookie", value);
+  } else if (Array.isArray(existing)) {
+    res.setHeader("Set-Cookie", existing.concat(value));
+  } else {
+    res.setHeader("Set-Cookie", [existing, value]);
+  }
+}
+
+function buildSessionCookie(value, maxAgeSeconds) {
+  const segments = [`${SESSION_COOKIE_NAME}=${value}`];
+  if (Number.isFinite(maxAgeSeconds)) {
+    segments.push(`Max-Age=${Math.max(1, Math.floor(maxAgeSeconds))}`);
+  }
+  segments.push("Path=/");
+  segments.push("HttpOnly");
+  segments.push("SameSite=Lax");
+  if (process.env.NODE_ENV === "production") {
+    segments.push("Secure");
+  }
+  return segments.join("; ");
+}
+
+function setSessionCookie(res, sessionId, expiresAtIso) {
+  const expiresMs = new Date(expiresAtIso).getTime() - Date.now();
+  const maxAgeSeconds = Math.max(1, Math.floor(expiresMs / 1000));
+  appendSetCookie(res, buildSessionCookie(sessionId, maxAgeSeconds));
+}
+
+function clearSessionCookie(res) {
+  appendSetCookie(res, buildSessionCookie("", 0));
+}
+
+function ensureAuthenticated(req, res) {
+  if (!authService) {
+    res.status(503).json({ error: "Auth service unavailable" });
+    return false;
+  }
+  if (!req.auth || !req.auth.user) {
+    res.status(401).json({ error: "AUTH_REQUIRED" });
+    return false;
+  }
+  return true;
+}
+
+function ensureAdmin(req, res) {
+  if (!ensureAuthenticated(req, res)) return false;
+  if (req.auth.user.role !== "admin") {
+    res.status(403).json({ error: "ADMIN_REQUIRED" });
+    return false;
+  }
+  return true;
+}
+
+function isSoleActiveAdmin(userId) {
+  if (!authService) return false;
+  const admins = authService.listUsers().filter((user) => user.role === "admin" && user.isActive);
+  return admins.length === 1 && admins[0].id === userId;
+}
 
 function sanitizeHexColor(input) {
   if (typeof input !== "string") return DEFAULT_CATEGORY_COLOR;
@@ -1415,6 +1493,218 @@ function findPlaylistOrFail(id) {
 /* ---------------- Playlist API (REST + SSE) ---------------- */
 // CRITICAL: JSON body parser middleware must come BEFORE routes that need it
 app.use(express.json({ limit: "20mb" }));
+
+app.use((req, res, next) => {
+  if (!authService) return next();
+  const cookies = parseCookies(req);
+  const sessionId = cookies[SESSION_COOKIE_NAME];
+  if (!sessionId) return next();
+
+  try {
+    const context = authService.getSessionWithUser(sessionId);
+    if (!context) {
+      clearSessionCookie(res);
+      return next();
+    }
+
+    const expiryMs = new Date(context.session.expiresAt).getTime();
+    if (!Number.isFinite(expiryMs) || expiryMs <= Date.now()) {
+      authService.deleteSession(sessionId);
+      clearSessionCookie(res);
+      return next();
+    }
+
+    if (!context.user.isActive) {
+      authService.deleteSession(sessionId);
+      clearSessionCookie(res);
+      return next();
+    }
+
+    req.auth = {
+      sessionId,
+      session: context.session,
+      user: authService.toPublicUser(context.user),
+    };
+  } catch (err) {
+    console.error("Session lookup failed:", err);
+  }
+
+  next();
+});
+
+app.post("/api/auth/login", (req, res) => {
+  if (!authService) {
+    return res.status(503).json({ error: "Auth service unavailable" });
+  }
+  const { email, password } = req.body || {};
+  if (typeof email !== "string" || !email.trim() || typeof password !== "string" || !password) {
+    return res.status(400).json({ error: "INVALID_CREDENTIALS" });
+  }
+
+  const record = authService.getUserByEmail(email);
+  if (!record) {
+    return res.status(401).json({ error: "INVALID_CREDENTIALS" });
+  }
+  if (!record.isActive) {
+    return res.status(403).json({ error: "USER_DISABLED" });
+  }
+
+  const valid = authService.verifyPassword(password, record.passwordEncrypted);
+  if (!valid) {
+    return res.status(401).json({ error: "INVALID_CREDENTIALS" });
+  }
+
+  const session = authService.createSession(record.id);
+  if (!session) {
+    return res.status(500).json({ error: "FAILED_TO_CREATE_SESSION" });
+  }
+
+  setSessionCookie(res, session.id, session.expiresAt);
+  const user = authService.toPublicUser(record);
+  res.json({ ok: true, user });
+});
+
+app.post("/api/auth/logout", (req, res) => {
+  if (!authService) {
+    return res.status(503).json({ error: "Auth service unavailable" });
+  }
+  const sessionId = req.auth?.sessionId || parseCookies(req)[SESSION_COOKIE_NAME];
+  if (sessionId) {
+    try { authService.deleteSession(sessionId); } catch {}
+  }
+  clearSessionCookie(res);
+  res.json({ ok: true });
+});
+
+app.get("/api/auth/session", (req, res) => {
+  if (!authService) {
+    return res.status(503).json({ error: "Auth service unavailable" });
+  }
+  if (!req.auth || !req.auth.user) {
+    return res.json({ ok: false });
+  }
+
+  const { sessionId, session, user } = req.auth;
+  const timeLeft = new Date(session.expiresAt).getTime() - Date.now();
+  if (timeLeft < SESSION_RENEW_THRESHOLD_MS) {
+    const refreshed = authService.touchSession(sessionId);
+    if (refreshed) {
+      setSessionCookie(res, sessionId, refreshed);
+      session.expiresAt = refreshed;
+    }
+  }
+
+  res.json({ ok: true, user, session });
+});
+
+app.get("/api/admin/users", (req, res) => {
+  if (!ensureAdmin(req, res)) return;
+  const users = authService.listUsers();
+  res.json({ ok: true, users });
+});
+
+app.post("/api/admin/users", (req, res) => {
+  if (!ensureAdmin(req, res)) return;
+  const { email, password, role = "user", isActive = true, pdfCount = 0, storageBytes = 0 } = req.body || {};
+  const pdfCountValue = Number(pdfCount);
+  const storageBytesValue = Number(storageBytes);
+  try {
+    const user = authService.createUser({
+      email,
+      password,
+      role,
+      isActive: Boolean(isActive),
+      pdfCount: Number.isFinite(pdfCountValue) ? pdfCountValue : 0,
+      storageBytes: Number.isFinite(storageBytesValue) ? storageBytesValue : 0,
+    });
+    res.status(201).json({ ok: true, user });
+  } catch (err) {
+    if (err.code === "E_EMAIL_REQUIRED" || err.code === "E_PASSWORD_WEAK" || err.code === "E_ROLE_INVALID") {
+      return res.status(400).json({ error: err.code });
+    }
+    if (err.code === "E_EMAIL_EXISTS") {
+      return res.status(409).json({ error: err.code });
+    }
+    console.error("Failed to create user:", err);
+    res.status(500).json({ error: "FAILED_TO_CREATE_USER" });
+  }
+});
+
+app.patch("/api/admin/users/:id", (req, res) => {
+  if (!ensureAdmin(req, res)) return;
+  const { id } = req.params;
+  const payload = req.body || {};
+  const existing = authService.getUserById(id);
+  if (!existing) {
+    return res.status(404).json({ error: "USER_NOT_FOUND" });
+  }
+
+  const updates = {};
+  if (Object.prototype.hasOwnProperty.call(payload, "isActive")) {
+    updates.isActive = Boolean(payload.isActive);
+  }
+  if (payload.role !== undefined) {
+    updates.role = payload.role;
+  }
+
+  if ((updates.role && updates.role !== "admin") || updates.isActive === false) {
+    if (isSoleActiveAdmin(id)) {
+      return res.status(400).json({ error: "LAST_ADMIN_RESTRICTION" });
+    }
+  }
+
+  if (updates.role !== undefined || updates.isActive !== undefined) {
+    try {
+      authService.setUserStatus(id, updates);
+    } catch (err) {
+      if (err.code === "E_ROLE_INVALID") {
+        return res.status(400).json({ error: err.code });
+      }
+      console.error("Failed to update user status:", err);
+      return res.status(500).json({ error: "FAILED_TO_UPDATE_USER" });
+    }
+  }
+
+  if (payload.pdfCount !== undefined || payload.storageBytes !== undefined) {
+    authService.updateUserUsage(id, {
+      pdfCount: Number(payload.pdfCount),
+      storageBytes: Number(payload.storageBytes),
+    });
+  }
+
+  if (payload.password) {
+    try {
+      authService.resetPassword(id, payload.password);
+    } catch (err) {
+      if (err.code === "E_PASSWORD_WEAK") {
+        return res.status(400).json({ error: err.code });
+      }
+      console.error("Failed to reset password:", err);
+      return res.status(500).json({ error: "FAILED_TO_UPDATE_USER" });
+    }
+  }
+
+  const updated = authService.getUserById(id);
+  res.json({ ok: true, user: updated });
+});
+
+app.delete("/api/admin/users/:id", (req, res) => {
+  if (!ensureAdmin(req, res)) return;
+  const { id } = req.params;
+  const existing = authService.getUserById(id);
+  if (!existing) {
+    return res.status(404).json({ error: "USER_NOT_FOUND" });
+  }
+  if (isSoleActiveAdmin(id)) {
+    return res.status(400).json({ error: "LAST_ADMIN_RESTRICTION" });
+  }
+
+  authService.deleteUser(id);
+  if (req.auth?.user?.id === id) {
+    clearSessionCookie(res);
+  }
+  res.json({ ok: true });
+});
 
 app.get("/api/playlists", (req, res) => {
   res.setHeader("Cache-Control", "no-store");
@@ -3119,12 +3409,19 @@ app.get("*", (req, res) => {
 });
 
 let server = null;
+let authService = null;
 let sheetWatcher = null;
 (async () => {
   try { 
     await ensureVendors(); 
   } catch { 
     console.warn("Vendor prefetch failed – will lazy-fetch on demand"); 
+  }
+  try {
+    authService = await createAuthService({ dataDir: DATA_DIR, logger: console });
+  } catch (err) {
+    console.error("Failed to initialize authentication store:", err);
+    process.exit(1);
   }
   sheetWatcher = initSheetWatcher();
   

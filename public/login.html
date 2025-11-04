@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Piano Sheets – Anmeldung</title>
+    <link rel="icon" href="/icon-maskable.svg" type="image/svg+xml">
+    <link rel="shortcut icon" href="/icon-maskable.svg" type="image/svg+xml">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      body {
+        min-height: 100vh;
+        background: radial-gradient(circle at top, rgba(99,102,241,0.25), rgba(9,9,12,1));
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 1.5rem;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="w-full max-w-md">
+      <div class="bg-neutral-900/80 backdrop-blur-xl border border-white/10 rounded-3xl shadow-2xl shadow-black/30 p-8">
+        <div class="text-center mb-8">
+          <div class="text-4xl mb-3">🎼</div>
+          <h1 class="text-2xl font-semibold text-white">Admin Anmeldung</h1>
+          <p class="text-sm text-neutral-300 mt-1">Melde dich mit deinem Konto an, um den Adminbereich zu öffnen.</p>
+        </div>
+        <form id="loginForm" class="space-y-6">
+          <div>
+            <label for="email" class="block text-sm font-medium text-neutral-200 mb-1">E-Mail</label>
+            <input id="email" name="email" type="email" required autocomplete="username" class="w-full rounded-xl border border-white/10 bg-neutral-900/70 px-4 py-3 text-neutral-100 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent" placeholder="admin@example.com" />
+          </div>
+          <div>
+            <label for="password" class="block text-sm font-medium text-neutral-200 mb-1">Passwort</label>
+            <input id="password" name="password" type="password" required autocomplete="current-password" class="w-full rounded-xl border border-white/10 bg-neutral-900/70 px-4 py-3 text-neutral-100 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent" placeholder="••••••••" />
+          </div>
+          <div id="loginError" class="hidden text-sm text-red-400 bg-red-500/10 border border-red-500/30 rounded-xl px-4 py-2"></div>
+          <button type="submit" class="w-full rounded-xl bg-indigo-500 hover:bg-indigo-400 active:bg-indigo-600 transition py-3 text-white font-medium shadow-lg shadow-indigo-500/40 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-300 focus:ring-offset-neutral-900">Anmelden</button>
+        </form>
+        <div class="mt-6 text-center">
+          <a href="/" class="text-sm text-indigo-300 hover:text-indigo-200 underline decoration-dotted">Zurück zur App</a>
+        </div>
+      </div>
+    </main>
+    <script src="/login.js" defer></script>
+  </body>
+</html>
