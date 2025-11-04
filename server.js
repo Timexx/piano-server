@@ -14,10 +14,11 @@ const { createAuthService } = require("./lib/auth");
 const { createDataStore } = require("./lib/data-store");
 
 // Optional middlewares (used if installed; otherwise skipped)
-let helmet = null, morgan = null, compression = null;
+let helmet = null, morgan = null, compression = null, rateLimit = null;
 try { helmet = require("helmet"); } catch {}
 try { morgan = require("morgan"); } catch {}
 try { compression = require("compression"); } catch {}
+try { rateLimit = require("express-rate-limit"); } catch {}
 
 // Try to load PDF processing libraries
 let pdfjsLib = null, sharp = null, canvas = null;
@@ -78,6 +79,65 @@ const FALLBACK_THUMB_BUFFER = Buffer.from(
 
 const SESSION_COOKIE_NAME = "ps_session";
 const SESSION_RENEW_THRESHOLD_MS = 1000 * 60 * 60 * 24; // 24 hours
+
+// =============================================================================
+// SECURITY: Centralized error handling and sanitization
+// =============================================================================
+
+/**
+ * Logs an error securely with full details (for server logs)
+ * @param {string} context - Description of where/what failed
+ * @param {Error|any} error - The error object
+ * @param {Object} metadata - Additional context (userId, file paths, etc.)
+ */
+function logError(context, error, metadata = {}) {
+  const timestamp = new Date().toISOString();
+  const errorDetails = {
+    timestamp,
+    context,
+    message: error?.message || String(error),
+    stack: error?.stack,
+    ...metadata
+  };
+  
+  // Log full error details to console (server-side only)
+  console.error(`[ERROR] ${context}:`, errorDetails);
+}
+
+/**
+ * Sends a sanitized error response to the client (no stack traces, no internal paths)
+ * @param {Response} res - Express response object
+ * @param {number} statusCode - HTTP status code
+ * @param {string} userMessage - Safe message for the user
+ * @param {Error|any} error - The original error (for logging only)
+ * @param {string} context - Context for logging
+ */
+function sendError(res, statusCode, userMessage, error = null, context = '') {
+  // Log full error server-side
+  if (error && context) {
+    logError(context, error, { statusCode, userMessage });
+  }
+  
+  // Send sanitized response to client
+  res.status(statusCode).json({ 
+    error: userMessage,
+    // Never include: stack traces, internal paths, raw error objects
+  });
+}
+
+/**
+ * Sanitizes file paths in error messages (removes absolute paths)
+ * @param {string} message - Error message that might contain paths
+ * @returns {string} - Sanitized message
+ */
+function sanitizePath(message) {
+  if (!message) return message;
+  // Remove absolute paths like /Volumes/home/piano/ or C:\Users\...
+  return message
+    .replace(/[A-Za-z]:\\[^\s]+/g, '[PATH]')
+    .replace(/\/[^\s]+\/(sheets|data|public|thumbnails)/g, '/$1')
+    .replace(/file:\/\/[^\s]+/g, '[FILE]');
+}
 
 function parseCookies(req) {
   const header = req.headers?.cookie;
@@ -942,7 +1002,6 @@ async function ensureThumbnail(pdfInfo) {
     thumbStat.mtimeMs >= pdfStat.mtimeMs &&
     Date.now() - thumbStat.mtimeMs < MEMORY_SETTINGS.maxThumbnailAge
   ) {
-    console.log(`Using cached thumbnail for ${relPdf}`);
     return { thumbPath, thumbStat };
   }
 
@@ -954,11 +1013,9 @@ async function ensureThumbnail(pdfInfo) {
   }
 
   try {
-    // console.log(`Creating thumbnail from PDF for ${relPdf}...`);
     await createThumbnailFromPdf(pdfPath, thumbPath, relPdf);
-    // console.log(`Thumbnail created successfully for ${relPdf}`);
   } catch (err) {
-    console.error(`createThumbnailFromPdf failed for ${relPdf}:`, err);
+    logError(`createThumbnailFromPdf failed`, err, { relPdf });
     await writeFallbackThumbnail(thumbPath);
   }
   const refreshedStat = await statSafe(thumbPath);
@@ -1273,7 +1330,7 @@ async function flushConfigBeforeExit() {
         await dataStore.saveUserConfig(userId, entry.config);
         entry.dirty = false;
       } catch (err) {
-        console.error(`Failed to flush config for ${userId}:`, err?.message || err);
+        logError("Failed to flush config", err, { userId });
       }
     }
   }
@@ -1283,7 +1340,7 @@ async function flushConfigBeforeExit() {
         await dataStore.saveUserPlaylists(userId, entry.state);
         entry.dirty = false;
       } catch (err) {
-        console.error(`Failed to flush playlists for ${userId}:`, err?.message || err);
+        logError("Failed to flush playlists", err, { userId });
       }
     }
   }
@@ -1459,7 +1516,7 @@ function ensurePlaylistFile(state) {
     fs.mkdirSync(path.dirname(PLAYLISTS_FILE), { recursive: true });
     fs.writeFileSync(PLAYLISTS_FILE, JSON.stringify(state, null, 2), "utf8");
   } catch (err) {
-    console.error("ensurePlaylistFile failed:", err);
+    logError("ensurePlaylistFile failed", err);
   }
 }
 
@@ -1580,7 +1637,7 @@ function broadcastPlaylists() {
     sseManager.broadcast(store.userId, "playlist-active", activePayload);
     sseManager.broadcast(store.userId, "playlist-state", statePayload);
   } catch (err) {
-    console.error("Broadcast failed:", err);
+    logError("Broadcast failed", err, { userId: store.userId });
   }
 }
 
@@ -1709,6 +1766,72 @@ async function statSafe(full) {
 
 // Function to register auth middleware and all API routes - called after initialization
 function registerApiRoutes() {
+  // SECURITY: Rate Limiters - Protect against brute force and DoS
+  let loginLimiter = null;
+  let uploadLimiter = null;
+  let apiLimiter = null;
+  
+  if (rateLimit) {
+    // Login Rate Limiter - Prevent brute force attacks
+    loginLimiter = rateLimit({
+      windowMs: 15 * 60 * 1000, // 15 minutes
+      max: 5, // Max 5 login attempts per window
+      message: { error: "Zu viele Login-Versuche. Bitte warten Sie 15 Minuten." },
+      standardHeaders: true,
+      legacyHeaders: false,
+      skipSuccessfulRequests: true, // Don't count successful logins
+      handler: (req, res) => {
+        console.warn('[SECURITY] Rate limit exceeded for login from:', req.ip);
+        res.status(429).json({ 
+          error: "Zu viele Login-Versuche. Bitte warten Sie 15 Minuten.",
+          retryAfter: Math.ceil(req.rateLimit.resetTime / 1000)
+        });
+      }
+    });
+    
+    // Upload Rate Limiter - Prevent upload spam
+    uploadLimiter = rateLimit({
+      windowMs: 60 * 1000, // 1 minute
+      max: 10, // Max 10 uploads per minute
+      message: { error: "Upload-Limit erreicht. Bitte warten Sie." },
+      standardHeaders: true,
+      legacyHeaders: false,
+      handler: (req, res) => {
+        console.warn('[SECURITY] Rate limit exceeded for upload from:', req.ip);
+        res.status(429).json({ 
+          error: "Upload-Limit erreicht. Bitte warten Sie.",
+          retryAfter: Math.ceil(req.rateLimit.resetTime / 1000)
+        });
+      }
+    });
+    
+    // General API Rate Limiter - Prevent API abuse
+    apiLimiter = rateLimit({
+      windowMs: 60 * 1000, // 1 minute
+      max: 120, // Max 120 requests per minute
+      message: { error: "Zu viele Anfragen. Bitte warten Sie." },
+      standardHeaders: true,
+      legacyHeaders: false,
+      skip: (req) => {
+        // Skip rate limiting for static files
+        return req.path.startsWith('/vendor/') || 
+               req.path.startsWith('/sheets/') ||
+               req.path.startsWith('/thumbnails/');
+      },
+      handler: (req, res) => {
+        console.warn('[SECURITY] Rate limit exceeded for API from:', req.ip);
+        res.status(429).json({ 
+          error: "Zu viele Anfragen. Bitte warten Sie.",
+          retryAfter: Math.ceil(req.rateLimit.resetTime / 1000)
+        });
+      }
+    });
+    
+    console.log('[SECURITY] Rate limiting enabled');
+  } else {
+    console.warn('[SECURITY] Rate limiting disabled - express-rate-limit not installed');
+  }
+  
   // Session middleware - extracts session from cookie and sets req.auth
   // Must run BEFORE user context middleware
   app.use((req, res, next) => {
@@ -1743,7 +1866,7 @@ function registerApiRoutes() {
         user: authService.toPublicUser(context.user),
       };
     } catch (err) {
-      console.error("Session lookup failed:", err);
+      logError("Session lookup failed", err, { sessionId });
     }
 
     next();
@@ -1754,8 +1877,13 @@ function registerApiRoutes() {
   app.use(userContext.middleware);
 
   // API routes defined below execute after both middlewares
+  
+  // SECURITY: Apply general API rate limiting to all /api/* routes
+  if (apiLimiter) {
+    app.use('/api/', apiLimiter);
+  }
 
-app.post("/api/auth/login", (req, res) => {
+app.post("/api/auth/login", loginLimiter || ((req, res, next) => next()), (req, res) => {
   if (!authService) {
     return res.status(503).json({ error: "Auth service unavailable" });
   }
@@ -1858,7 +1986,7 @@ app.get("/api/admin/users", async (req, res) => {
         storageBytes,
       };
     } catch (err) {
-      console.error(`Failed to calculate stats for user ${user.id}:`, err);
+      logError(`Failed to calculate stats for user`, err, { userId: user.id });
       return user;
     }
   }));
@@ -1888,8 +2016,7 @@ app.post("/api/admin/users", (req, res) => {
     if (err.code === "E_EMAIL_EXISTS") {
       return res.status(409).json({ error: err.code });
     }
-    console.error("Failed to create user:", err);
-    res.status(500).json({ error: "FAILED_TO_CREATE_USER" });
+    sendError(res, 500, "FAILED_TO_CREATE_USER", err, "Admin create user");
   }
 });
 
@@ -1923,8 +2050,7 @@ app.patch("/api/admin/users/:id", (req, res) => {
       if (err.code === "E_ROLE_INVALID") {
         return res.status(400).json({ error: err.code });
       }
-      console.error("Failed to update user status:", err);
-      return res.status(500).json({ error: "FAILED_TO_UPDATE_USER" });
+      return sendError(res, 500, "FAILED_TO_UPDATE_USER", err, "Admin update user status");
     }
   }
 
@@ -1942,8 +2068,7 @@ app.patch("/api/admin/users/:id", (req, res) => {
       if (err.code === "E_PASSWORD_WEAK") {
         return res.status(400).json({ error: err.code });
       }
-      console.error("Failed to reset password:", err);
-      return res.status(500).json({ error: "FAILED_TO_UPDATE_USER" });
+      return sendError(res, 500, "FAILED_TO_UPDATE_USER", err, "Admin reset password");
     }
   }
 
@@ -1996,7 +2121,7 @@ app.get("/api/playlists/events", (req, res) => {
   try {
     res.write(`data: ${JSON.stringify(serializePlaylistState(PLAYLIST_STATE))}\n\n`);
   } catch (err) {
-    console.error("Failed to send initial playlist state:", err);
+    logError("Failed to send initial playlist state", err);
   }
 
   // Register with SSE manager
@@ -2039,7 +2164,7 @@ app.get("/api/playlist/events", (req, res) => {
   try {
     res.write(`data: ${JSON.stringify(serializeActivePlaylist())}\n\n`);
   } catch (err) {
-    console.error("Failed to send initial active playlist:", err);
+    logError("Failed to send initial active playlist", err);
   }
 
   // Register with SSE manager
@@ -2219,18 +2344,7 @@ app.post("/api/playlists/items/assign", async (req, res) => {
   if (!ensureAuthenticated(req, res)) return;
   const { PLAYLIST_STATE } = userContext;
   
-  console.log('========================================');
-  console.log('POST /api/playlists/items/assign RECEIVED');
-  console.log('req.body type:', typeof req.body);
-  console.log('req.body:', req.body);
-  console.log('req.body stringified:', JSON.stringify(req.body, null, 2));
-  console.log('req.headers["content-type"]:', req.headers['content-type']);
-  
   const { name, playlists } = req.body || {};
-  
-  console.log('Extracted name:', name, 'type:', typeof name);
-  console.log('Extracted playlists:', playlists, 'type:', typeof playlists);
-  console.log('========================================');
   
   if (!name || typeof name !== 'string') {
     console.warn('VALIDATION FAILED - Invalid or missing name parameter:', name);
@@ -2255,8 +2369,6 @@ app.post("/api/playlists/items/assign", async (req, res) => {
     
     // Remove leading/trailing slashes
     rel = rel.replace(/^\/+|\/+$/g, '');
-    
-    console.log('Normalized filename:', rel);
   } else {
     console.warn('Invalid filename format:', name);
     return res.status(400).json({ error: `Invalid file name: ${name}` });
@@ -2269,8 +2381,6 @@ app.post("/api/playlists/items/assign", async (req, res) => {
     return res.status(400).json({ error: "No playlists selected" });
   }
   
-  console.log('Assigning item:', { rel, playlistIds: ids });
-  
   const targetSet = new Set(ids);
   let changed = false;
 
@@ -2281,7 +2391,6 @@ app.post("/api/playlists/items/assign", async (req, res) => {
       pl.items.push(rel);
       updatePlaylistTimestamp(pl);
       changed = true;
-      console.log(`Added ${rel} to playlist ${pl.name}`);
     } else if (!shouldHave && has) {
       pl.items = pl.items.filter((item) => item !== rel);
       if (pl.currentIndex >= pl.items.length) {
@@ -2289,18 +2398,14 @@ app.post("/api/playlists/items/assign", async (req, res) => {
       }
       updatePlaylistTimestamp(pl);
       changed = true;
-      console.log(`Removed ${rel} from playlist ${pl.name}`);
     }
   });
 
   if (changed) {
     await savePlaylistsImmediate().catch((err) => {
-      console.error('Failed to save playlists:', err);
+      logError('Failed to save playlists', err);
     });
     broadcastPlaylists();
-    console.log('Playlist assignments saved successfully');
-  } else {
-    console.log('No changes needed for assignments');
   }
 
   res.json({ ok: true, state: serializePlaylistState(PLAYLIST_STATE) });
@@ -2507,7 +2612,7 @@ app.get("/thumbnails/*", async (req, res) => {
     });
     return stream.pipe(res);
   } catch (error) {
-    console.error("Thumbnail serve error:", error);
+    logError("Thumbnail serve error", error, { thumbPath: relPathEncoded });
     return sendFallback();
   }
 });
@@ -2788,7 +2893,7 @@ app.get("/api/sheets", async (req, res) => {
 });
 
 // Improved upload endpoint (accepts PDF by MIME or .pdf filename)
-app.post("/api/upload", async (req, res) => {
+app.post("/api/upload", uploadLimiter || ((req, res, next) => next()), async (req, res) => {
   if (!ensureAuthenticated(req, res)) return;
   
   const limitMb = Math.round(MAX_UPLOAD_BYTES / 1024 / 1024);
@@ -2846,8 +2951,7 @@ app.post("/api/upload", async (req, res) => {
   try {
     await fs.promises.mkdir(path.dirname(finalPath), { recursive: true });
   } catch (err) {
-    console.error("Upload mkdir failed:", err);
-    return res.status(500).json({ error: "Upload konnte nicht vorbereitet werden" });
+    return sendError(res, 500, "Upload konnte nicht vorbereitet werden", err, "Upload mkdir");
   }
 
   try {
@@ -2859,16 +2963,14 @@ app.post("/api/upload", async (req, res) => {
     if (err && err.code === "LIMIT_FILE_SIZE") {
       return res.status(413).json({ error: `Datei ist größer als ${limitMb} MB.` });
     }
-    console.error("Upload stream failed:", err);
-    return res.status(400).json({ error: "Upload fehlgeschlagen" });
+    return sendError(res, 400, "Upload fehlgeschlagen", err, "Upload stream");
   }
 
   try {
     await fs.promises.rename(tempPath, finalPath);
   } catch (err) {
     await fs.promises.unlink(tempPath).catch(() => {});
-    console.error("Upload rename failed:", err);
-    return res.status(500).json({ error: "Upload konnte nicht gespeichert werden" });
+    return sendError(res, 500, "Upload konnte nicht gespeichert werden", err, "Upload rename");
   }
 
   const cleanupFile = async () => {
@@ -2876,6 +2978,66 @@ app.post("/api/upload", async (req, res) => {
     const thumbPath = path.join(THUMBS_DIR, thumbnailRelPath(rel));
     await fs.promises.unlink(thumbPath).catch(() => {});
   };
+  
+  // SECURITY: Validate actual file content (MIME type detection)
+  try {
+    // Read first chunk of file for MIME detection (more reliable than headers)
+    const fileBuffer = await fs.promises.readFile(finalPath);
+    
+    // Check 1: File-type based MIME detection (if available)
+    let detectedMime = null;
+    try {
+      const { fileTypeFromBuffer } = require('file-type');
+      const fileType = await fileTypeFromBuffer(fileBuffer);
+      detectedMime = fileType?.mime;
+      
+      if (fileType && fileType.mime !== 'application/pdf') {
+        console.warn('[SECURITY] File upload blocked - wrong MIME type detected:', {
+          declared: contentType,
+          detected: fileType.mime,
+          file: finalName
+        });
+        await cleanupFile();
+        return res.status(415).json({ 
+          error: "Nur PDF-Dateien erlaubt",
+          details: `Detektierter Dateityp: ${fileType.mime}` 
+        });
+      }
+    } catch (fileTypeErr) {
+      // file-type not installed - fallback to PDF signature check
+      console.warn('[SECURITY] file-type not available, using fallback validation');
+    }
+    
+    // Check 2: PDF signature validation (magic bytes)
+    const pdfSignature = Buffer.from([0x25, 0x50, 0x44, 0x46]); // %PDF
+    if (!fileBuffer.subarray(0, 4).equals(pdfSignature)) {
+      console.warn('[SECURITY] File upload blocked - invalid PDF signature:', finalName);
+      await cleanupFile();
+      return res.status(415).json({ 
+        error: "Ungültige PDF-Datei",
+        details: "Datei beginnt nicht mit PDF-Signatur" 
+      });
+    }
+    
+    // Check 3: PDF structure validation using pdf-lib
+    try {
+      await PDFDocument.load(fileBuffer, { ignoreEncryption: true });
+      console.log('[SECURITY] PDF validation passed:', finalName);
+    } catch (pdfErr) {
+      console.warn('[SECURITY] File upload blocked - corrupt PDF:', {
+        file: finalName,
+        error: pdfErr.message
+      });
+      await cleanupFile();
+      return res.status(400).json({ 
+        error: "Ungültige oder beschädigte PDF-Datei",
+        details: "PDF-Struktur konnte nicht gelesen werden"
+      });
+    }
+  } catch (validationErr) {
+    await cleanupFile();
+    return sendError(res, 500, "Datei-Validierung fehlgeschlagen", validationErr, "File content validation");
+  }
 
   try {
     const { CONFIG } = userContext;
@@ -2905,7 +3067,7 @@ app.post("/api/upload", async (req, res) => {
     try {
       await ensureThumbnail({ rel, abs: finalPath });
     } catch (thumbErr) {
-      console.error("Thumbnail generation failed for upload:", rel, thumbErr);
+      logError("Thumbnail generation failed for upload", thumbErr, { rel });
     }
 
     const fileConfig = {};
@@ -2928,7 +3090,7 @@ app.post("/api/upload", async (req, res) => {
     try {
       await userContext.saveConfigImmediate();
     } catch (saveErr) {
-      console.error("Failed to persist config after upload:", saveErr);
+      logError("Failed to persist config after upload", saveErr);
     }
     
     // Register document ownership
@@ -2937,7 +3099,7 @@ app.post("/api/upload", async (req, res) => {
       await dataStore.assignDocumentsToUser(userId, [rel], "owner");
       userContext.addDocumentsToUserCache(userId, [rel]);
     } catch (err) {
-      console.error("Failed to register document:", err);
+      logError("Failed to register document", err, { rel, userId: req.auth.user.id });
       // Continue - file is uploaded, just not registered
     }
 
@@ -2982,8 +3144,6 @@ app.get("/api/prefs", async (req, res) => {
   if (!ensureAuthenticated(req, res)) return;
   const store = userContext.requireUserContext();
   const config = store.configEntry.config;
-  console.log('[DEBUG] /api/prefs - config:', JSON.stringify(config, null, 2));
-  console.log('[DEBUG] /api/prefs - config.favorites:', config.favorites);
   res.setHeader("Cache-Control", "no-store");
   res.json(config);
 });
