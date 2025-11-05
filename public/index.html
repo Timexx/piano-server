@@ -224,7 +224,10 @@
       import { createAnnotationManager } from "./annotation-tools.js";
 
       // force same-origin worker to avoid blob/CORS issues (Safari/iPad)
-      pdfjsLib.GlobalWorkerOptions.workerSrc = "/vendor/pdfjs/pdf.worker.min.js";
+      // Use withBasePath to ensure correct path with proxy
+      pdfjsLib.GlobalWorkerOptions.workerSrc = window.withBasePath 
+        ? withBasePath("/vendor/pdfjs/pdf.worker.min.js")
+        : "/vendor/pdfjs/pdf.worker.min.js";
 
   const $ = (sel, el = document) => el.querySelector(sel);
   const encodePathSegments = (rel) => rel.split('/').map(encodeURIComponent).join('/');
@@ -740,7 +743,11 @@
             return true;
           }
         } catch (e) {
-          console.warn('WakeLock.request failed', e);
+          // Silently fail - WakeLock permission not granted or not supported
+          // This is expected behavior and not an error
+          if (e.name !== 'NotAllowedError') {
+            console.warn('WakeLock.request failed:', e.name);
+          }
         }
         // Fallback: NoSleep.js (must be created from a user gesture on iOS)
         try {
@@ -754,7 +761,10 @@
             return true;
           }
         } catch (e) {
-          console.warn('NoSleep.enable failed (needs user gesture on iOS)', e);
+          // Silently fail - needs user gesture
+          if (e.name !== 'NotAllowedError') {
+            console.warn('NoSleep.enable failed:', e.name);
+          }
         }
         return false;
       }
@@ -772,7 +782,10 @@
             if (state.viewer.wakeDesired) setWakeBtn(true);
           }
         } catch (e) {
-          console.warn('NoSleep sync activation failed', e);
+          // Silently fail - needs user gesture
+          if (e.name !== 'NotAllowedError') {
+            console.warn('NoSleep sync activation failed:', e.name);
+          }
         }
         // Wake Lock API async im Hintergrund
         if ('wakeLock' in navigator && !state.viewer.wakeLock) {
@@ -787,7 +800,10 @@
             });
             if (state.viewer.wakeDesired) setWakeBtn(true);
           }).catch(e => {
-            console.warn('WakeLock.request failed', e);
+            // Silently fail - permission not granted
+            if (e.name !== 'NotAllowedError') {
+              console.warn('WakeLock.request failed:', e.name);
+            }
           });
         }
       }

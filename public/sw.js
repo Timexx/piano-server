@@ -1,6 +1,6 @@
 // Service Worker für Piano Sheets PWA
-// Version für Cache-Invalidierung - UPDATED: PDF cache corruption fix
-const CACHE_VERSION = 'v7-pdf-cache-fix';
+// Version für Cache-Invalidierung - UPDATED: PDF.js Worker bypass fix
+const CACHE_VERSION = 'v9-worker-bypass-fix';
 const STATIC_CACHE = `piano-static-${CACHE_VERSION}`;
 const DYNAMIC_CACHE = `piano-dynamic-${CACHE_VERSION}`;
 const PDF_CACHE = `piano-pdfs-${CACHE_VERSION}`;
@@ -113,8 +113,16 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(request.url);
 
   // WICHTIG: Ignoriere externe Domains (CDN, etc.)
-  if (url.origin !== self.location.origin) {
+  // Aber erlaube explizit music.familieklement.com und cloud.familieklement.com
+  const allowedOrigins = [
+    self.location.origin,
+    'https://music.familieklement.com',
+    'https://cloud.familieklement.com'
+  ];
+  
+  if (!allowedOrigins.includes(url.origin)) {
     // Lass externe Requests direkt durch (keine Caching-Logik)
+    console.log('[SW] Ignoring external origin:', url.origin);
     return;
   }
 
@@ -130,6 +138,13 @@ self.addEventListener('fetch', (event) => {
 
   // Ignoriere Chrome Extension Requests
   if (url.protocol === 'chrome-extension:') {
+    return;
+  }
+
+  // Ignoriere Worker-Requests (PDF.js Worker, etc.)
+  // Workers müssen direkt vom Browser geladen werden
+  if (request.destination === 'worker' || request.destination === 'sharedworker') {
+    console.log('[SW] Bypassing worker request:', url.pathname);
     return;
   }
 

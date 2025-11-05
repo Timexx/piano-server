@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Service Worker & Cache Cleaner</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .container {
+      background: white;
+      border-radius: 16px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+      padding: 40px;
+      max-width: 600px;
+      width: 100%;
+    }
+    h1 {
+      color: #333;
+      margin-bottom: 10px;
+      font-size: 28px;
+    }
+    p {
+      color: #666;
+      margin-bottom: 30px;
+      line-height: 1.6;
+    }
+    button {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border: none;
+      padding: 14px 28px;
+      border-radius: 8px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      width: 100%;
+      margin-bottom: 12px;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    button:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+    }
+    button:active {
+      transform: translateY(0);
+    }
+    button.secondary {
+      background: #6c757d;
+    }
+    button.danger {
+      background: #dc3545;
+    }
+    #log {
+      background: #f8f9fa;
+      border: 1px solid #dee2e6;
+      border-radius: 8px;
+      padding: 16px;
+      margin-top: 20px;
+      max-height: 300px;
+      overflow-y: auto;
+      font-family: 'Courier New', monospace;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    .log-entry {
+      margin-bottom: 4px;
+      padding: 4px 0;
+    }
+    .log-success { color: #28a745; }
+    .log-error { color: #dc3545; }
+    .log-info { color: #17a2b8; }
+    .log-warning { color: #ffc107; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🔧 Service Worker & Cache Cleaner</h1>
+    <p>Dieses Tool hilft, Probleme mit dem Service Worker und gecachten Daten zu beheben.</p>
+    
+    <button onclick="unregisterServiceWorker()">1. Service Worker deregistrieren</button>
+    <button onclick="clearAllCaches()">2. Alle Caches löschen</button>
+    <button onclick="clearEverything()" class="danger">3. Alles löschen & neu starten</button>
+    <button onclick="window.location.href='/'" class="secondary">4. Zurück zur App</button>
+    
+    <div id="log"></div>
+  </div>
+
+  <script>
+    const log = document.getElementById('log');
+    
+    function addLog(message, type = 'info') {
+      const entry = document.createElement('div');
+      entry.className = `log-entry log-${type}`;
+      entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+      log.appendChild(entry);
+      log.scrollTop = log.scrollHeight;
+      console.log(message);
+    }
+
+    async function unregisterServiceWorker() {
+      addLog('Deregistriere Service Worker...', 'info');
+      
+      if (!('serviceWorker' in navigator)) {
+        addLog('Service Worker wird nicht unterstützt', 'warning');
+        return;
+      }
+      
+      try {
+        const registrations = await navigator.serviceWorker.getRegistrations();
+        if (registrations.length === 0) {
+          addLog('Keine Service Worker registriert', 'info');
+          return;
+        }
+        
+        for (const registration of registrations) {
+          await registration.unregister();
+          addLog(`✅ Service Worker deregistriert: ${registration.scope}`, 'success');
+        }
+        
+        addLog('Alle Service Worker wurden deregistriert', 'success');
+      } catch (error) {
+        addLog(`❌ Fehler: ${error.message}`, 'error');
+      }
+    }
+
+    async function clearAllCaches() {
+      addLog('Lösche alle Caches...', 'info');
+      
+      if (!('caches' in window)) {
+        addLog('Cache API wird nicht unterstützt', 'warning');
+        return;
+      }
+      
+      try {
+        const cacheNames = await caches.keys();
+        if (cacheNames.length === 0) {
+          addLog('Keine Caches vorhanden', 'info');
+          return;
+        }
+        
+        for (const cacheName of cacheNames) {
+          await caches.delete(cacheName);
+          addLog(`✅ Cache gelöscht: ${cacheName}`, 'success');
+        }
+        
+        addLog('Alle Caches wurden gelöscht', 'success');
+      } catch (error) {
+        addLog(`❌ Fehler: ${error.message}`, 'error');
+      }
+    }
+
+    async function clearEverything() {
+      addLog('🧹 Starte vollständige Bereinigung...', 'info');
+      
+      await unregisterServiceWorker();
+      await clearAllCaches();
+      
+      // LocalStorage löschen
+      try {
+        localStorage.clear();
+        addLog('✅ LocalStorage gelöscht', 'success');
+      } catch (e) {
+        addLog(`⚠️ LocalStorage konnte nicht gelöscht werden: ${e.message}`, 'warning');
+      }
+      
+      // SessionStorage löschen
+      try {
+        sessionStorage.clear();
+        addLog('✅ SessionStorage gelöscht', 'success');
+      } catch (e) {
+        addLog(`⚠️ SessionStorage konnte nicht gelöscht werden: ${e.message}`, 'warning');
+      }
+      
+      addLog('', 'info');
+      addLog('🎉 Bereinigung abgeschlossen!', 'success');
+      addLog('Seite wird in 2 Sekunden neu geladen...', 'info');
+      
+      setTimeout(() => {
+        window.location.href = '/';
+      }, 2000);
+    }
+
+    // Initial Log
+    addLog('Tool geladen. Bereit für Bereinigung.', 'info');
+    
+    // Check Status
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations().then(regs => {
+        if (regs.length > 0) {
+          addLog(`ℹ️ ${regs.length} Service Worker(s) aktiv`, 'warning');
+        }
+      });
+    }
+    
+    if ('caches' in window) {
+      caches.keys().then(names => {
+        if (names.length > 0) {
+          addLog(`ℹ️ ${names.length} Cache(s) vorhanden`, 'warning');
+        }
+      });
+    }
+  </script>
+</body>
+</html>
