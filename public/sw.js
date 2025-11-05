@@ -1,6 +1,6 @@
 // Service Worker für Piano Sheets PWA
-// Version für Cache-Invalidierung - UPDATED: Share/Unshare fixes + UI improvements
-const CACHE_VERSION = 'v6-share-ui-fixes';
+// Version für Cache-Invalidierung - UPDATED: PDF cache corruption fix
+const CACHE_VERSION = 'v7-pdf-cache-fix';
 const STATIC_CACHE = `piano-static-${CACHE_VERSION}`;
 const DYNAMIC_CACHE = `piano-dynamic-${CACHE_VERSION}`;
 const PDF_CACHE = `piano-pdfs-${CACHE_VERSION}`;
@@ -82,11 +82,12 @@ self.addEventListener('activate', (event) => {
         return Promise.all(
           cacheNames
             .filter((cacheName) => {
-              // Lösche alte Versionen
-              return cacheName.startsWith('piano-') && !cacheName.endsWith(`-${CACHE_VERSION}`);
+              // Lösche alte Versionen ODER den PDF-Cache (wegen Korruption)
+              return (cacheName.startsWith('piano-') && !cacheName.endsWith(`-${CACHE_VERSION}`))
+                || cacheName === PDF_CACHE; // PDF-Cache immer löschen
             })
             .map((cacheName) => {
-              console.log('[SW] Deleting old cache:', cacheName);
+              console.log('[SW] Deleting cache:', cacheName);
               return caches.delete(cacheName);
             })
         );
@@ -100,7 +101,7 @@ self.addEventListener('activate', (event) => {
             console.warn('[SW] Navigation preload enable failed:', err);
           }
         }
-        console.log('[SW] Service Worker activated');
+        console.log('[SW] Service Worker activated (PDF cache cleared)');
         return self.clients.claim(); // Übernehme Kontrolle über alle Clients
       })
   );
@@ -261,55 +262,29 @@ async function handleVendorRequest(request) {
   }
 }
 
-// Cache-First für PDFs mit Download-Tracking
+// Network-First für PDFs - Cache führt zu Problemen mit großen PDFs
 async function handlePDFRequest(request) {
-  const cached = await caches.match(request);
-  if (cached) {
-    console.log('[SW] Serving PDF from cache:', request.url);
-    // Ensure proper headers for offline PDF viewing
-    const headers = new Headers(cached.headers);
-    if (!headers.has('Content-Type')) {
-      headers.set('Content-Type', 'application/pdf');
-    }
-    if (!headers.has('Accept-Ranges')) {
-      headers.set('Accept-Ranges', 'bytes');
-    }
-    
-    return new Response(cached.body, {
-      status: cached.status,
-      statusText: cached.statusText,
-      headers: headers
-    });
-  }
-
   try {
-    console.log('[SW] Downloading PDF:', request.url);
+    console.log('[SW] Fetching PDF from network:', request.url);
     const response = await fetch(request);
     
     if (response && response.ok) {
-      const cache = await caches.open(PDF_CACHE);
-      // Clone first to read body twice
-      const clonedResponse = response.clone();
-      
-      // Ensure proper headers before caching
-      const responseBlob = await clonedResponse.blob();
-      const headers = new Headers(response.headers);
-      headers.set('Content-Type', 'application/pdf');
-      headers.set('Accept-Ranges', 'bytes');
-      
-      const responseToCache = new Response(responseBlob, {
-        status: response.status,
-        statusText: response.statusText,
-        headers: headers
-      });
-      
-      await cache.put(request, responseToCache);
-      console.log('[SW] PDF cached:', request.url);
+      // PDFs NICHT cachen - sie sind zu groß und führen zu Cache-Korruption
+      // Der Browser cached sie bereits über HTTP-Cache
+      console.log('[SW] PDF fetched successfully (not caching):', request.url);
     }
     
     return response;
   } catch (error) {
-    console.warn('[SW] PDF download failed:', error);
+    console.warn('[SW] PDF network request failed, trying cache:', error);
+    
+    // Nur bei Netzwerkfehler versuchen wir den Cache
+    const cached = await caches.match(request, { ignoreSearch: false });
+    if (cached) {
+      console.log('[SW] Serving PDF from cache (fallback):', request.url);
+      return cached;
+    }
+    
     // Wenn offline und nicht gecacht: Fehler
     return new Response('PDF nicht verfügbar (offline)', {
       status: 503,
