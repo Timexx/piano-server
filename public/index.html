@@ -372,9 +372,45 @@
         padding: 1.25rem;
       }
       /* ===== HEADER STYLES - Modern & Elegant ===== */
+
+      /* ===== FILTER BOX SCROLL-BEHAVIOR (stabilisiert) ===== */
+      #filterBlock,
+      #filterPanel {
+        transition: transform 200ms ease-out, opacity 180ms ease-out, height 200ms ease-out, margin 200ms ease-out;
+        will-change: transform, opacity, height, margin;
+      }
+
+      #filterBlock.is-collapsed,
+      #filterPanel.is-collapsed {
+        transform: translateY(-8px);
+        opacity: 0;
+        height: 0 !important;
+        margin: 0 !important;
+        overflow: hidden;
+        pointer-events: none;
+      }
+
       #mainHeader {
         will-change: transform;
         transition: transform 200ms ease-out;
+      }
+
+      /* ===== FILTER PANEL AUTO-COLLAPSE (stabilisiert) ===== */
+      #filterPanel,
+      #filterBlock {
+        transition: max-height 200ms ease-out, opacity 150ms ease-out, transform 150ms ease-out, margin 150ms ease-out;
+        will-change: max-height, opacity, transform;
+        overflow: hidden;
+        /* Große Obergrenze, damit echte Höhe Platz hat; wird animiert */
+        max-height: 1000px;
+      }
+      /* Zusammengeklappt: Platz freigeben + keine Klicks */
+      .filter-collapsed {
+        max-height: 0 !important;
+        opacity: 0 !important;
+        transform: translateY(-6px);
+        margin-bottom: 0 !important;
+        pointer-events: none !important;
       }
       
       #mainHeader.header-hidden {
@@ -1981,6 +2017,111 @@
           }
         });
       }
+
+      // === Stabilisiertes Filter-Scroll-Verhalten ===
+      (function () {
+        const filterEl = document.getElementById('filterBlock') || document.getElementById('filterPanel');
+          // Wenn der Inhalt kaum höher ist als der Viewport → kein Scrollverhalten aktivieren
+        if (document.body.scrollHeight - window.innerHeight < 150) {
+          return; // bleibt immer sichtbar, verhindert Ruckeln bei kurzem Inhalt
+        }
+        if (!filterEl) return;
+
+        let lastScrollYFB = 0;
+        let tickingFB = false;
+        let lastToggleFB = 0;
+
+        filterEl.classList.remove('is-collapsed');
+
+        window.addEventListener('scroll', () => {
+          if (!tickingFB) {
+            window.requestAnimationFrame(() => {
+              const now = Date.now();
+              const delta = window.scrollY - lastScrollYFB;
+              const absScroll = window.scrollY;
+
+              if (Math.abs(delta) > 15 && now - lastToggleFB > 250) {
+                if (delta > 0 && absScroll > 120) {
+                  filterEl.classList.add('is-collapsed');
+                } else if (delta < 0 || absScroll < 60) {
+                  filterEl.classList.remove('is-collapsed');
+                }
+                lastToggleFB = now;
+              }
+
+              lastScrollYFB = absScroll;
+              tickingFB = false;
+            });
+            tickingFB = true;
+          }
+        }, { passive: true });
+      })();
+
+      // === Stabilisierte Filter-Box (Filter Panel / Block) ===
+      (function initFilterAutoCollapse(){
+        const getFilterEl = () => document.getElementById('filterPanel') || document.getElementById('filterBlock');
+        let filterEl = getFilterEl();
+        if (!filterEl) {
+          // Falls dynamisch gerendert: auf #app warten
+          const mo = new MutationObserver(() => {
+            filterEl = getFilterEl();
+            if (filterEl) {
+              mo.disconnect();
+              attachFilterHandler(filterEl);
+            }
+          });
+          const app = document.getElementById('app') || document.body;
+          mo.observe(app, { childList: true, subtree: true });
+        } else {
+          attachFilterHandler(filterEl);
+        }
+
+        function attachFilterHandler(target) {
+          let lastY = 0;
+          let ticking = false;
+          let lastToggle = 0;
+
+          const MIN_SCROLL_RANGE = 200;   // Bei sehr kurzem Scrollbereich nicht einklappen
+          const DEADZONE_DELTA   = 15;    // Minimale Bewegung, bevor reagiert wird
+          const RATE_LIMIT_MS    = 250;   // Mindestabstand zwischen Toggles
+          const HIDE_AFTER_Y     = 120;   // Erst ab dieser Scrolltiefe einklappen
+          const SHOW_BEFORE_Y    = 80;    // Bei Rückweg frühzeitig wieder anzeigen
+
+          window.addEventListener('scroll', () => {
+            if (ticking) return;
+            ticking = true;
+            requestAnimationFrame(() => {
+              const now = Date.now();
+              const y = window.scrollY;
+              const delta = y - lastY;
+              const scrollRange = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+
+              // Wenn kaum Scrollbereich existiert: niemals einklappen → stabil
+              if (scrollRange < MIN_SCROLL_RANGE) {
+                target.classList.remove('filter-collapsed');
+                lastY = y;
+                ticking = false;
+                return;
+              }
+
+              if (Math.abs(delta) > DEADZONE_DELTA && (now - lastToggle) > RATE_LIMIT_MS) {
+                if (delta > 0 && y > HIDE_AFTER_Y) {
+                  // Runter scrollen → einklappen
+                  target.classList.add('filter-collapsed');
+                  lastToggle = now;
+                } else if (delta < 0 || y < SHOW_BEFORE_Y) {
+                  // Hoch scrollen oder nahe oben → ausklappen
+                  target.classList.remove('filter-collapsed');
+                  lastToggle = now;
+                }
+              }
+
+              lastY = y;
+              ticking = false;
+            });
+          }, { passive: true });
+        }
+      })();
 
       // Icons for playlist toggle (add/remove)
       const SVG_PLAYLIST_ADD = `
