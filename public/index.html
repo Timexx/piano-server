@@ -6225,41 +6225,103 @@
         const backdrop = document.createElement('div');
         backdrop.className = 'modal-backdrop';
         backdrop.innerHTML = `
-          <div class="glass-panel w-[560px] max-w-full p-6 text-sm text-neutral-200">
-            <div class="flex items-center justify-between gap-3">
-              <div>
-                <div class="text-xs uppercase tracking-wide text-neutral-500">Sammlung</div>
-                <h2 class="text-lg font-semibold text-neutral-100">Kategorien verwalten</h2>
+          <div class="share-dialog-container">
+            <button class="share-dialog-close" aria-label="Schließen" title="Schließen (ESC)" data-role="close">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+              </svg>
+            </button>
+            <div class="share-dialog-header">
+              <div class="share-dialog-title">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                </svg>
+                <span>Kategorien verwalten</span>
               </div>
-              <button type="button" class="px-2 py-1 rounded-full border border-neutral-700 text-neutral-400 hover:text-neutral-200" data-role="close">✕</button>
+              <div class="share-dialog-subtitle">
+                Organisiere deine Musiksammlung
+              </div>
             </div>
-            <form id="createCategoryForm" class="mt-5 grid grid-cols-1 gap-3">
-              <div class="grid grid-cols-6 gap-3 items-end">
-                <label class="col-span-3 text-xs uppercase tracking-wide text-neutral-400">Name
-                  <input name="name" required maxlength="40" class="mt-1 w-full px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-700" placeholder="z.B. Filmmusik" />
-                </label>
-                <label class="col-span-2 text-xs uppercase tracking-wide text-neutral-400">Icon
-                  <input name="icon" maxlength="2" class="mt-1 w-full px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-700" placeholder="♪" />
-                </label>
-                <label class="col-span-1 text-xs uppercase tracking-wide text-neutral-400">Farbe
-                  <input name="color" type="color" value="#6366F1" class="mt-1 h-[42px] w-full rounded-lg border border-neutral-700 bg-neutral-900" />
-                </label>
+            
+            <div class="share-dialog-body">
+              <form id="createCategoryForm" class="space-y-4 pb-4 border-b border-neutral-800/60">
+                <div class="text-xs uppercase tracking-[0.08em] font-semibold text-neutral-400 mb-3">Neue Kategorie erstellen</div>
+                <div class="grid grid-cols-6 gap-3 items-end">
+                  <label class="col-span-3 flex flex-col gap-2">
+                    <span class="text-xs uppercase tracking-[0.08em] font-semibold text-neutral-400">Name</span>
+                    <input name="name" required maxlength="40" class="w-full px-3 py-2 rounded-lg bg-neutral-900/80 border border-neutral-700 text-neutral-200" placeholder="z.B. Filmmusik" />
+                  </label>
+                  <label class="col-span-2 flex flex-col gap-2">
+                    <span class="text-xs uppercase tracking-[0.08em] font-semibold text-neutral-400">Icon</span>
+                    <input name="icon" maxlength="2" class="w-full px-3 py-2 rounded-lg bg-neutral-900/80 border border-neutral-700 text-neutral-200 text-center" placeholder="♪" readonly />
+                  </label>
+                  <label class="col-span-1 flex flex-col gap-2">
+                    <span class="text-xs uppercase tracking-[0.08em] font-semibold text-neutral-400">Farbe</span>
+                    <input name="color" type="color" value="#6366F1" class="h-[42px] w-full rounded-lg border border-neutral-700 bg-neutral-900 cursor-pointer" />
+                  </label>
+                </div>
+                <div class="mb-3">
+                  <div class="text-xs uppercase tracking-[0.08em] font-semibold text-neutral-400 mb-2">Wähle ein Icon</div>
+                  <div id="emojiPicker" class="grid grid-cols-8 gap-2">
+                    <button type="button" class="emoji-btn">🎵</button>
+                    <button type="button" class="emoji-btn">🎶</button>
+                    <button type="button" class="emoji-btn">🎹</button>
+                    <button type="button" class="emoji-btn">🎼</button>
+                    <button type="button" class="emoji-btn">🎺</button>
+                    <button type="button" class="emoji-btn">🎸</button>
+                    <button type="button" class="emoji-btn">🎻</button>
+                    <button type="button" class="emoji-btn">🥁</button>
+                    <button type="button" class="emoji-btn">🎤</button>
+                    <button type="button" class="emoji-btn">🎧</button>
+                    <button type="button" class="emoji-btn">📻</button>
+                    <button type="button" class="emoji-btn">🎙️</button>
+                    <button type="button" class="emoji-btn">🎬</button>
+                    <button type="button" class="emoji-btn">🎭</button>
+                    <button type="button" class="emoji-btn">🎪</button>
+                    <button type="button" class="emoji-btn">🎨</button>
+                    <button type="button" class="emoji-btn">⭐</button>
+                    <button type="button" class="emoji-btn">✨</button>
+                    <button type="button" class="emoji-btn">💫</button>
+                    <button type="button" class="emoji-btn">🌟</button>
+                    <button type="button" class="emoji-btn">❤️</button>
+                    <button type="button" class="emoji-btn">💛</button>
+                    <button type="button" class="emoji-btn">💚</button>
+                    <button type="button" class="emoji-btn">💙</button>
+                  </div>
+                </div>
+                <div class="flex justify-end pt-2">
+                  <button type="submit" class="btn btn-primary is-ready">
+                    Kategorie anlegen
+                  </button>
+                </div>
+              </form>
+              
+              <div class="mt-5">
+                <div class="text-xs uppercase tracking-[0.08em] font-semibold text-neutral-400 mb-3">Bestehende Kategorien</div>
+                <div id="categoryManagerList" class="space-y-2"></div>
               </div>
-              <div class="flex justify-end">
-                <button type="submit" class="px-3 py-1.5 rounded-full bg-emerald-600 text-white hover:bg-emerald-500">Kategorie anlegen</button>
-              </div>
-            </form>
-            <div class="mt-6">
-              <div class="text-xs uppercase tracking-wide text-neutral-500">Bestehende Kategorien</div>
-              <div id="categoryManagerList" class="mt-3 space-y-2 max-h-[45vh] overflow-y-auto pr-1"></div>
             </div>
           </div>`;
 
-        const closeModal = () => backdrop.remove();
+        const closeModal = () => {
+          backdrop.classList.add('fade-out');
+          setTimeout(() => backdrop.remove(), 200);
+        };
         backdrop.addEventListener('click', (ev) => {
           if (ev.target === backdrop) closeModal();
         });
-        backdrop.querySelector('[data-role="close"]').addEventListener('click', closeModal);
+        const closeBtn = backdrop.querySelector('.share-dialog-close');
+        closeBtn?.addEventListener('click', closeModal);
+        
+        // ESC key support
+        const handleEsc = (ev) => {
+          if (ev.key === 'Escape') {
+            closeModal();
+            document.removeEventListener('keydown', handleEsc);
+          }
+        };
+        document.addEventListener('keydown', handleEsc);
 
         const listEl = backdrop.querySelector('#categoryManagerList');
 
@@ -6290,26 +6352,85 @@
               const id = row.getAttribute('data-id');
               const cat = categories.find(c => c.id === id);
               if (!cat) return;
-              row.innerHTML = `<form class="w-full space-y-3" data-role="editForm">
+              row.innerHTML = `<form class="w-full space-y-3 p-4 rounded-xl border border-neutral-700 bg-neutral-900/40" data-role="editForm">
                   <div class="grid grid-cols-6 gap-3 items-end">
-                    <label class="col-span-3 text-xs uppercase tracking-wide text-neutral-400">Name
-                      <input name="name" value="${cat.name}" required maxlength="40" class="mt-1 w-full px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-700" />
+                    <label class="col-span-3 flex flex-col gap-2">
+                      <span class="text-xs uppercase tracking-[0.08em] font-semibold text-neutral-400">Name</span>
+                      <input name="name" value="${cat.name}" required maxlength="40" class="w-full px-3 py-2 rounded-lg bg-neutral-900/80 border border-neutral-700 text-neutral-200" />
                     </label>
-                    <label class="col-span-2 text-xs uppercase tracking-wide text-neutral-400">Icon
-                      <input name="icon" value="${cat.icon || ''}" maxlength="2" class="mt-1 w-full px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-700" />
+                    <label class="col-span-2 flex flex-col gap-2">
+                      <span class="text-xs uppercase tracking-[0.08em] font-semibold text-neutral-400">Icon</span>
+                      <input name="icon" value="${cat.icon || ''}" maxlength="2" class="w-full px-3 py-2 rounded-lg bg-neutral-900/80 border border-neutral-700 text-neutral-200 text-center" readonly />
                     </label>
-                    <label class="col-span-1 text-xs uppercase tracking-wide text-neutral-400">Farbe
-                      <input name="color" type="color" value="${cat.color || '#6366F1'}" class="mt-1 h-[42px] w-full rounded-lg border border-neutral-700 bg-neutral-900" />
+                    <label class="col-span-1 flex flex-col gap-2">
+                      <span class="text-xs uppercase tracking-[0.08em] font-semibold text-neutral-400">Farbe</span>
+                      <input name="color" type="color" value="${cat.color || '#6366F1'}" class="h-[42px] w-full rounded-lg border border-neutral-700 bg-neutral-900 cursor-pointer" />
                     </label>
                   </div>
-                  <div class="flex justify-end gap-2">
-                    <button type="button" class="px-3 py-1.5 rounded-full border border-neutral-700 text-neutral-300 hover:bg-neutral-800" data-role="cancel">Abbrechen</button>
-                    <button type="submit" class="px-3 py-1.5 rounded-full bg-emerald-600 text-white hover:bg-emerald-500">Speichern</button>
+                  <div class="mb-3">
+                    <div class="text-xs uppercase tracking-[0.08em] font-semibold text-neutral-400 mb-2">Wähle ein Icon</div>
+                    <div class="emoji-picker-edit grid grid-cols-8 gap-2">
+                      <button type="button" class="emoji-btn">🎵</button>
+                      <button type="button" class="emoji-btn">🎶</button>
+                      <button type="button" class="emoji-btn">🎹</button>
+                      <button type="button" class="emoji-btn">🎼</button>
+                      <button type="button" class="emoji-btn">🎺</button>
+                      <button type="button" class="emoji-btn">🎸</button>
+                      <button type="button" class="emoji-btn">🎻</button>
+                      <button type="button" class="emoji-btn">🥁</button>
+                      <button type="button" class="emoji-btn">🎤</button>
+                      <button type="button" class="emoji-btn">🎧</button>
+                      <button type="button" class="emoji-btn">📻</button>
+                      <button type="button" class="emoji-btn">🎙️</button>
+                      <button type="button" class="emoji-btn">🎬</button>
+                      <button type="button" class="emoji-btn">🎭</button>
+                      <button type="button" class="emoji-btn">🎪</button>
+                      <button type="button" class="emoji-btn">🎨</button>
+                      <button type="button" class="emoji-btn">⭐</button>
+                      <button type="button" class="emoji-btn">✨</button>
+                      <button type="button" class="emoji-btn">💫</button>
+                      <button type="button" class="emoji-btn">🌟</button>
+                      <button type="button" class="emoji-btn">❤️</button>
+                      <button type="button" class="emoji-btn">💛</button>
+                      <button type="button" class="emoji-btn">💚</button>
+                      <button type="button" class="emoji-btn">💙</button>
+                    </div>
+                  </div>
+                  <div class="flex justify-end gap-2 pt-2">
+                    <button type="button" class="btn btn-secondary" data-role="cancel">Abbrechen</button>
+                    <button type="submit" class="btn btn-primary is-ready">Speichern</button>
                   </div>
                 </form>`;
+              
               const form = row.querySelector('[data-role="editForm"]');
               const cancelBtn = row.querySelector('[data-role="cancel"]');
               cancelBtn?.addEventListener('click', refreshList);
+              
+              // Emoji picker for edit form
+              const emojiPickerEdit = row.querySelector('.emoji-picker-edit');
+              const iconInputEdit = row.querySelector('input[name="icon"]');
+              if (emojiPickerEdit && iconInputEdit) {
+                // Mark current emoji as selected
+                const currentEmoji = cat.icon || '';
+                emojiPickerEdit.querySelectorAll('.emoji-btn').forEach(btn => {
+                  if (btn.textContent === currentEmoji) {
+                    btn.classList.add('selected');
+                  }
+                });
+                
+                emojiPickerEdit.addEventListener('click', (ev) => {
+                  if (ev.target.classList.contains('emoji-btn')) {
+                    const emoji = ev.target.textContent;
+                    iconInputEdit.value = emoji;
+                    // Visual feedback
+                    emojiPickerEdit.querySelectorAll('.emoji-btn').forEach(btn => {
+                      btn.classList.remove('selected');
+                    });
+                    ev.target.classList.add('selected');
+                  }
+                });
+              }
+              
               form?.addEventListener('submit', async (ev) => {
                 ev.preventDefault();
                 const data = new FormData(form);
@@ -6346,6 +6467,23 @@
         }
 
         refreshList();
+
+        // Emoji picker functionality
+        const emojiPicker = backdrop.querySelector('#emojiPicker');
+        const iconInput = backdrop.querySelector('input[name="icon"]');
+        if (emojiPicker && iconInput) {
+          emojiPicker.addEventListener('click', (ev) => {
+            if (ev.target.classList.contains('emoji-btn')) {
+              const emoji = ev.target.textContent;
+              iconInput.value = emoji;
+              // Visual feedback
+              emojiPicker.querySelectorAll('.emoji-btn').forEach(btn => {
+                btn.classList.remove('selected');
+              });
+              ev.target.classList.add('selected');
+            }
+          });
+        }
 
         const createForm = backdrop.querySelector('#createCategoryForm');
         if (createForm) {
