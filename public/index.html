@@ -374,7 +374,7 @@
       /* ===== HEADER STYLES - Modern & Elegant ===== */
       #mainHeader {
         will-change: transform;
-        transition: transform 300ms cubic-bezier(0.4, 0.0, 0.2, 1);
+        transition: transform 200ms ease-out;
       }
       
       #mainHeader.header-hidden {
@@ -1641,6 +1641,36 @@
           max-width: 92vw; 
         }
       }
+      /* === GPU Performance Optimierungen === */
+      .music-card,
+      .playlist-card,
+      .glass-panel,
+      .control-panel,
+      .toast {
+        will-change: transform, opacity;
+        transform: translateZ(0);
+        backface-visibility: hidden;
+      }
+
+      /* Verhindert Repaints durch Box-Shadows bei Scrollbewegung */
+      .music-card,
+      .playlist-card {
+        transition: transform 0.25s ease, filter 0.25s ease;
+      }
+
+      /* Vermeidet teures Redraw bei Scroll für überlagerte Filter */
+      #app, main, body {
+        transform: translateZ(0);
+      }
+
+      /* Für iOS Safari: stabilisiert Layer bei blur() und backdrop-filter */
+      @supports (-webkit-backdrop-filter: blur(10px)) {
+        .glass-panel,
+        .control-panel {
+          -webkit-transform: translateZ(0);
+          transform: translateZ(0);
+        }
+      }
     </style>
   </head>
   <body class="min-h-screen bg-neutral-950 text-neutral-100 antialiased tap-highlight-none">
@@ -1920,6 +1950,37 @@
       
       // Initialize on load
       initHeaderSpacer();
+      // === Stabilisiertes Header-Scroll-Verhalten ===
+      const header = document.getElementById('mainHeader');
+      if (header) {
+        let lastScrollY = 0;
+        let ticking = false;
+        let lastToggle = 0;
+
+        window.addEventListener('scroll', () => {
+          if (!ticking) {
+            window.requestAnimationFrame(() => {
+              const now = Date.now();
+              const delta = window.scrollY - lastScrollY;
+              const absScroll = window.scrollY;
+
+              // Deadzone: erst toggeln, wenn Bewegung >15px und seit letztem Toggle >250ms
+              if (Math.abs(delta) > 15 && now - lastToggle > 250) {
+                if (delta > 0 && absScroll > 80) {
+                  header.classList.add('header-hidden');
+                } else if (delta < 0 || absScroll < 50) {
+                  header.classList.remove('header-hidden');
+                }
+                lastToggle = now;
+              }
+
+              lastScrollY = absScroll;
+              ticking = false;
+            });
+            ticking = true;
+          }
+        });
+      }
 
       // Icons for playlist toggle (add/remove)
       const SVG_PLAYLIST_ADD = `
