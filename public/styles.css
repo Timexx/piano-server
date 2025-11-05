@@ -1,8 +1,8 @@
 :root {
   color-scheme: light dark;
-  --surface-0: #050506;
-  --surface-1: #0b0b0c;
-  --surface-2: #111114;
+  --surface-0: #0e0e11;
+  --surface-1: #141418;
+  --surface-2: #1a1a1f;
   --accent-color: #6366F1;
   --accent-soft: rgba(99, 102, 241, 0.16);
   --accent-muted: rgba(99, 102, 241, 0.35);
@@ -12,7 +12,7 @@
 html, body { height: 100%; }
 
 body {
-  background: linear-gradient(145deg, color-mix(in srgb, var(--accent-color) 8%, var(--surface-0)) 0%, var(--surface-0) 55%, var(--surface-1) 100%);
+  background: linear-gradient(145deg, color-mix(in srgb, var(--accent-color) 15%, var(--surface-0)) 0%, var(--surface-0) 55%, var(--surface-1) 100%);
   transition: background 0.4s ease;
   min-height: 100vh;
   display: flex;
