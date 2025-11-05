@@ -1862,15 +1862,16 @@ function registerApiRoutes() {
     // General API Rate Limiter - Prevent API abuse
     apiLimiter = rateLimit({
       windowMs: 60 * 1000, // 1 minute
-      max: 120, // Max 120 requests per minute
+      max: 500, // Max 500 requests per minute (erhöht für große Bibliotheken)
       message: { error: "Zu viele Anfragen. Bitte warten Sie." },
       standardHeaders: true,
       legacyHeaders: false,
       skip: (req) => {
-        // Skip rate limiting for static files
+        // Skip rate limiting for static files and authenticated batch requests
         return req.path.startsWith('/vendor/') || 
                req.path.startsWith('/sheets/') ||
-               req.path.startsWith('/thumbnails/');
+               req.path.startsWith('/thumbnails/') ||
+               (req.path === '/api/share/info/batch' && req.auth); // Skip für batch endpoint
       },
       handler: (req, res) => {
         console.warn('[SECURITY] Rate limit exceeded for API from:', req.ip);
@@ -3026,6 +3027,199 @@ function withAnnotationLock(rel, task) {
   annotationLocks.set(rel, next);
   return next;
 }
+
+/* ---------------- Document Sharing API ---------------- */
+// Get share info for a document
+app.get("/api/share/info", async (req, res) => {
+  if (!ensureAuthenticated(req, res)) return;
+  
+  const fileName = req.query.name;
+  if (!fileName) {
+    return sendError(res, 400, "Document name required");
+  }
+  
+  const info = resolvePdfName(fileName);
+  if (!info) {
+    return sendError(res, 404, "Document not found");
+  }
+  
+  try {
+    const shareInfo = dataStore.getDocumentShareInfo(info.rel);
+    const accessRole = dataStore.getDocumentAccessRole(req.auth.user.id, info.rel);
+    
+    res.json({
+      ...shareInfo,
+      accessRole,
+      canShare: accessRole === 'owner'
+    });
+  } catch (err) {
+    logError('Get share info failed', err, { fileName, userId: req.auth.user.id });
+    sendError(res, 500, 'Fehler beim Abrufen der Freigabe-Informationen', err, 'Get share info');
+  }
+});
+
+// Batch: Get share info for multiple documents at once (optimized for large libraries)
+app.post("/api/share/info/batch", async (req, res) => {
+  if (!ensureAuthenticated(req, res)) return;
+  
+  const { fileNames } = req.body;
+  
+  if (!Array.isArray(fileNames) || fileNames.length === 0) {
+    return sendError(res, 400, "File names array required");
+  }
+  
+  // Limit batch size to prevent abuse
+  if (fileNames.length > 200) {
+    return sendError(res, 400, "Batch size too large (max 200)");
+  }
+  
+  try {
+    const results = {};
+    
+    for (const fileName of fileNames) {
+      const info = resolvePdfName(fileName);
+      if (!info) {
+        results[fileName] = { error: 'NOT_FOUND', accessRole: null, canShare: false };
+        continue;
+      }
+      
+      try {
+        const shareInfo = dataStore.getDocumentShareInfo(info.rel);
+        const accessRole = dataStore.getDocumentAccessRole(req.auth.user.id, info.rel);
+        
+        results[fileName] = {
+          ...shareInfo,
+          accessRole,
+          canShare: accessRole === 'owner'
+        };
+      } catch (err) {
+        results[fileName] = { error: 'INTERNAL_ERROR', accessRole: null, canShare: false };
+      }
+    }
+    
+    res.json({ results });
+  } catch (err) {
+    logError('Batch share info failed', err, { userId: req.auth.user.id, count: fileNames.length });
+    sendError(res, 500, 'Fehler beim Abrufen der Freigabe-Informationen', err, 'Batch share info');
+  }
+});
+
+// Share document with other users
+app.post("/api/share", async (req, res) => {
+  if (!ensureAuthenticated(req, res)) return;
+  
+  const { fileName, userIds } = req.body;
+  
+  if (!fileName || !Array.isArray(userIds) || userIds.length === 0) {
+    return sendError(res, 400, "Document name and target user IDs required");
+  }
+  
+  const info = resolvePdfName(fileName);
+  if (!info) {
+    return sendError(res, 404, "Document not found");
+  }
+  
+  try {
+    // Verify user is owner
+    const accessRole = dataStore.getDocumentAccessRole(req.auth.user.id, info.rel);
+    if (accessRole !== 'owner') {
+      return sendError(res, 403, "Only document owner can share");
+    }
+    
+    // Validate target user IDs exist
+    const validUserIds = [];
+    for (const userId of userIds) {
+      const user = authService.getUserById(userId);
+      if (user && user.isActive) {
+        validUserIds.push(userId);
+      }
+    }
+    
+    if (validUserIds.length === 0) {
+      return sendError(res, 400, "No valid target users found");
+    }
+    
+    dataStore.shareDocument(req.auth.user.id, info.rel, validUserIds);
+    
+    res.json({
+      success: true,
+      sharedWith: validUserIds.length,
+      message: `Dokument mit ${validUserIds.length} Benutzer(n) geteilt`
+    });
+  } catch (err) {
+    logError('Share document failed', err, { fileName, userIds, userId: req.auth.user.id });
+    sendError(res, 500, err.message || 'Fehler beim Teilen des Dokuments', err, 'Share document');
+  }
+});
+
+// Unshare document from specific users
+app.delete("/api/share", async (req, res) => {
+  if (!ensureAuthenticated(req, res)) return;
+  
+  const { fileName, userIds } = req.body;
+  
+  if (!fileName) {
+    return sendError(res, 400, "Document name required");
+  }
+  
+  const info = resolvePdfName(fileName);
+  if (!info) {
+    return sendError(res, 404, "Document not found");
+  }
+  
+  try {
+    const accessRole = dataStore.getDocumentAccessRole(req.auth.user.id, info.rel);
+    
+    // Owner can unshare from others, shared users can remove themselves
+    if (accessRole === 'owner' && Array.isArray(userIds) && userIds.length > 0) {
+      dataStore.unshareDocument(req.auth.user.id, info.rel, userIds);
+      res.json({
+        success: true,
+        message: `Freigabe für ${userIds.length} Benutzer(n) aufgehoben`
+      });
+    } else if (accessRole === 'shared') {
+      dataStore.removeSelfFromSharedDocument(req.auth.user.id, info.rel);
+      res.json({
+        success: true,
+        message: 'Dokument von Ihrer Bibliothek entfernt'
+      });
+    } else {
+      return sendError(res, 403, "No permission to modify sharing");
+    }
+  } catch (err) {
+    logError('Unshare document failed', err, { fileName, userIds, userId: req.auth.user.id });
+    sendError(res, 500, 'Fehler beim Aufheben der Freigabe', err, 'Unshare document');
+  }
+});
+
+// Get user's share code (their user ID)
+app.get("/api/share/code", (req, res) => {
+  if (!ensureAuthenticated(req, res)) return;
+  
+  res.json({
+    userId: req.auth.user.id,
+    email: req.auth.user.email
+  });
+});
+
+// Get list of all users (for sharing UI) - limited info
+app.get("/api/users/list", (req, res) => {
+  if (!ensureAuthenticated(req, res)) return;
+  
+  try {
+    const users = authService.listUsers()
+      .filter(u => u.isActive && u.id !== req.auth.user.id)
+      .map(u => ({
+        id: u.id,
+        email: u.email
+      }));
+    
+    res.json({ users });
+  } catch (err) {
+    logError('List users failed', err, { userId: req.auth.user.id });
+    sendError(res, 500, 'Fehler beim Abrufen der Benutzerliste', err, 'List users');
+  }
+});
 
 /* ---------------- Sheets API (enhanced with pagination) ---------------- */
 app.get("/api/sheets", async (req, res) => {

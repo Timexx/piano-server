@@ -488,6 +488,18 @@
         <svg xmlns="http://www.w3.org/2000/svg" height="24" viewBox="0 -960 960 960" width="24" fill="currentColor" aria-hidden="true" focusable="false">
           <path d="M480-160v-80h120l180-240-180-240H160v200H80v-200q0-33 23.5-56.5T160-800h440q19 0 36 8.5t28 23.5l216 288-216 288q-11 15-28 23.5t-36 8.5H480Zm-10-320ZM200-120v-120H80v-80h120v-120h80v120h120v80H280v120h-80Z"/>
         </svg>`;
+      const SVG_SHARE = `
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+          <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/>
+          <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
+        </svg>`;
+      const SVG_USER_GROUP = `
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+          <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/>
+          <circle cx="9" cy="7" r="4"/>
+          <path d="M23 21v-2a4 4 0 00-3-3.87"/>
+          <path d="M16 3.13a4 4 0 010 7.75"/>
+        </svg>`;
 
       // Icons for playlist list UI
       const SVG_SEARCH = `
@@ -4987,10 +4999,30 @@
             <button type="button" aria-label="Als Favorit markieren" title="Favorit" class="fav icon-btn"></button>
             <button type="button" aria-label="Zur Playlist hinzufügen" title="Zur Playlist hinzufügen" data-name="${item.name}" class="add-playlist icon-btn">${SVG_PLAYLIST_ADD}</button>
             <button type="button" aria-label="Kategorien" title="Kategorien" class="assign-cat icon-btn">${SVG_CATEGORY_ADD}</button>
+            <button type="button" aria-label="Teilen" title="Teilen" class="share-pdf icon-btn" style="display:none;" data-name="${item.name}">${SVG_SHARE}</button>
+            <button type="button" aria-label="Entfernen" title="Von mir entfernen" class="remove-shared icon-btn text-orange-400 hover:text-orange-300" style="display:none;" data-name="${item.name}">${SVG_TRASH_MINI}</button>
             <button type="button" aria-label="PDF löschen" title="PDF löschen" class="delete-pdf icon-btn text-red-400 hover:text-red-300" style="display:none;" data-name="${item.name}">${SVG_TRASH_MINI}</button>
           </div>
         `;
         a.appendChild(overlay);
+        
+        // Add shared badge (initially hidden, will be shown by checkAuthAndShowActions)
+        const sharedBadge = document.createElement('div');
+        sharedBadge.className = 'badge-shared';
+        sharedBadge.style.display = 'none';
+        sharedBadge.innerHTML = `
+          ${SVG_USER_GROUP}
+          <div class="shared-tooltip">Geteilt</div>
+        `;
+        sharedBadge.addEventListener('click', (ev) => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          const ownerEmail = sharedBadge.dataset.ownerEmail;
+          if (ownerEmail) {
+            showToast(`Geteilt von: ${ownerEmail}`, 4000);
+          }
+        });
+        a.appendChild(sharedBadge);
 
         // Wire interactions
         const favBtn = overlay.querySelector('.fav');
@@ -5030,7 +5062,21 @@
           await confirmAndDeletePdf(item);
         });
         
-        // Show delete button only for admin users (will be enabled by checkAuthAndShowActions)
+        // Share button handler
+        const shareBtn = overlay.querySelector('.share-pdf');
+        shareBtn?.addEventListener('click', async (ev) => {
+          ev.preventDefault(); ev.stopPropagation();
+          await openShareDialog(item);
+        });
+        
+        // Remove shared button handler
+        const removeSharedBtn = overlay.querySelector('.remove-shared');
+        removeSharedBtn?.addEventListener('click', async (ev) => {
+          ev.preventDefault(); ev.stopPropagation();
+          await confirmAndRemoveSharedDocument(item);
+        });
+        
+        // Show delete/share/remove buttons based on access rights (will be enabled by checkAuthAndShowActions)
         // Ensure playlist icons reflect current state
         queueMicrotask(() => updateLibraryPlaylistButtons());
 
@@ -5104,11 +5150,35 @@
             <button class="assign-cat h-9 w-9 grid place-items-center rounded-full border border-neutral-700 text-neutral-200 bg-neutral-800/70 hover:bg-neutral-700" title="Kategorien hinzufügen" style="padding:0;" aria-label="Kategorien hinzufügen">
               ${SVG_CATEGORY_ADD}
             </button>
+            <button class="share-pdf h-9 w-9 grid place-items-center rounded-full border border-neutral-700 text-neutral-200 bg-neutral-800/70 hover:bg-neutral-700" data-name="${item.name}" title="Teilen" style="display:none;padding:0;" aria-label="Teilen">
+              ${SVG_SHARE}
+            </button>
+            <button class="remove-shared h-9 w-9 grid place-items-center rounded-full border border-orange-700 text-orange-400 bg-neutral-800/70 hover:bg-orange-900/50 hover:text-orange-300 transition-transform" data-name="${item.name}" title="Von mir entfernen" style="display:none;padding:0;" aria-label="Von mir entfernen">
+              ${SVG_TRASH_MINI}
+            </button>
             <button class="delete-pdf h-9 w-9 grid place-items-center rounded-full border border-red-700 text-red-400 bg-neutral-800/70 hover:bg-red-900/50 hover:text-red-300 transition-transform" data-name="${item.name}" title="PDF löschen" style="display:none;padding:0;" aria-label="PDF löschen">
               ${SVG_TRASH_MINI}
             </button>
           </div>
         `;
+        
+        // Add shared badge (initially hidden, will be shown by checkAuthAndShowActions)
+        const sharedBadgeRow = document.createElement('div');
+        sharedBadgeRow.className = 'badge-shared-row';
+        sharedBadgeRow.style.display = 'none';
+        sharedBadgeRow.innerHTML = `
+          ${SVG_USER_GROUP}
+          <div class="shared-tooltip">Geteilt</div>
+        `;
+        sharedBadgeRow.addEventListener('click', (ev) => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          const ownerEmail = sharedBadgeRow.dataset.ownerEmail;
+          if (ownerEmail) {
+            showToast(`Geteilt von: ${ownerEmail}`, 4000);
+          }
+        });
+        a.appendChild(sharedBadgeRow);
         const favBtnRow = a.querySelector('.fav');
         if (favBtnRow) {
           const isFav = state.library.favorites.has(item.name);
@@ -5151,6 +5221,22 @@
           ev.preventDefault();
           ev.stopPropagation();
           await confirmAndDeletePdf(item);
+        });
+        
+        // Share button handler
+        const shareBtn = a.querySelector('.share-pdf');
+        if (shareBtn) shareBtn.addEventListener('click', async (ev) => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          await openShareDialog(item);
+        });
+        
+        // Remove shared button handler
+        const removeBtn = a.querySelector('.remove-shared');
+        if (removeBtn) removeBtn.addEventListener('click', async (ev) => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          await confirmAndRemoveSharedDocument(item);
         });
         
         // Click-Handler für direktes Laden (ohne Page-Reload) + Wake Lock Aktivierung
@@ -6288,6 +6374,31 @@
         console.log(`Cleaned ${excess} thumbnails from cache`);
       }
       
+      // ===== Check Document Access Rights =====
+      async function checkDocumentAccessRights(fileName) {
+        try {
+          const response = await fetch(`/api/share/info?name=${encodeURIComponent(fileName)}`, {
+            credentials: 'include'
+          });
+          
+          if (!response.ok) {
+            return { accessRole: null, canEdit: false };
+          }
+          
+          const shareInfo = await response.json();
+          const canEdit = shareInfo.accessRole === 'owner';
+          
+          return {
+            accessRole: shareInfo.accessRole,
+            canEdit,
+            sharedBy: shareInfo.sharedBy
+          };
+        } catch (error) {
+          console.error('Failed to check access rights:', error);
+          return { accessRole: null, canEdit: false };
+        }
+      }
+      
       // ===== Viewer =====
       async function renderViewer(fileName) {
         // Schließe offene Playlist-Docks/Manager, damit der Viewer sauber startet
@@ -6297,6 +6408,12 @@
         document.body.classList.add('in-viewer');
         setUploadButtonVisible(false);
         state.viewer.wakeDesired = true;
+        
+        // Check access rights for this document
+        const accessInfo = await checkDocumentAccessRights(fileName);
+        state.viewer.accessRole = accessInfo.accessRole;
+        state.viewer.canEdit = accessInfo.canEdit;
+        state.viewer.sharedBy = accessInfo.sharedBy;
         if (state.viewer.layoutObserver) {
           state.viewer.layoutObserver.disconnect();
           state.viewer.layoutObserver = null;
@@ -6664,6 +6781,40 @@
             }
           });
         }
+        
+        // Disable annotation controls if user doesn't have edit rights
+        const annotationBtn = document.querySelector('#btnAnnotationToggle');
+        const editMarkersBtn = document.querySelector('#btnEditMarkers');
+        if (!state.viewer.canEdit) {
+          if (annotationBtn) {
+            annotationBtn.disabled = true;
+            annotationBtn.title = 'Nur Eigentümer können Notizen bearbeiten';
+            annotationBtn.classList.add('opacity-50', 'cursor-not-allowed');
+          }
+          if (editMarkersBtn) {
+            editMarkersBtn.disabled = true;
+            editMarkersBtn.title = 'Nur Eigentümer können Marker bearbeiten';
+            editMarkersBtn.classList.add('opacity-50', 'cursor-not-allowed');
+          }
+          
+          // Show info message if document is shared
+          if (state.viewer.sharedBy) {
+            showToast(`Geteilt von ${state.viewer.sharedBy.email} - Nur-Lesen-Modus`, 4000);
+          }
+        } else {
+          // Re-enable controls for owners
+          if (annotationBtn) {
+            annotationBtn.disabled = false;
+            annotationBtn.title = 'Notizen';
+            annotationBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+          }
+          if (editMarkersBtn) {
+            editMarkersBtn.disabled = false;
+            editMarkersBtn.title = 'Sprungmarkierungen bearbeiten';
+            editMarkersBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+          }
+        }
+        
     await mountPdfVirtual(container, state.viewer.url);
     annotations.refreshOverlayActivation();
         await new Promise((resolve) => requestAnimationFrame(resolve));
@@ -7558,6 +7709,287 @@
         }
       }
       
+      // ===== Document Sharing Functionality =====
+      async function openShareDialog(item) {
+        try {
+          // Get current share info
+          const response = await fetch(`/api/share/info?name=${encodeURIComponent(item.name)}`, {
+            credentials: 'include'
+          });
+          
+          if (!response.ok) {
+            showToast('Fehler beim Laden der Freigabe-Informationen', 3000);
+            return;
+          }
+          
+          const shareInfo = await response.json();
+          
+          // Get list of all users
+          const usersResp = await fetch('/api/users/list', {
+            credentials: 'include'
+          });
+          
+          const usersData = await usersResp.json();
+          const allUsers = usersData.users || [];
+          
+          // Build user list with checkboxes
+          const sharedWithIds = new Set(shareInfo.sharedWith.map(u => u.userId));
+          const userCheckboxes = allUsers.map(user => {
+            const checked = sharedWithIds.has(user.id);
+            const checkId = `share-user-${user.id}`;
+            const statusBadge = checked 
+              ? '<span class="share-status-badge">Aktuell geteilt</span>' 
+              : '';
+            return `
+              <div class="share-user-item ${checked ? 'is-shared' : ''}">
+                <input type="checkbox" 
+                       id="${checkId}"
+                       class="share-user-checkbox" 
+                       data-user-id="${user.id}" 
+                       ${checked ? 'checked' : ''}>
+                <label for="${checkId}" class="share-user-label">
+                  <div class="share-user-info">
+                    <div class="share-user-email">${escapeHtml(user.email)}</div>
+                    <div class="share-user-id">ID: ${user.id.slice(0, 8)}...</div>
+                  </div>
+                  ${statusBadge}
+                </label>
+              </div>
+            `;
+          }).join('');
+          
+          // Create share modal
+          const backdrop = document.createElement('div');
+          backdrop.className = 'modal-backdrop';
+          backdrop.innerHTML = `
+            <div class="share-dialog-container">
+              <button class="share-dialog-close" aria-label="Schließen" title="Schließen (ESC)">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18"></line>
+                  <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+              </button>
+              <div class="share-dialog-header">
+                <div class="share-dialog-title">
+                  ${SVG_SHARE}
+                  <span>Dokument teilen</span>
+                </div>
+                <div class="share-dialog-subtitle">
+                  ${escapeHtml(item.displayName || item.name)}
+                </div>
+              </div>
+              
+              <div class="share-dialog-body">
+                ${userCheckboxes.length > 0 ? userCheckboxes : `
+                  <div class="share-no-users">
+                    <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="margin: 0 auto 16px; opacity: 0.3;">
+                      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                      <circle cx="9" cy="7" r="4"></circle>
+                      <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+                      <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+                    </svg>
+                    <div style="font-size: 15px; font-weight: 600; color: #d1d5db; margin-bottom: 6px;">Keine Benutzer vorhanden</div>
+                    <div style="font-size: 13px; color: #9ca3af;">Es gibt aktuell keine anderen Benutzer zum Teilen</div>
+                  </div>
+                `}
+              </div>
+              
+              <div class="share-dialog-footer">
+                <button id="cancelShare" class="btn btn-secondary">
+                  Abbrechen
+                </button>
+                <button id="confirmShare" class="btn btn-primary is-ready" ${userCheckboxes.length === 0 ? 'disabled' : ''}>
+                  Freigeben
+                </button>
+              </div>
+            </div>
+          `;
+          
+          document.body.appendChild(backdrop);
+          
+          // Handle cancel and close
+          const closeBtn = backdrop.querySelector('.share-dialog-close');
+          const cancelBtn = backdrop.querySelector('#cancelShare');
+          const confirmBtn = backdrop.querySelector('#confirmShare');
+          
+          const closeDialog = () => {
+            backdrop.classList.add('fade-out');
+            setTimeout(() => backdrop.remove(), 200);
+          };
+          
+          closeBtn.addEventListener('click', closeDialog);
+          cancelBtn.addEventListener('click', closeDialog);
+          
+          // Handle backdrop click to close
+          backdrop.addEventListener('click', (e) => {
+            if (e.target === backdrop) {
+              closeDialog();
+            }
+          });
+          
+          // Handle ESC key
+          const handleEscape = (e) => {
+            if (e.key === 'Escape') {
+              closeDialog();
+              document.removeEventListener('keydown', handleEscape);
+            }
+          };
+          document.addEventListener('keydown', handleEscape);
+          
+          // Handle confirm
+          confirmBtn.addEventListener('click', async () => {
+            confirmBtn.disabled = true;
+            confirmBtn.textContent = 'Teile...';
+            
+            try {
+              // Get all checked user IDs
+              const checkedBoxes = backdrop.querySelectorAll('.share-user-checkbox:checked');
+              const selectedUserIds = Array.from(checkedBoxes).map(cb => cb.dataset.userId);
+              
+              // Get previously shared user IDs
+              const previouslySharedIds = Array.from(sharedWithIds);
+              
+              // Determine users to share with (newly selected)
+              const toShare = selectedUserIds.filter(id => !sharedWithIds.has(id));
+              
+              // Determine users to unshare (previously shared but now unchecked)
+              const toUnshare = previouslySharedIds.filter(id => !selectedUserIds.includes(id));
+              
+              // Share with new users
+              if (toShare.length > 0) {
+                const shareResp = await fetch('/api/share', {
+                  method: 'POST',
+                  credentials: 'include',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    fileName: item.name,
+                    userIds: toShare
+                  })
+                });
+                
+                if (!shareResp.ok) {
+                  const errorData = await shareResp.json().catch(() => ({}));
+                  throw new Error(errorData.error || 'Fehler beim Teilen');
+                }
+              }
+              
+              // Unshare from users
+              if (toUnshare.length > 0) {
+                const unshareResp = await fetch('/api/share', {
+                  method: 'DELETE',
+                  credentials: 'include',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    fileName: item.name,
+                    userIds: toUnshare
+                  })
+                });
+                
+                if (!unshareResp.ok) {
+                  const errorData = await unshareResp.json().catch(() => ({}));
+                  throw new Error(errorData.error || 'Fehler beim Aufheben der Freigabe');
+                }
+              }
+              
+              closeDialog();
+              document.removeEventListener('keydown', handleEscape);
+              showToast(`Freigabe aktualisiert: ${selectedUserIds.length} Benutzer`, 3000);
+              
+              // Refresh library to show updated share status
+              setTimeout(() => renderLibrary(), 300);
+              
+            } catch (error) {
+              console.error('Share failed:', error);
+              closeDialog();
+              document.removeEventListener('keydown', handleEscape);
+              showToast(error.message || 'Fehler beim Teilen', 4000);
+            }
+          });
+          
+        } catch (error) {
+          console.error('Open share dialog failed:', error);
+          showToast('Fehler beim Öffnen des Dialogs', 3000);
+        }
+      }
+      
+      async function confirmAndRemoveSharedDocument(item) {
+        // Create confirmation modal
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `
+          <div class="glass-panel p-6 max-w-md w-full animate-fade-in" style="animation: slideUp 0.3s ease-out;">
+            <h3 class="text-xl font-bold mb-4 text-orange-400">Von mir entfernen?</h3>
+            <p class="text-neutral-300 mb-6">
+              Möchten Sie "<strong>${escapeHtml(item.displayName || item.name)}</strong>" aus Ihrer Bibliothek entfernen?
+            </p>
+            <p class="text-sm text-neutral-500 mb-6">
+              Das Dokument bleibt beim Eigentümer erhalten und Sie können es jederzeit erneut anfordern.
+            </p>
+            <div class="flex gap-3 justify-end">
+              <button id="cancelRemove" class="btn btn-secondary">
+                Abbrechen
+              </button>
+              <button id="confirmRemove" class="btn" style="background: linear-gradient(135deg, #f97316 0%, #ea580c 100%); border-color: #f97316; color: white;">
+                Entfernen
+              </button>
+            </div>
+          </div>
+        `;
+        
+        document.body.appendChild(backdrop);
+        
+        // Handle cancel
+        const cancelBtn = backdrop.querySelector('#cancelRemove');
+        const confirmBtn = backdrop.querySelector('#confirmRemove');
+        
+        cancelBtn.addEventListener('click', () => {
+          backdrop.remove();
+        });
+        
+        // Handle backdrop click to close
+        backdrop.addEventListener('click', (e) => {
+          if (e.target === backdrop) {
+            backdrop.remove();
+          }
+        });
+        
+        // Handle confirm
+        confirmBtn.addEventListener('click', async () => {
+          confirmBtn.disabled = true;
+          confirmBtn.textContent = 'Entferne...';
+          
+          try {
+            const response = await fetch('/api/share', {
+              method: 'DELETE',
+              credentials: 'include',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                fileName: item.name
+              })
+            });
+            
+            if (!response.ok) {
+              const errorData = await response.json().catch(() => ({}));
+              throw new Error(errorData.error || 'Fehler beim Entfernen');
+            }
+            
+            backdrop.remove();
+            showToast('Dokument aus Ihrer Bibliothek entfernt', 3000);
+            
+            // Remove from local state
+            state.library.items = state.library.items.filter(i => i.name !== item.name);
+            
+            // Refresh library view
+            renderLibrary();
+            
+          } catch (error) {
+            console.error('Remove shared failed:', error);
+            backdrop.remove();
+            showToast(error.message || 'Fehler beim Entfernen', 4000);
+          }
+        });
+      }
+      
       // ===== PDF Delete Functionality =====
       async function confirmAndDeletePdf(item) {
         // Create confirmation modal
@@ -7638,7 +8070,7 @@
         });
       }
       
-      // Check authentication and show delete buttons for authorized users
+      // Check authentication and show action buttons based on access rights
       async function checkAuthAndShowActions() {
         try {
           const response = await fetch('/api/auth/session', {
@@ -7653,11 +8085,83 @@
           
           const isAdmin = data.user.role === 'admin';
           
-          // Show delete buttons for admin users
-          if (isAdmin) {
-            document.querySelectorAll('.delete-pdf').forEach(btn => {
-              btn.style.display = 'inline-flex';
+          // Collect all document names for batch request (OPTIMIZED: single API call instead of N)
+          const items = state.library.items;
+          if (items.length === 0) return;
+          
+          const fileNames = items.map(item => item.name);
+          
+          // Fetch share info for all documents in one batch request
+          let shareInfoMap = {};
+          try {
+            const batchResp = await fetch('/api/share/info/batch', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
+              body: JSON.stringify({ fileNames })
             });
+            
+            if (!batchResp.ok) {
+              console.error('Batch share info request failed:', batchResp.status);
+              return;
+            }
+            
+            const batchData = await batchResp.json();
+            shareInfoMap = batchData.results || {};
+          } catch (err) {
+            console.error('Failed to fetch batch share info:', err);
+            return;
+          }
+          
+          // Apply share info to UI elements
+          for (const item of items) {
+            try {
+              const shareInfo = shareInfoMap[item.name];
+              if (!shareInfo || shareInfo.error) continue;
+              
+              const accessRole = shareInfo.accessRole;
+              
+              // Find buttons for this item
+              const itemEl = document.querySelector(`[data-item-name="${cssEscape(item.name)}"]`);
+              if (!itemEl) continue;
+              
+              const shareBtn = itemEl.querySelector('.share-pdf');
+              const removeBtn = itemEl.querySelector('.remove-shared');
+              const deleteBtn = itemEl.querySelector('.delete-pdf');
+              const sharedBadge = itemEl.querySelector('.badge-shared');
+              const sharedBadgeRow = itemEl.querySelector('.badge-shared-row');
+              
+              // Show appropriate buttons based on access role
+              if (accessRole === 'owner') {
+                // Owner can share and delete (if admin)
+                if (shareBtn) shareBtn.style.display = 'inline-flex';
+                if (deleteBtn && isAdmin) deleteBtn.style.display = 'inline-flex';
+                if (removeBtn) removeBtn.style.display = 'none';
+                if (sharedBadge) sharedBadge.style.display = 'none';
+                if (sharedBadgeRow) sharedBadgeRow.style.display = 'none';
+              } else if (accessRole === 'shared') {
+                // Shared users can only remove from themselves
+                if (removeBtn) removeBtn.style.display = 'inline-flex';
+                if (shareBtn) shareBtn.style.display = 'none';
+                if (deleteBtn) deleteBtn.style.display = 'none';
+                
+                // Show shared badge (both grid and list view) and store owner email
+                if (shareInfo.sharedBy) {
+                  const ownerEmail = shareInfo.sharedBy.email;
+                  if (sharedBadge) {
+                    sharedBadge.style.display = 'flex';
+                    sharedBadge.dataset.ownerEmail = ownerEmail;
+                  }
+                  if (sharedBadgeRow) {
+                    sharedBadgeRow.style.display = 'flex';
+                    sharedBadgeRow.dataset.ownerEmail = ownerEmail;
+                  }
+                }
+              }
+              
+            } catch (err) {
+              console.error('Failed to apply share info for', item.name, err);
+            }
           }
           
         } catch (error) {

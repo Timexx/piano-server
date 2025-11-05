@@ -404,13 +404,51 @@ button.grid.place-items-center svg {
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(6, 6, 9, 0.68);
-  backdrop-filter: blur(18px);
+  background: radial-gradient(
+    ellipse at center,
+    rgba(8, 8, 12, 0.85) 0%,
+    rgba(4, 4, 6, 0.92) 100%
+  );
+  backdrop-filter: blur(24px) saturate(120%);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 80;
   padding: 1.25rem;
+  animation: backdropFadeIn 0.3s ease-out;
+}
+
+@keyframes backdropFadeIn {
+  from {
+    opacity: 0;
+    backdrop-filter: blur(0px);
+  }
+  to {
+    opacity: 1;
+    backdrop-filter: blur(24px) saturate(120%);
+  }
+}
+
+.modal-backdrop.fade-out {
+  animation: backdropFadeOut 0.2s ease-out forwards;
+}
+
+@keyframes backdropFadeOut {
+  to {
+    opacity: 0;
+    backdrop-filter: blur(0px);
+  }
+}
+
+.modal-backdrop.fade-out .share-dialog-container {
+  animation: dialogExit 0.2s ease-out forwards;
+}
+
+@keyframes dialogExit {
+  to {
+    opacity: 0;
+    transform: scale(0.95) translateY(20px);
+  }
 }
 
 /* ===== HEADER STYLES - Modern & Elegant ===== */
@@ -925,10 +963,10 @@ body.in-viewer #headerSpacer {
 /* Viewer Controls - Glassmorphism Style */
 #controls {
   position: fixed;
-  bottom: 0;
+  bottom: max(env(safe-area-inset-bottom, 0px), 8px); /* Ensure visibility above screen edge */
   left: 0;
   right: 0;
-  z-index: 50;
+  z-index: 70; /* High priority to ensure visibility above PDF viewer */
   padding: 0;
   background: transparent;
   border: none;
@@ -1398,6 +1436,74 @@ body.in-viewer #headerSpacer {
   50% { opacity: 0.5; }
 }
 
+/* iPad / Tablet specific styles (768px - 1024px) */
+@media (min-width: 641px) and (max-width: 1024px) {
+  /* Ensure control panel is fully visible on iPad */
+  #controls {
+    z-index: 60; /* Higher than most elements */
+    position: fixed;
+    bottom: max(env(safe-area-inset-bottom, 0px), 12px); /* Lift above screen edge */
+    pointer-events: auto;
+  }
+  
+  #controlsInner {
+    padding: 1rem 1.2rem;
+    max-width: 100%;
+  }
+  
+  .control-panel {
+    padding: 0.7rem 1rem;
+    border-radius: 16px;
+    background: linear-gradient(120deg, 
+      color-mix(in srgb, var(--accent-color) 20%, rgba(15, 18, 26, 0.95)) 0%, 
+      rgba(15, 18, 26, 0.92) 100%);
+    border: 1.5px solid rgba(148, 163, 184, 0.18);
+    box-shadow: 
+      0 24px 48px -20px rgba(0, 0, 0, 0.8),
+      0 0 0 1px rgba(255, 255, 255, 0.05) inset;
+    backdrop-filter: blur(32px) saturate(180%);
+    -webkit-backdrop-filter: blur(32px) saturate(180%);
+  }
+  
+  .control-panel-left,
+  .control-panel-center,
+  .control-panel-right {
+    gap: 0.6rem;
+  }
+  
+  /* Make buttons slightly larger for better touch targets */
+  .btn {
+    padding: 0.55rem 1rem;
+    font-size: 0.875rem;
+    min-height: 44px; /* Apple's recommended minimum touch target */
+  }
+  
+  .btn-icon {
+    padding: 0.5rem;
+    min-width: 44px;
+    min-height: 44px;
+  }
+  
+  /* Ensure annotation toolbar is visible */
+  #annotationToolbar {
+    margin-bottom: 0.7rem;
+  }
+  
+  .annotation-toolbar {
+    background: linear-gradient(120deg, 
+      color-mix(in srgb, var(--accent-color) 24%, rgba(13, 17, 28, 0.96)) 0%, 
+      rgba(13, 17, 28, 0.94) 100%);
+    border: 1.5px solid rgba(148, 163, 184, 0.16);
+    backdrop-filter: blur(28px) saturate(180%);
+    -webkit-backdrop-filter: blur(28px) saturate(180%);
+  }
+  
+  /* Ensure viewer content doesn't overlap controls */
+  #viewerContent {
+    padding-bottom: calc(140px + var(--sab)); /* Extra space for controls */
+  }
+}
+
 /* Mobile tweaks */
 @media (max-width: 640px) {
   #app {
@@ -1433,6 +1539,7 @@ body.in-viewer #headerSpacer {
   
   #viewerContent {
     padding: 0;
+    padding-bottom: calc(160px + var(--sab)); /* Extra space for controls on mobile */
   }
   
   #viewerPdfContainer {
@@ -1578,7 +1685,7 @@ body.in-viewer #headerSpacer {
    Base layers (0-10): Normal content
    UI layers (10-30): Panels, cards, filters
    Interactive (30-50): Dropdowns, tooltips, popovers  
-   Overlays (50-80): Modals, drawers
+   Overlays (50-80): Modals, drawers, viewer controls (70)
    System (80-100): Notifications, critical UI
 */
 
@@ -1771,5 +1878,657 @@ body.in-viewer #headerSpacer {
   .control-panel {
     -webkit-transform: translateZ(0);
     transform: translateZ(0);
+  }
+}
+
+/* ===== SHARE DIALOG STYLES ===== */
+.share-dialog-container {
+  position: relative;
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  background: linear-gradient(135deg, 
+    rgba(22, 22, 28, 0.98) 0%, 
+    rgba(18, 18, 24, 0.96) 100%);
+  border: 2px solid rgba(99, 102, 241, 0.4);
+  border-radius: 24px;
+  box-shadow: 
+    0 0 0 1px rgba(99, 102, 241, 0.2) inset,
+    0 40px 80px -20px rgba(0, 0, 0, 0.95),
+    0 20px 60px -10px rgba(99, 102, 241, 0.3),
+    0 10px 40px -5px rgba(0, 0, 0, 0.8);
+  max-width: 560px;
+  width: 90vw;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  animation: dialogEnter 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transform-origin: center;
+  overflow: hidden;
+  /* Ensure proper stacking and visibility */
+  z-index: 1;
+  isolation: isolate;
+}
+
+.share-dialog-container::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, 
+    transparent 0%, 
+    rgba(99, 102, 241, 0.6) 50%, 
+    transparent 100%);
+  opacity: 1;
+  z-index: 1;
+}
+
+.share-dialog-container::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: radial-gradient(
+    circle at top center,
+    rgba(99, 102, 241, 0.12) 0%,
+    transparent 70%
+  );
+  pointer-events: none;
+  z-index: 0;
+}
+
+.share-dialog-close {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  z-index: 10;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  color: #9ca3af;
+}
+
+.share-dialog-close:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.2);
+  color: #f3f4f6;
+  transform: rotate(90deg);
+}
+
+.share-dialog-close:active {
+  transform: rotate(90deg) scale(0.95);
+}
+
+@keyframes dialogEnter {
+  0% {
+    opacity: 0;
+    transform: scale(0.92) translateY(30px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.share-dialog-header {
+  position: relative;
+  z-index: 2;
+  padding: 28px 28px 20px 28px;
+  background: linear-gradient(180deg, 
+    rgba(99, 102, 241, 0.08) 0%,
+    rgba(99, 102, 241, 0.03) 50%,
+    transparent 100%);
+  border-bottom: 1px solid rgba(99, 102, 241, 0.3);
+}
+
+.share-dialog-title {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-size: 22px;
+  font-weight: 700;
+  color: #f9fafb;
+  margin-bottom: 10px;
+  letter-spacing: -0.01em;
+}
+
+.share-dialog-title svg {
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  filter: drop-shadow(0 2px 4px rgba(99, 102, 241, 0.4));
+}
+
+.share-dialog-subtitle {
+  font-size: 14px;
+  color: #d1d5db;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-left: 40px;
+  opacity: 0.9;
+}
+
+.share-dialog-body {
+  position: relative;
+  z-index: 2;
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 240px;
+  max-height: 480px;
+  background: linear-gradient(180deg,
+    rgba(0, 0, 0, 0.2) 0%,
+    rgba(0, 0, 0, 0.25) 100%);
+}
+
+.share-dialog-body::-webkit-scrollbar {
+  width: 10px;
+}
+
+.share-dialog-body::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 5px;
+  margin: 8px 0;
+}
+
+.share-dialog-body::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, 
+    rgba(99, 102, 241, 0.4) 0%, 
+    rgba(99, 102, 241, 0.25) 100%);
+  border-radius: 5px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.share-dialog-body::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, 
+    rgba(99, 102, 241, 0.6) 0%, 
+    rgba(99, 102, 241, 0.4) 100%);
+  background-clip: padding-box;
+}
+
+.share-user-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 18px;
+  background: linear-gradient(135deg, 
+    rgba(255, 255, 255, 0.08) 0%, 
+    rgba(255, 255, 255, 0.04) 100%);
+  border: 1.5px solid rgba(255, 255, 255, 0.15);
+  border-radius: 14px;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: pointer;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.share-user-item::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 14px;
+  padding: 1px;
+  background: linear-gradient(135deg, 
+    rgba(99, 102, 241, 0) 0%, 
+    rgba(99, 102, 241, 0.3) 100%);
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+
+.share-user-item:hover {
+  background: linear-gradient(135deg, 
+    rgba(99, 102, 241, 0.12) 0%, 
+    rgba(99, 102, 241, 0.06) 100%);
+  border-color: rgba(99, 102, 241, 0.5);
+  transform: translateX(4px);
+  box-shadow: 
+    0 4px 16px -4px rgba(99, 102, 241, 0.3),
+    0 0 0 1px rgba(99, 102, 241, 0.1) inset;
+}
+
+.share-user-item:hover::before {
+  opacity: 1;
+}
+
+.share-user-item:active {
+  transform: translateX(2px) scale(0.99);
+}
+
+.share-user-checkbox {
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  min-height: 22px;
+  cursor: pointer;
+  accent-color: #6366f1;
+  border-radius: 6px;
+  margin: 0;
+  transition: all 0.2s ease;
+  filter: drop-shadow(0 2px 4px rgba(99, 102, 241, 0.3));
+}
+
+.share-user-checkbox:checked {
+  filter: drop-shadow(0 2px 8px rgba(99, 102, 241, 0.6));
+}
+
+.share-user-checkbox:focus {
+  outline: 2px solid rgba(99, 102, 241, 0.6);
+  outline-offset: 2px;
+}
+
+.share-user-checkbox:focus:not(:focus-visible) {
+  outline: none;
+}
+
+.share-user-item.is-shared {
+  background: linear-gradient(135deg, 
+    rgba(99, 102, 241, 0.15) 0%, 
+    rgba(99, 102, 241, 0.08) 100%);
+  border-color: rgba(99, 102, 241, 0.4);
+}
+
+.share-user-label {
+  flex: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.share-user-info {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  flex: 1;
+}
+
+.share-status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  background: rgba(34, 197, 94, 0.15);
+  border: 1px solid rgba(34, 197, 94, 0.3);
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #86efac;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.share-user-email {
+  font-size: 15px;
+  font-weight: 600;
+  color: #f3f4f6;
+  letter-spacing: -0.01em;
+}
+
+.share-user-id {
+  font-size: 12px;
+  color: #9ca3af;
+  font-family: 'SF Mono', 'Monaco', 'Courier New', monospace;
+  opacity: 0.8;
+}
+
+.share-no-users {
+  text-align: center;
+  padding: 60px 20px;
+  color: #9ca3af;
+  font-size: 14px;
+  font-weight: 500;
+  opacity: 0.7;
+}
+
+.share-dialog-footer {
+  position: relative;
+  z-index: 2;
+  padding: 20px 28px 24px 28px;
+  background: linear-gradient(180deg, 
+    transparent 0%, 
+    rgba(0, 0, 0, 0.3) 100%);
+  border-top: 1px solid rgba(99, 102, 241, 0.2);
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+}
+
+.share-dialog-footer button {
+  padding: 12px 24px;
+  font-size: 15px;
+  font-weight: 600;
+  border-radius: 12px;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: pointer;
+  letter-spacing: -0.01em;
+}
+
+.share-dialog-footer .btn-secondary {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #d1d5db;
+}
+
+.share-dialog-footer .btn-secondary:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
+  transform: translateY(-1px);
+}
+
+.share-dialog-footer .btn-primary {
+  background: linear-gradient(135deg, 
+    #6366f1 0%, 
+    #4f46e5 100%);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: white;
+  box-shadow: 
+    0 4px 16px -4px rgba(99, 102, 241, 0.6),
+    0 0 0 1px rgba(255, 255, 255, 0.1) inset;
+}
+
+.share-dialog-footer .btn-primary:hover:not(:disabled) {
+  background: linear-gradient(135deg, 
+    #7c3aed 0%, 
+    #6366f1 100%);
+  transform: translateY(-2px);
+  box-shadow: 
+    0 8px 24px -6px rgba(99, 102, 241, 0.8),
+    0 0 0 1px rgba(255, 255, 255, 0.15) inset;
+}
+
+.share-dialog-footer .btn-primary:active:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.share-dialog-footer .btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ===== SHARED ITEM BADGE STYLES ===== */
+
+/* Shared badge - positioned absolute like offline badge */
+.badge-shared {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  width: 32px;
+  height: 32px;
+  background: linear-gradient(135deg, 
+    rgba(99, 102, 241, 0.95) 0%, 
+    rgba(79, 70, 229, 0.95) 100%);
+  border: 1.5px solid rgba(255, 255, 255, 0.3);
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 
+    0 4px 12px rgba(99, 102, 241, 0.5),
+    0 0 0 1px rgba(255, 255, 255, 0.1) inset;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  z-index: 10;
+  cursor: pointer;
+}
+
+.badge-shared svg {
+  width: 18px;
+  height: 18px;
+  color: #ffffff;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.3));
+}
+
+.badge-shared:hover {
+  transform: scale(1.15) translateY(-2px);
+  box-shadow: 
+    0 8px 20px rgba(99, 102, 241, 0.7),
+    0 0 0 2px rgba(255, 255, 255, 0.2) inset;
+  border-color: rgba(255, 255, 255, 0.5);
+}
+
+.badge-shared:active,
+.badge-shared-row:active {
+  transform: scale(1.05);
+}
+
+/* Tooltip for shared badge - simple indicator */
+.badge-shared .shared-tooltip {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%) translateY(8px);
+  background: linear-gradient(135deg, 
+    rgba(15, 18, 26, 0.98) 0%, 
+    rgba(10, 13, 18, 0.98) 100%);
+  border: 1px solid rgba(99, 102, 241, 0.4);
+  border-radius: 8px;
+  padding: 8px 12px;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+  color: #e2e8f0;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  z-index: 100;
+  box-shadow: 
+    0 12px 24px -8px rgba(0, 0, 0, 0.8),
+    0 0 0 1px rgba(99, 102, 241, 0.2) inset;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+.badge-shared .shared-tooltip::before {
+  content: '';
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 6px solid transparent;
+  border-bottom-color: rgba(99, 102, 241, 0.4);
+}
+
+.badge-shared .shared-tooltip::after {
+  content: '';
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%) translateY(1px);
+  border: 5px solid transparent;
+  border-bottom-color: rgba(15, 18, 26, 0.98);
+}
+
+.badge-shared:hover .shared-tooltip {
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(-50%) translateY(10px);
+}
+
+/* Hide label and email elements - show only "Geteilt" text via content */
+.shared-tooltip-label,
+.shared-tooltip-email {
+  display: none;
+}
+
+/* Hide old inline badge container */
+.shared-badge-container {
+  display: none !important;
+}
+
+/* Shared badge for list view - inline style */
+.badge-shared-row {
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  transform: translateY(-50%);
+  width: 28px;
+  height: 28px;
+  background: linear-gradient(135deg, 
+    rgba(99, 102, 241, 0.95) 0%, 
+    rgba(79, 70, 229, 0.95) 100%);
+  border: 1.5px solid rgba(255, 255, 255, 0.3);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 
+    0 3px 10px rgba(99, 102, 241, 0.5),
+    0 0 0 1px rgba(255, 255, 255, 0.1) inset;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  z-index: 5;
+  cursor: pointer;
+  margin-right: 380px; /* Space for action buttons */
+}
+
+.badge-shared-row svg {
+  width: 14px;
+  height: 14px;
+  color: #ffffff;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.3));
+}
+
+.badge-shared-row:hover {
+  transform: translateY(-50%) scale(1.15);
+  box-shadow: 
+    0 6px 16px rgba(99, 102, 241, 0.7),
+    0 0 0 2px rgba(255, 255, 255, 0.2) inset;
+  border-color: rgba(255, 255, 255, 0.5);
+}
+
+.badge-shared-row .shared-tooltip {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  transform: translateY(8px);
+  background: linear-gradient(135deg, 
+    rgba(15, 18, 26, 0.98) 0%, 
+    rgba(10, 13, 18, 0.98) 100%);
+  border: 1px solid rgba(99, 102, 241, 0.4);
+  border-radius: 8px;
+  padding: 8px 12px;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+  color: #e2e8f0;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  z-index: 100;
+  box-shadow: 
+    0 12px 24px -8px rgba(0, 0, 0, 0.8),
+    0 0 0 1px rgba(99, 102, 241, 0.2) inset;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+.badge-shared-row .shared-tooltip::before {
+  content: 'Geteilt';
+}
+
+.badge-shared-row .shared-tooltip::after {
+  content: none;
+}
+
+.badge-shared-row:hover .shared-tooltip {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(10px);
+}
+
+@media (max-width: 640px) {
+  .share-dialog-container {
+    width: 95vw;
+    max-height: 90vh;
+    border-radius: 20px;
+  }
+  
+  .share-dialog-header {
+    padding: 24px 20px 18px 20px;
+  }
+  
+  .share-dialog-title {
+    font-size: 19px;
+    gap: 12px;
+  }
+  
+  .share-dialog-title svg {
+    width: 24px;
+    height: 24px;
+  }
+  
+  .share-dialog-subtitle {
+    padding-left: 36px;
+  }
+  
+  .share-dialog-body {
+    padding: 16px 20px;
+    gap: 10px;
+  }
+  
+  .share-user-item {
+    padding: 14px 16px;
+  }
+  
+  .share-dialog-footer {
+    padding: 16px 20px 20px 20px;
+    flex-direction: column-reverse;
+    gap: 10px;
+  }
+  
+  .share-dialog-footer button {
+    width: 100%;
+    padding: 14px 20px;
+  }
+  
+  .badge-shared {
+    width: 30px;
+    height: 30px;
+  }
+  
+  .badge-shared svg {
+    width: 16px;
+    height: 16px;
+  }
+  
+  .badge-shared-row {
+    width: 26px;
+    height: 26px;
+    margin-right: 0;
+    position: relative;
+    right: auto;
+    top: auto;
+    transform: none;
+    margin-left: 8px;
+  }
+  
+  .badge-shared-row:hover {
+    transform: scale(1.1);
+  }
+  
+  .badge-shared-row svg {
+    width: 13px;
+    height: 13px;
   }
 }

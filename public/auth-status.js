@@ -135,14 +135,40 @@
       }
 
       const logoutIcon = '<svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="#1f1f1f"><path d="M200-120q-33 0-56.5-23.5T120-200v-560q0-33 23.5-56.5T200-840h280v80H200v560h280v80H200Zm440-160-55-58 102-102H360v-80h327L585-622l55-58 200 200-200 200Z"/></svg>';
-      container.appendChild(
-        createIconButton({
-          icon: logoutIcon,
-          title: "Abmelden",
-          onClick: handleLogout,
-          variant: "danger",
-        })
-      );
+      
+      // Wrap logout button with share code tooltip
+      const logoutWrapper = document.createElement('div');
+      logoutWrapper.className = 'relative';
+      logoutWrapper.style.position = 'relative';
+      
+      const logoutBtn = createIconButton({
+        icon: logoutIcon,
+        title: "Abmelden",
+        onClick: handleLogout,
+        variant: "danger",
+      });
+      
+      const shareCodeTooltip = document.createElement('div');
+      shareCodeTooltip.className = 'absolute bottom-full mb-2 right-0 bg-neutral-900 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-neutral-200 shadow-lg whitespace-nowrap opacity-0 pointer-events-none transition-opacity duration-200';
+      shareCodeTooltip.style.zIndex = '9999';
+      shareCodeTooltip.innerHTML = `
+        <div class="flex flex-col gap-1">
+          <div class="text-xs text-neutral-400">Dein Teilen-Code:</div>
+          <div class="font-mono font-bold">${authState.user.id.slice(0, 12)}...</div>
+          <div class="text-xs text-neutral-500">Vollständig: ${authState.user.id}</div>
+        </div>
+      `;
+      
+      logoutBtn.addEventListener('mouseenter', () => {
+        shareCodeTooltip.style.opacity = '1';
+      });
+      logoutBtn.addEventListener('mouseleave', () => {
+        shareCodeTooltip.style.opacity = '0';
+      });
+      
+      logoutWrapper.appendChild(logoutBtn);
+      logoutWrapper.appendChild(shareCodeTooltip);
+      container.appendChild(logoutWrapper);
     } else {
       const loginIcon = '<svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="#1f1f1f"><path d="M200-120q-33 0-56.5-23.5T120-200v-560q0-33 23.5-56.5T200-840h280v80H200v560h280v80H200Zm440-160-55-58 102-102H360v-80h327L585-622l55-58 200 200-200 200Z"/></svg>';
       container.appendChild(
