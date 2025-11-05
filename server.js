@@ -3146,6 +3146,9 @@ app.post("/api/share", async (req, res) => {
       userContext.addDocumentsToUserCache(targetUserId, [info.rel]);
     }
     
+    // Also invalidate owner's cache so share info updates on page reload
+    userContext._caches.userDocumentCache.delete(req.auth.user.id);
+    
     res.json({
       success: true,
       sharedWith: validUserIds.length,
@@ -3186,6 +3189,9 @@ app.delete("/api/share", async (req, res) => {
           store.delete(info.rel);
         }
       }
+      
+      // Also invalidate owner's cache so share info updates on page reload
+      userContext._caches.userDocumentCache.delete(req.auth.user.id);
       
       res.json({
         success: true,

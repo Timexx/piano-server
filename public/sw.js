@@ -1,6 +1,6 @@
 // Service Worker für Piano Sheets PWA
-// Version für Cache-Invalidierung - UPDATED: Fix für unendliche Reload-Loop offline
-const CACHE_VERSION = 'v5-offline-reload-fix';
+// Version für Cache-Invalidierung - UPDATED: Share/Unshare fixes + UI improvements
+const CACHE_VERSION = 'v6-share-ui-fixes';
 const STATIC_CACHE = `piano-static-${CACHE_VERSION}`;
 const DYNAMIC_CACHE = `piano-dynamic-${CACHE_VERSION}`;
 const PDF_CACHE = `piano-pdfs-${CACHE_VERSION}`;
