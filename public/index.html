@@ -2497,6 +2497,61 @@
         if (document.body.classList.contains('in-viewer')) acquireWakeLockAuto();
       });
 
+      async function refreshPdfPages(fileName, pages, { bustToken } = {}) {
+        if (!Array.isArray(pages) || !pages.length) return;
+        if (!state.viewer._pdf) {
+          console.warn('PDF not loaded, cannot refresh pages');
+          return;
+        }
+
+        const container = document.querySelector('#viewer');
+        if (!container) return;
+
+        // Update URL with new cache token
+        if (bustToken) {
+          state.viewer.cacheToken = bustToken;
+          const urlBase = `/sheets/${encodePathSegments(fileName)}`;
+          state.viewer.url = `${urlBase}?v=${bustToken}`;
+        }
+
+        // Reload the PDF document with new cache token to get updated annotations
+        const pdf = await pdfjsLib.getDocument(state.viewer.url).promise;
+        state.viewer._pdf = pdf;
+
+        // Reload annotation data from server for affected pages
+        const annotationSnapshots = await getAnnotationsFromBackend(fileName);
+        const snapshotMap = new Map();
+        if (Array.isArray(annotationSnapshots)) {
+          annotationSnapshots.forEach((snapshot) => {
+            if (snapshot && Number.isInteger(snapshot.pageNumber)) {
+              snapshotMap.set(snapshot.pageNumber, snapshot);
+            }
+          });
+        }
+
+        // Find and re-render each affected page
+        for (const pageNum of pages) {
+          const pageWrapper = container.querySelector(`.viewer-page[data-page="${pageNum}"]`);
+          if (!pageWrapper) continue;
+
+          // Update the annotation committed image for this page
+          const snapshot = snapshotMap.get(pageNum);
+          if (typeof annotations?.primeCommittedImage === 'function') {
+            // If there's a snapshot, load it; otherwise pass null to clear
+            annotations.primeCommittedImage(pageNum, snapshot || { pageNumber: pageNum, dataUrl: null });
+          }
+
+          // Mark for re-render by removing rendered flag
+          delete pageWrapper.dataset.rendered;
+          
+          // Re-render the page
+          await renderOnePageInto(pageWrapper, pdf, pageNum);
+        }
+
+        // Refresh annotation overlays
+        annotations.refreshOverlayActivation();
+      }
+
       async function runPdfPageRefresh() {
         if (pdfRefreshState.running) {
           pdfRefreshState.timer = window.setTimeout(runPdfPageRefresh, 160);
