@@ -3300,8 +3300,15 @@ app.get("/api/sheets", async (req, res) => {
     
     // Filter by user's accessible documents and add user-specific category info
     // USER_DOCUMENTS is a Proxy that wraps a Set, use it directly
+    // De-duplicate by name to prevent showing the same document multiple times
+    const seenNames = new Set();
     let filtered = all
-      .filter(x => USER_DOCUMENTS.has(x.name))
+      .filter(x => {
+        if (!USER_DOCUMENTS.has(x.name)) return false;
+        if (seenNames.has(x.name)) return false; // Skip duplicates
+        seenNames.add(x.name);
+        return true;
+      })
       .map(item => {
         // Add user-specific category information
         const fileCfg = CONFIG.files[item.name] || {};
