@@ -3141,6 +3141,11 @@ app.post("/api/share", async (req, res) => {
     
     dataStore.shareDocument(req.auth.user.id, info.rel, validUserIds);
     
+    // Invalidate document cache for target users so they see the new shared document
+    for (const targetUserId of validUserIds) {
+      userContext.addDocumentsToUserCache(targetUserId, [info.rel]);
+    }
+    
     res.json({
       success: true,
       sharedWith: validUserIds.length,
@@ -3173,12 +3178,28 @@ app.delete("/api/share", async (req, res) => {
     // Owner can unshare from others, shared users can remove themselves
     if (accessRole === 'owner' && Array.isArray(userIds) && userIds.length > 0) {
       dataStore.unshareDocument(req.auth.user.id, info.rel, userIds);
+      
+      // Update document cache for target users - remove the document
+      for (const targetUserId of userIds) {
+        const store = userContext._caches.userDocumentCache.get(targetUserId);
+        if (store) {
+          store.delete(info.rel);
+        }
+      }
+      
       res.json({
         success: true,
         message: `Freigabe für ${userIds.length} Benutzer(n) aufgehoben`
       });
     } else if (accessRole === 'shared') {
       dataStore.removeSelfFromSharedDocument(req.auth.user.id, info.rel);
+      
+      // Update own document cache - remove the document
+      const store = userContext._caches.userDocumentCache.get(req.auth.user.id);
+      if (store) {
+        store.delete(info.rel);
+      }
+      
       res.json({
         success: true,
         message: 'Dokument von Ihrer Bibliothek entfernt'
