@@ -6782,19 +6782,18 @@
           });
         }
         
-        // Disable annotation controls if user doesn't have edit rights
+        // Hide annotation and marker controls if user doesn't have edit rights (shared documents)
         const annotationBtn = document.querySelector('#btnAnnotationToggle');
         const editMarkersBtn = document.querySelector('#btnEditMarkers');
         if (!state.viewer.canEdit) {
+          // Completely hide buttons for shared documents
           if (annotationBtn) {
+            annotationBtn.style.display = 'none';
             annotationBtn.disabled = true;
-            annotationBtn.title = 'Nur Eigentümer können Notizen bearbeiten';
-            annotationBtn.classList.add('opacity-50', 'cursor-not-allowed');
           }
           if (editMarkersBtn) {
+            editMarkersBtn.style.display = 'none';
             editMarkersBtn.disabled = true;
-            editMarkersBtn.title = 'Nur Eigentümer können Marker bearbeiten';
-            editMarkersBtn.classList.add('opacity-50', 'cursor-not-allowed');
           }
           
           // Show info message if document is shared
@@ -6802,13 +6801,15 @@
             showToast(`Geteilt von ${state.viewer.sharedBy.email} - Nur-Lesen-Modus`, 4000);
           }
         } else {
-          // Re-enable controls for owners
+          // Show and enable controls for owners
           if (annotationBtn) {
+            annotationBtn.style.display = '';
             annotationBtn.disabled = false;
             annotationBtn.title = 'Notizen';
             annotationBtn.classList.remove('opacity-50', 'cursor-not-allowed');
           }
           if (editMarkersBtn) {
+            editMarkersBtn.style.display = '';
             editMarkersBtn.disabled = false;
             editMarkersBtn.title = 'Sprungmarkierungen bearbeiten';
             editMarkersBtn.classList.remove('opacity-50', 'cursor-not-allowed');
