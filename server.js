@@ -1983,6 +1983,9 @@ app.post("/api/auth/login", loginLimiter || ((req, res, next) => next()), (req, 
   // SECURITY: Clear failed login attempts on successful login
   recordSuccessfulLogin(email);
 
+  // Update last login timestamp
+  authService.updateLastLogin(record.id);
+
   // SECURITY: Enhanced Session Fixation Prevention
   // Delete any existing session before creating new one, but validate ownership first
   const oldSessionId = req.auth?.sessionId || parseCookies(req)[SESSION_COOKIE_NAME];
@@ -2083,7 +2086,7 @@ app.get("/api/version", (req, res) => {
   // No authentication required for version endpoint
   res.setHeader("Cache-Control", "public, max-age=300"); // Cache for 5 minutes
   res.json({
-    version: "5.0.0",
+    version: "5.0.1",
     buildTime: Date.now()
   });
 });
@@ -2175,6 +2178,16 @@ app.patch("/api/admin/users/:id", (req, res) => {
     }
   }
 
+  // Prevent admin from deactivating or demoting themselves
+  if (req.auth.user.id === id) {
+    if (updates.isActive === false) {
+      return res.status(400).json({ error: "CANNOT_DEACTIVATE_SELF" });
+    }
+    if (updates.role && updates.role !== "admin") {
+      return res.status(400).json({ error: "CANNOT_DEMOTE_SELF" });
+    }
+  }
+
   if (updates.role !== undefined || updates.isActive !== undefined) {
     try {
       authService.setUserStatus(id, updates);
@@ -2215,6 +2228,12 @@ app.delete("/api/admin/users/:id", (req, res) => {
   if (!existing) {
     return res.status(404).json({ error: "USER_NOT_FOUND" });
   }
+
+  // Prevent admin from deleting themselves
+  if (req.auth.user.id === id) {
+    return res.status(400).json({ error: "CANNOT_DELETE_SELF" });
+  }
+
   if (isSoleActiveAdmin(id)) {
     return res.status(400).json({ error: "LAST_ADMIN_RESTRICTION" });
   }
