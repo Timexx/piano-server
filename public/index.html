@@ -4085,12 +4085,33 @@
         es.onmessage = (ev) => {
           try {
             const data = JSON.parse(ev.data);
-            // console.log('[SSE] 📨 Received playlist update:', data);
+            console.log('[SSE] 📨 Received generic message:', data);
             applyPlaylistState(data, { silent: true });
           } catch (err) {
             console.warn('[SSE] ⚠️ Parse failed:', err);
           }
         };
+        
+        // Handle specific event types for playlist updates
+        es.addEventListener('playlist-active', (ev) => {
+          try {
+            const data = JSON.parse(ev.data);
+            console.log('[SSE] 📨 Received playlist-active update:', data);
+            applyPlaylistState(data, { silent: true });
+          } catch (err) {
+            console.warn('[SSE] ⚠️ Parse failed for playlist-active:', err);
+          }
+        });
+        
+        es.addEventListener('playlist-state', (ev) => {
+          try {
+            const data = JSON.parse(ev.data);
+            console.log('[SSE] 📨 Received playlist-state update:', data);
+            applyPlaylistState(data, { silent: true });
+          } catch (err) {
+            console.warn('[SSE] ⚠️ Parse failed for playlist-state:', err);
+          }
+        });
         
         es.onerror = (err) => {
           console.error('[SSE] ❌ Connection error:', err, 'ReadyState:', es.readyState);

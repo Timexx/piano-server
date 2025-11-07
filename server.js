@@ -1691,7 +1691,9 @@ function broadcastPlaylists(userId = null) {
     const sentActive = sseManager.broadcast(targetUserId, "playlist-active", activePayload);
     const sentState = sseManager.broadcast(targetUserId, "playlist-state", statePayload);
     
-    console.log(`[SSE] Broadcasted playlist update to ${sentActive + sentState} clients for user ${targetUserId}`);
+    console.log(`[SSE] Broadcasted playlist update to ${sentActive + sentState} clients for user ${targetUserId} (active: ${sentActive}, state: ${sentState})`);
+    console.log(`[SSE] Active payload:`, JSON.stringify(activePayload).substring(0, 200) + '...');
+    console.log(`[SSE] State payload:`, JSON.stringify(statePayload).substring(0, 200) + '...');
   } catch (err) {
     logError("Broadcast failed", err, { userId: targetUserId });
   }
@@ -2410,7 +2412,7 @@ app.get("/api/playlists/events", (req, res) => {
   // Send initial data
   try {
     const initialData = serializePlaylistState(PLAYLIST_STATE);
-    const message = `data: ${JSON.stringify(initialData)}\n\n`;
+    const message = `event: playlist-state\ndata: ${JSON.stringify(initialData)}\n\n`;
     res.write(message);
     
     // Force flush to ensure data reaches client immediately
@@ -2489,7 +2491,7 @@ app.get("/api/playlist/events", (req, res) => {
 
   // Send initial data immediately
   try {
-    const initialData = `data: ${JSON.stringify(serializeActivePlaylist())}\n\n`;
+    const initialData = `event: playlist-active\ndata: ${JSON.stringify(serializeActivePlaylist())}\n\n`;
     res.write(initialData);
   } catch (err) {
     logError("Failed to send initial active playlist", err);
@@ -3154,27 +3156,15 @@ app.use(
 // to be accessible during server startup and outside registerApiRoutes()
 
 /* ---------------- Memory & System API ---------------- */
-app.get("/api/system/memory", (req, res) => {
-  // SECURITY: Use centralized admin check for consistency
-  if (!ensureAdmin(req, res)) return;
+app.get("/api/debug/sse-stats", (req, res) => {
+  if (!ensureAuthenticated(req, res)) return;
   
-  try {
-    const mem = process.memoryUsage();
-    const heapUsed = Math.round(mem.heapUsed / 1024 / 1024);
-    const heapTotal = Math.round(mem.heapTotal / 1024 / 1024);
-    const external = Math.round(mem.external / 1024 / 1024);
-    
-    res.json({
-      heapUsed,
-      heapTotal,
-      external,
-      uptime: Math.round(process.uptime()),
-      cacheSize: indexCache.items.length,
-      lastScan: indexCache.at ? new Date(indexCache.at).toISOString() : null
-    });
-  } catch (e) {
-    res.status(500).json({ error: "Memory info unavailable" });
-  }
+  const stats = sseManager.getStats();
+  res.json({
+    stats,
+    currentUser: req.auth.user.id,
+    currentUserConnections: sseManager.getSubscriberCount(req.auth.user.id)
+  });
 });
 
 app.post("/api/system/gc", (req, res) => {
