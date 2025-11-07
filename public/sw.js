@@ -1,6 +1,6 @@
 // Service Worker für Piano Sheets PWA
-// Version für Cache-Invalidierung - UPDATED: PDF.js Worker bypass fix
-const CACHE_VERSION = 'v9-worker-bypass-fix';
+// Version für Cache-Invalidierung - UPDATED: Layout fix for library pager
+const CACHE_VERSION = 'v10-layout-fix';
 const STATIC_CACHE = `piano-static-${CACHE_VERSION}`;
 const DYNAMIC_CACHE = `piano-dynamic-${CACHE_VERSION}`;
 const PDF_CACHE = `piano-pdfs-${CACHE_VERSION}`;

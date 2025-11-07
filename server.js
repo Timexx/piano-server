@@ -2238,6 +2238,8 @@ app.get("/api/playlists/events", (req, res) => {
   res.setHeader("Cache-Control", "no-cache, no-transform");
   res.setHeader("Connection", "keep-alive");
   res.setHeader("X-Accel-Buffering", "no"); // Disable nginx buffering
+  res.setHeader("Access-Control-Allow-Origin", "*"); // Allow cross-origin for SSE
+  res.setHeader("Access-Control-Allow-Headers", "Cache-Control");
   res.flushHeaders();
   console.log('[SSE] Headers sent, flushed');
   
@@ -2271,14 +2273,34 @@ app.get("/api/playlists/events", (req, res) => {
   sseManager.subscribe(userId, "playlist-state", res);
   console.log('[SSE] Client registered:', userId, 'Total subscribers:', sseManager.getSubscriberCount(userId));
 
-  // Keep-alive - shorter interval for proxy compatibility (15s < typical 60s timeout)
+  // Keep-alive - more frequent pings for better connection stability
   const keepAlive = setInterval(() => {
-    sseManager.ping(userId, "playlist-state");
-  }, 15000);
+    try {
+      sseManager.ping(userId, "playlist-state");
+    } catch (err) {
+      console.warn('[SSE] Keep-alive ping failed:', err.message);
+    }
+  }, 10000); // Reduced from 15s to 10s for better stability
 
+  // Handle connection close
   req.on("close", () => {
     clearInterval(keepAlive);
-    try { res.end(); } catch {}
+    try {
+      sseManager.unsubscribe(userId, "playlist-state", res);
+      res.end();
+    } catch (err) {
+      console.warn('[SSE] Error during cleanup:', err.message);
+    }
+  });
+
+  // Handle connection errors
+  req.on("error", (err) => {
+    console.warn('[SSE] Request error:', err.message);
+    clearInterval(keepAlive);
+    try {
+      sseManager.unsubscribe(userId, "playlist-state", res);
+      res.end();
+    } catch {}
   });
 });
 
@@ -2304,26 +2326,50 @@ app.get("/api/playlist/events", (req, res) => {
   res.setHeader("Cache-Control", "no-cache, no-transform");
   res.setHeader("Connection", "keep-alive");
   res.setHeader("X-Accel-Buffering", "no"); // Disable nginx buffering
+  res.setHeader("Access-Control-Allow-Origin", "*"); // Allow cross-origin for SSE
+  res.setHeader("Access-Control-Allow-Headers", "Cache-Control");
   res.flushHeaders();
 
-  // Send initial data
+  // Send initial data immediately
   try {
-    res.write(`data: ${JSON.stringify(serializeActivePlaylist())}\n\n`);
+    const initialData = `data: ${JSON.stringify(serializeActivePlaylist())}\n\n`;
+    res.write(initialData);
   } catch (err) {
     logError("Failed to send initial active playlist", err);
   }
 
   // Register with SSE manager
   sseManager.subscribe(userId, "playlist-active", res);
+  console.log('[SSE] Client registered:', userId, 'Total subscribers:', sseManager.getSubscriberCount(userId));
 
-  // Keep-alive - shorter interval for proxy compatibility (15s < typical 60s timeout)
+  // Keep-alive - more frequent pings for better connection stability
   const keepAlive = setInterval(() => {
-    sseManager.ping(userId, "playlist-active");
-  }, 15000);
+    try {
+      sseManager.ping(userId, "playlist-active");
+    } catch (err) {
+      console.warn('[SSE] Keep-alive ping failed:', err.message);
+    }
+  }, 10000); // Reduced from 15s to 10s for better stability
 
+  // Handle connection close
   req.on("close", () => {
     clearInterval(keepAlive);
-    try { res.end(); } catch {}
+    try {
+      sseManager.unsubscribe(userId, "playlist-active", res);
+      res.end();
+    } catch (err) {
+      console.warn('[SSE] Error during cleanup:', err.message);
+    }
+  });
+
+  // Handle connection errors
+  req.on("error", (err) => {
+    console.warn('[SSE] Request error:', err.message);
+    clearInterval(keepAlive);
+    try {
+      sseManager.unsubscribe(userId, "playlist-active", res);
+      res.end();
+    } catch {}
   });
 });
 

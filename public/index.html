@@ -2978,11 +2978,11 @@
             </div>
             <section id="offlineShelf" class="hidden"></section>
             <div class="flex flex-col flex-1 min-h-0 overflow-hidden">
-              <section id="virtualWrap" class="relative flex-1 min-h-0"></section>
-              <section id="libraryPager" class="flex items-center justify-between pt-3 shrink-0 ${pagerHiddenClass}">
-                <button id="prevPage" class="px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-800 ${prevDisabled?"invisible pointer-events-none select-none opacity-0":""}" ${prevDisabled?"aria-disabled=\"true\" tabindex=\"-1\"":""}>« Zurück</button>
+              <section id="virtualWrap" class="relative flex-1 min-h-0 pb-4"></section>
+              <section id="libraryPager" class="flex items-center justify-between px-4 py-3 shrink-0 ${pagerHiddenClass} bg-neutral-950/80 backdrop-blur-sm border-t border-neutral-800/50">
+                <button id="prevPage" class="px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-800 hover:bg-neutral-800 transition-colors ${prevDisabled?"invisible pointer-events-none select-none opacity-0":""}" ${prevDisabled?"aria-disabled=\"true\" tabindex=\"-1\"":""}>« Zurück</button>
                 <div class="text-sm text-neutral-400">Seite <span id="pNow">${currentPage}</span> / ${totalPages}</div>
-                <button id="nextPage" class="px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-800 ${nextDisabled?"invisible pointer-events-none select-none opacity-0":""}" ${nextDisabled?"aria-disabled=\"true\" tabindex=\"-1\"":""}>Weiter »</button>
+                <button id="nextPage" class="px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-800 hover:bg-neutral-800 transition-colors ${nextDisabled?"invisible pointer-events-none select-none opacity-0":""}" ${nextDisabled?"aria-disabled=\"true\" tabindex=\"-1\"":""}>Weiter »</button>
               </section>
             </div>
           </div>`;
@@ -3845,6 +3845,8 @@
         
         es.onopen = () => {
           console.log('[SSE] ✅ Connected to playlist events');
+          // Reset reconnection attempts on successful connection
+          playlist.reconnectAttempts = 0;
         };
         
         es.onmessage = (ev) => {
@@ -3860,8 +3862,15 @@
         es.onerror = (err) => {
           console.error('[SSE] ❌ Connection error:', err, 'ReadyState:', es.readyState);
           try { es.close(); } catch {}
-          console.log('[SSE] Reconnecting in 2.5s...');
-          setTimeout(connectPlaylistEvents, 2500);
+          
+          // Implement exponential backoff for reconnection
+          playlist.reconnectAttempts = (playlist.reconnectAttempts || 0) + 1;
+          const maxDelay = 30000; // Max 30 seconds
+          const baseDelay = 2500; // Base 2.5 seconds
+          const delay = Math.min(baseDelay * Math.pow(1.5, playlist.reconnectAttempts - 1), maxDelay);
+          
+          console.log(`[SSE] Reconnecting in ${delay}ms (attempt ${playlist.reconnectAttempts})...`);
+          setTimeout(connectPlaylistEvents, delay);
         };
         
         playlist.es = es;

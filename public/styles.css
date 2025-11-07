@@ -12,7 +12,7 @@
 html, body { height: 100%; }
 
 body {
-  background: linear-gradient(145deg, color-mix(in srgb, var(--accent-color) 15%, var(--surface-0)) 0%, var(--surface-0) 55%, var(--surface-1) 100%);
+  background: linear-gradient(145deg, color-mix(in srgb, var(--accent-color) 10%, var(--surface-0)) 0%, var(--surface-0) 55%, var(--surface-1) 100%);
   transition: background 0.4s ease;
   min-height: 100vh;
   display: flex;
