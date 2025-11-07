@@ -3992,11 +3992,15 @@
             opts.body = JSON.stringify(body);
             opts.headers["Content-Type"] = "application/json";
           }
+          // CSRF-Token explizit setzen, falls vorhanden
+          const csrfToken = sessionStorage.getItem('csrfToken');
+          if (csrfToken && ["POST", "PUT", "DELETE", "PATCH"].includes(method.toUpperCase()) && path.startsWith('/api/')) {
+            opts.headers["X-CSRF-Token"] = csrfToken;
+          }
           const res = await fetch(path, opts);
           if (!res?.ok) {
             const status = res ? res.status : "network";
             let errorMessage = `Request failed (${status})`;
-            
             // Try to get error message from response
             try {
               const errorData = await res.json();
@@ -4010,7 +4014,6 @@
                 if (errorText) errorMessage = errorText;
               } catch {}
             }
-            
             const error = new Error(errorMessage);
             error.status = status;
             throw error;

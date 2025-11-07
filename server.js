@@ -1664,7 +1664,7 @@ function ensureActivePlaylistPresent() {
 // const playlistStateClients = new Set();
 
 function broadcastPlaylists(userId = null) {
-  // Broadcast to current user only via sseManager
+  // Broadcast to ALL active sessions of the user (multi-device sync)
   if (!userContext || !sseManager) {
     console.warn("broadcastPlaylists called but userContext or sseManager not initialized");
     return;
@@ -1687,15 +1687,15 @@ function broadcastPlaylists(userId = null) {
     const activePayload = serializeActivePlaylist();
     const statePayload = serializePlaylistState(PLAYLIST_STATE);
     
-    console.log('[SSE] Broadcasting to user:', targetUserId, 'subscribers:', sseManager.getSubscriberCount(targetUserId));
-    sseManager.broadcast(targetUserId, "playlist-active", activePayload);
-    sseManager.broadcast(targetUserId, "playlist-state", statePayload);
+    // SSE-Manager broadcastet bereits an alle Clients des Users
+    const sentActive = sseManager.broadcast(targetUserId, "playlist-active", activePayload);
+    const sentState = sseManager.broadcast(targetUserId, "playlist-state", statePayload);
+    
+    console.log(`[SSE] Broadcasted playlist update to ${sentActive + sentState} clients for user ${targetUserId}`);
   } catch (err) {
     logError("Broadcast failed", err, { userId: targetUserId });
   }
-}
-
-function updatePlaylistTimestamp(playlist) {
+}function updatePlaylistTimestamp(playlist) {
   const now = Date.now();
   playlist.updatedAt = now;
   const { PLAYLIST_STATE } = userContext;
