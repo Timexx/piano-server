@@ -53,6 +53,81 @@
         </article>
       </section>
 
+      <section class="rounded-3xl border border-white/10 bg-white/5 p-6 shadow-xl">
+        <header class="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-2 mb-6">
+          <div>
+            <h2 class="text-xl font-semibold tracking-tight">Seitenaufruf-Statistiken</h2>
+            <p class="text-sm text-neutral-300">Anonyme Zugriffe auf verschiedene Bereiche der Anwendung (letzte 30 Tage).</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="text-sm text-neutral-400">Gesamt:</span>
+            <span id="statsTotalViews" class="text-lg font-semibold text-indigo-300">0</span>
+          </div>
+        </header>
+        <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+          <article class="rounded-xl border border-white/10 bg-neutral-900/30 p-4">
+            <h3 class="text-sm font-medium text-neutral-200 mb-2">Startseite</h3>
+            <p id="statsIndex" class="text-2xl font-bold text-blue-400">0</p>
+            <p class="text-xs text-neutral-400">index.html</p>
+          </article>
+          <article class="rounded-xl border border-white/10 bg-neutral-900/30 p-4">
+            <h3 class="text-sm font-medium text-neutral-200 mb-2">PDF-Viewer</h3>
+            <p id="statsViewer" class="text-2xl font-bold text-green-400">0</p>
+            <p class="text-xs text-neutral-400">Viewer-Modus</p>
+          </article>
+          <article class="rounded-xl border border-white/10 bg-neutral-900/30 p-4">
+            <h3 class="text-sm font-medium text-neutral-200 mb-2">Playlist-Modus</h3>
+            <p id="statsPlaylist" class="text-2xl font-bold text-emerald-400">0</p>
+            <p class="text-xs text-neutral-400">Playlist-Ansicht</p>
+          </article>
+          <article class="rounded-xl border border-white/10 bg-neutral-900/30 p-4">
+            <h3 class="text-sm font-medium text-neutral-200 mb-2">Adminbereich</h3>
+            <p id="statsAdmin" class="text-2xl font-bold text-purple-400">0</p>
+            <p class="text-xs text-neutral-400">admin.html</p>
+          </article>
+          <article class="rounded-xl border border-white/10 bg-neutral-900/30 p-4">
+            <h3 class="text-sm font-medium text-neutral-200 mb-2">Loginseite</h3>
+            <p id="statsLogin" class="text-2xl font-bold text-orange-400">0</p>
+            <p class="text-xs text-neutral-400">login.html</p>
+          </article>
+        </div>
+        
+        <details class="mt-6 rounded-xl border border-white/10 bg-neutral-900/30">
+          <summary class="cursor-pointer px-4 py-3 text-sm font-medium text-neutral-200 hover:bg-white/5 transition rounded-t-xl">
+            <span class="flex items-center gap-2">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+              </svg>
+              Detailansicht aller Seitenaufrufe
+            </span>
+          </summary>
+          <div class="px-4 py-4 border-t border-white/10">
+            <div class="flex items-center justify-between mb-4">
+              <p class="text-sm text-neutral-400">Alle einzelnen Seitenaufrufe der letzten 30 Tage (max. 1000 Einträge)</p>
+              <button id="refreshStatsDetails" class="px-3 py-1 text-xs rounded-lg border border-indigo-400/40 bg-indigo-500/20 text-indigo-100 hover:bg-indigo-500/30 transition">
+                Aktualisieren
+              </button>
+            </div>
+            <div class="overflow-x-auto rounded-lg border border-white/10">
+              <table class="min-w-full text-sm">
+                <thead class="bg-white/10 uppercase text-xs tracking-wide text-neutral-300">
+                  <tr>
+                    <th class="px-4 py-2 text-left">Zeitpunkt</th>
+                    <th class="px-4 py-2 text-left">Seite</th>
+                    <th class="px-4 py-2 text-left">Typ</th>
+                  </tr>
+                </thead>
+                <tbody id="statsDetailsTableBody" class="divide-y divide-white/5 bg-neutral-950/30">
+                  <tr>
+                    <td colspan="3" class="px-4 py-6 text-center text-neutral-400">Keine Daten geladen.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </details>
+      </section>
+
       <div id="statusMessage" class="hidden rounded-xl border px-4 py-3 text-sm"></div>
 
       <section class="rounded-3xl border border-white/10 bg-white/5 p-6 shadow-xl space-y-6">
@@ -121,7 +196,33 @@
       </section>
     </div>
     <!-- SECURITY: CSRF Protection -->
-    <script src="/csrf-protection.js"></script>
+    <script src="/csrf-protection.js?v=5.0.1"></script>
     <script src="/admin.js" defer></script>
+
+    <!-- Page view tracking -->
+    <script>
+      // Track page view for statistics
+      async function trackPageView(pageType) {
+        try {
+          const response = await fetch('/api/stats/pageview', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ pageType })
+          });
+          if (!response.ok) {
+            console.warn('Failed to track page view:', response.status);
+          }
+        } catch (error) {
+          console.warn('Error tracking page view:', error);
+        }
+      }
+
+      // Track admin page view on load
+      window.addEventListener('load', () => {
+        trackPageView('admin');
+      });
+    </script>
   </body>
 </html>

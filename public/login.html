@@ -438,5 +438,31 @@
     </div>
 
     <script src="/login.js" defer></script>
+
+    <!-- Page view tracking -->
+    <script>
+      // Track page view for statistics
+      async function trackPageView(pageType) {
+        try {
+          const response = await fetch('/api/stats/pageview', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ pageType })
+          });
+          if (!response.ok) {
+            console.warn('Failed to track page view:', response.status);
+          }
+        } catch (error) {
+          console.warn('Error tracking page view:', error);
+        }
+      }
+
+      // Track login page view on load
+      window.addEventListener('load', () => {
+        trackPageView('login');
+      });
+    </script>
   </body>
 </html>

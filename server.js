@@ -1871,7 +1871,7 @@ function registerApiRoutes() {
         return req.path.startsWith('/vendor/') || 
                req.path.startsWith('/sheets/') ||
                req.path.startsWith('/thumbnails/') ||
-               (req.path === '/api/share/info/batch' && req.auth); // Skip für batch endpoint
+               req.path === '/share/info/batch'; // Skip für batch endpoint
       },
       handler: (req, res) => {
         console.warn('[SECURITY] Rate limit exceeded for API from:', req.ip);
@@ -2077,6 +2077,18 @@ app.get("/api/auth/session", (req, res) => {
 app.use('/api/', csrfProtection);
 
 // =============================================================================
+// VERSION API ENDPOINT
+// =============================================================================
+app.get("/api/version", (req, res) => {
+  // No authentication required for version endpoint
+  res.setHeader("Cache-Control", "public, max-age=300"); // Cache for 5 minutes
+  res.json({
+    version: "5.0.0",
+    buildTime: Date.now()
+  });
+});
+
+// =============================================================================
 // ADMIN & USER API ENDPOINTS
 // =============================================================================
 
@@ -2212,6 +2224,132 @@ app.delete("/api/admin/users/:id", (req, res) => {
     clearSessionCookie(res);
   }
   res.json({ ok: true });
+});
+
+app.get("/api/admin/stats", (req, res) => {
+  if (!ensureAdmin(req, res)) return;
+  
+  try {
+    // Get page view statistics from database
+    const stats = authService.query.all(`
+      SELECT 
+        page_type,
+        COUNT(*) as count,
+        MAX(timestamp) as last_view
+      FROM page_views 
+      WHERE timestamp >= datetime('now', '-30 days')
+      GROUP BY page_type
+      ORDER BY count DESC
+    `);
+    
+    // Format the results
+    const pageStats = {};
+    let totalViews = 0;
+    
+    stats.forEach(row => {
+      const pageType = row.page_type;
+      const count = Number(row.count);
+      pageStats[pageType] = {
+        count,
+        lastView: row.last_view
+      };
+      totalViews += count;
+    });
+    
+    // Ensure all page types are present with 0 counts if no data
+    const allPageTypes = ['index', 'admin', 'login', 'viewer'];
+    allPageTypes.forEach(type => {
+      if (!pageStats[type]) {
+        pageStats[type] = { count: 0, lastView: null };
+      }
+    });
+    
+    res.json({
+      ok: true,
+      stats: pageStats,
+      totalViews,
+      period: '30 days'
+    });
+  } catch (err) {
+    logError("Failed to get admin stats", err);
+    res.status(500).json({ error: "Failed to retrieve statistics" });
+  }
+});
+
+app.get("/api/admin/stats/details", (req, res) => {
+  if (!ensureAdmin(req, res)) return;
+  
+  try {
+    // Get detailed page view events from database (last 30 days, limited to 1000 records)
+    const events = authService.query.all(`
+      SELECT 
+        id,
+        page_type,
+        timestamp
+      FROM page_views 
+      WHERE timestamp >= datetime('now', '-30 days')
+      ORDER BY timestamp DESC
+      LIMIT 1000
+    `);
+    
+    // Format the results
+    const formattedEvents = events.map(row => ({
+      id: row.id,
+      pageType: row.page_type,
+      timestamp: row.timestamp,
+      // Format timestamp for display
+      formattedTime: new Date(row.timestamp).toLocaleString('de-DE', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+      })
+    }));
+    
+    res.json({
+      ok: true,
+      events: formattedEvents,
+      totalEvents: formattedEvents.length,
+      period: '30 days',
+      limit: 1000
+    });
+  } catch (err) {
+    logError("Failed to get admin stats details", err);
+    res.status(500).json({ error: "Failed to retrieve statistics details" });
+  }
+});
+
+app.post("/api/stats/pageview", (req, res) => {
+  // This endpoint is public - no authentication required for anonymous tracking
+  const { pageType } = req.body || {};
+  
+  if (!pageType || typeof pageType !== 'string') {
+    return res.status(400).json({ error: "pageType is required" });
+  }
+  
+  // Validate page type
+  const validTypes = ['index', 'admin', 'login', 'viewer', 'playlist'];
+  if (!validTypes.includes(pageType)) {
+    return res.status(400).json({ error: "Invalid pageType" });
+  }
+  
+  try {
+    // Insert page view record (anonymous - no user_id stored)
+    const id = crypto.randomUUID();
+    const timestamp = new Date().toISOString();
+    
+    authService.query.run(`
+      INSERT INTO page_views (id, page_type, timestamp)
+      VALUES (?, ?, ?)
+    `, [id, pageType, timestamp]);
+    
+    res.json({ ok: true });
+  } catch (err) {
+    logError("Failed to record page view", err, { pageType });
+    res.status(500).json({ error: "Failed to record page view" });
+  }
 });
 
 app.get("/api/playlists", (req, res) => {
@@ -2795,7 +2933,22 @@ app.use((req, res, next) => {
   });
 });
 
-app.use(express.static(PUBLIC_DIR, { etag: true, lastModified: true, maxAge: "1d" }));
+app.use(express.static(PUBLIC_DIR, { 
+  etag: true, 
+  lastModified: true, 
+  maxAge: 0, // Disable browser caching for static files
+  setHeaders: (res, path) => {
+    // Aggressive no-cache for HTML, JS, CSS files
+    if (path.endsWith('.html') || path.endsWith('.js') || path.endsWith('.css')) {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+    } else {
+      // Allow caching for other assets (images, etc.) but with shorter duration
+      res.setHeader('Cache-Control', 'public, max-age=3600'); // 1 hour for images, etc.
+    }
+  }
+}));
 
 /* ---------------- Serve local vendors ---------------- */
 app.get(/^\/vendor\/pdfjs\/pdf\.min\.js$/, async (req, res) => {
@@ -5037,7 +5190,27 @@ function csrfProtection(req, res, next) {
   }
   
   // Skip CSRF for login endpoint (no session yet)
-  if (req.path === '/api/auth/login') {
+  if (req.path === '/auth/login') {
+    return next();
+  }
+  
+  // Skip CSRF for anonymous page view tracking
+  if (req.path === '/stats/pageview') {
+    return next();
+  }
+  
+  // Skip CSRF for batch share info endpoint (makes many requests)
+  if (req.path === '/share/info/batch') {
+    return next();
+  }
+  
+  // Skip CSRF for playlist current index updates (frequent navigation)
+  if (req.path.match(/^\/playlists\/[^\/]+\/items\/current$/)) {
+    return next();
+  }
+  
+  // Skip CSRF for playlist activation (frequent switching between playlists)
+  if (req.path.match(/^\/playlists\/[^\/]+\/activate$/)) {
     return next();
   }
   

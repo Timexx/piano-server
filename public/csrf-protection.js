@@ -14,7 +14,7 @@
     const method = (options.method || 'GET').toUpperCase();
     const needsCsrf = ['POST', 'PUT', 'DELETE', 'PATCH'].includes(method);
     
-    if (needsCsrf && url.startsWith('/api/') && url !== '/api/auth/login') {
+    if (needsCsrf && url.startsWith('/api/') && url !== '/api/auth/login' && url !== '/api/share/info/batch') {
       // Wait for token if it's being retrieved
       if (tokenPromise) {
         await tokenPromise;
@@ -28,37 +28,19 @@
         await retrieveCsrfToken();
         csrfToken = sessionStorage.getItem('csrfToken');
       }
-      
-      if (csrfToken) {
-        // Add CSRF token to headers
-        options.headers = options.headers || {};
-        if (options.headers instanceof Headers) {
-          options.headers.set('X-CSRF-Token', csrfToken);
-        } else {
-          options.headers['X-CSRF-Token'] = csrfToken;
-        }
-        console.debug('[CSRF] ✓ Token added to request:', method, url, csrfToken.substring(0, 8) + '...');
-      } else {
-        console.error('[CSRF] ❌ CRITICAL: No CSRF token available for:', method, url);
-        console.error('[CSRF] SessionStorage:', Object.keys(sessionStorage).length, 'items');
-      }
     }
     
     // Call original fetch
     let response = await originalFetch(url, options);
     
-    console.log('[CSRF] 📡 Response received:', method, url, response.status);
-    
     // If CSRF failed (403), refresh token and retry once
-    if (response.status === 403 && needsCsrf && url.startsWith('/api/') && url !== '/api/auth/login') {
-      console.log('[CSRF] 🔍 Got 403, checking if CSRF error...', {needsCsrf, startsWithApi: url.startsWith('/api/'), notLogin: url !== '/api/auth/login'});
+    if (response.status === 403 && needsCsrf && url.startsWith('/api/') && url !== '/api/auth/login' && url !== '/api/share/info/batch') {
       try {
         const clonedResponse = response.clone();
         const contentType = response.headers.get('content-type');
         
         if (contentType && contentType.includes('application/json')) {
           const errorData = await clonedResponse.json();
-          console.log('[CSRF] 🔍 Error data:', errorData);
           
           if (errorData.error && (errorData.error.includes('CSRF') || errorData.error.includes('Invalid') || errorData.error.includes('token'))) {
             console.warn('[CSRF] ⚠️ CSRF token rejected by server, refreshing and retrying...', url);
@@ -83,9 +65,7 @@
                 retryOptions.headers['X-CSRF-Token'] = newToken;
               }
               
-              console.log('[CSRF] 🔄 Retrying with new token:', method, url, newToken.substring(0, 8) + '...');
               response = await originalFetch(url, retryOptions);
-              console.log('[CSRF] ✅ Retry result:', response.status, response.statusText);
             } else {
               console.error('[CSRF] ❌ Failed to get new token for retry');
             }
@@ -101,7 +81,6 @@
     if (response.headers) {
       const freshToken = response.headers.get('X-CSRF-Token');
       if (freshToken && freshToken !== sessionStorage.getItem('csrfToken')) {
-        console.log('[CSRF] 🔄 Updating token from response:', freshToken.substring(0, 8) + '...');
         sessionStorage.setItem('csrfToken', freshToken);
       }
     }
@@ -117,7 +96,6 @@
     
     tokenPromise = (async () => {
       try {
-        console.log('[CSRF] Retrieving token from /api/auth/session...');
         const response = await originalFetch('/api/auth/session', {
           method: 'GET',
           credentials: 'include',
@@ -128,7 +106,6 @@
           const data = await response.json();
           if (data.csrfToken) {
             sessionStorage.setItem('csrfToken', data.csrfToken);
-            console.log('[CSRF] ✅ Token retrieved successfully:', data.csrfToken.substring(0, 8) + '...');
             return data.csrfToken;
           } else {
             console.error('[CSRF] ❌ No csrfToken in response:', data);
@@ -148,20 +125,14 @@
 
   // Auto-retrieve token on page load
   // Always retrieve fresh token on page load to ensure validity
-  console.log('[CSRF] 🚀 Initializing CSRF protection, readyState:', document.readyState);
-  
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {
-      console.log('[CSRF] 🚀 DOMContentLoaded, retrieving token...');
       retrieveCsrfToken();
     });
   } else {
-    console.log('[CSRF] 🚀 Document ready, retrieving token immediately...');
     retrieveCsrfToken();
   }
   
   // Also expose function globally for manual refresh if needed
   window.refreshCsrfToken = retrieveCsrfToken;
-  
-  console.log('[CSRF] ✅ Protection initialized, window.fetch overridden');
 })();

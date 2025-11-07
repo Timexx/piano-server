@@ -15,6 +15,16 @@
     createForm: document.getElementById("createUserForm"),
     logout: document.getElementById("logoutButton"),
     refresh: document.getElementById("refreshUsers"),
+    // Statistics elements
+    statsTotalViews: document.getElementById("statsTotalViews"),
+    statsIndex: document.getElementById("statsIndex"),
+    statsViewer: document.getElementById("statsViewer"),
+    statsPlaylist: document.getElementById("statsPlaylist"),
+    statsAdmin: document.getElementById("statsAdmin"),
+    statsLogin: document.getElementById("statsLogin"),
+    // Statistics details elements
+    statsDetailsTableBody: document.getElementById("statsDetailsTableBody"),
+    refreshStatsDetails: document.getElementById("refreshStatsDetails"),
   };
 
   function showStatus(kind, message) {
@@ -209,6 +219,133 @@
       if (err.message === "AUTH_REQUIRED") return;
       console.error("Failed to load users:", err);
       showStatus("error", "Benutzer konnten nicht geladen werden.");
+    }
+  }
+
+  async function loadStats() {
+    try {
+      const response = await fetchWithAuth("/api/admin/stats");
+      const data = await response.json();
+      
+      console.log('Stats API response:', data);
+      
+      if (data.ok && data.stats) {
+        const stats = data.stats;
+        
+        console.log('Updating stats elements:', {
+          totalViews: data.totalViews,
+          stats
+        });
+        
+        // Update total views
+        if (el.statsTotalViews) {
+          el.statsTotalViews.textContent = String(stats.totalViews || 0);
+          console.log('Updated total views element:', el.statsTotalViews.textContent);
+        } else {
+          console.warn('statsTotalViews element not found');
+        }
+        
+        // Update individual page stats
+        if (el.statsIndex) {
+          el.statsIndex.textContent = String(stats.index?.count || 0);
+          console.log('Updated index stats:', el.statsIndex.textContent);
+        } else {
+          console.warn('statsIndex element not found');
+        }
+        if (el.statsViewer) {
+          el.statsViewer.textContent = String(stats.viewer?.count || 0);
+          console.log('Updated viewer stats:', el.statsViewer.textContent);
+        } else {
+          console.warn('statsViewer element not found');
+        }
+        if (el.statsPlaylist) {
+          el.statsPlaylist.textContent = String(stats.playlist?.count || 0);
+          console.log('Updated playlist stats:', el.statsPlaylist.textContent);
+        } else {
+          console.warn('statsPlaylist element not found');
+        }
+        if (el.statsAdmin) {
+          el.statsAdmin.textContent = String(stats.admin?.count || 0);
+          console.log('Updated admin stats:', el.statsAdmin.textContent);
+        } else {
+          console.warn('statsAdmin element not found');
+        }
+        if (el.statsLogin) {
+          el.statsLogin.textContent = String(stats.login?.count || 0);
+          console.log('Updated login stats:', el.statsLogin.textContent);
+        } else {
+          console.warn('statsLogin element not found');
+        }
+      } else {
+        console.warn('Stats API returned invalid data:', data);
+      }
+    } catch (err) {
+      if (err.message === "AUTH_REQUIRED") return;
+      console.error("Failed to load stats:", err);
+      // Don't show error status for stats - they're not critical
+    }
+  }
+
+  async function loadStatsDetails() {
+    try {
+      if (!el.statsDetailsTableBody) return;
+      
+      const response = await fetchWithAuth("/api/admin/stats/details");
+      const data = await response.json();
+      
+      if (data.ok && data.events) {
+        const tbody = el.statsDetailsTableBody;
+        tbody.innerHTML = "";
+        
+        if (!data.events.length) {
+          const row = document.createElement("tr");
+          const cell = document.createElement("td");
+          cell.colSpan = 3;
+          cell.className = "px-4 py-6 text-center text-neutral-400";
+          cell.textContent = "Keine Seitenaufrufe in den letzten 30 Tagen.";
+          row.appendChild(cell);
+          tbody.appendChild(row);
+          return;
+        }
+        
+        const frag = document.createDocumentFragment();
+        data.events.forEach((event) => {
+          const row = document.createElement("tr");
+          row.className = "align-middle";
+          
+          // Map page types to display names
+          const pageTypeLabels = {
+            'index': 'Startseite',
+            'viewer': 'PDF-Viewer',
+            'playlist': 'Playlist-Modus',
+            'admin': 'Adminbereich',
+            'login': 'Loginseite'
+          };
+          
+          row.innerHTML = `
+            <td class="px-4 py-2 text-sm text-neutral-300">${event.formattedTime}</td>
+            <td class="px-4 py-2 text-sm text-neutral-200">${pageTypeLabels[event.pageType] || event.pageType}</td>
+            <td class="px-4 py-2 text-sm text-neutral-400">${event.pageType}</td>
+          `;
+          
+          frag.appendChild(row);
+        });
+        
+        tbody.appendChild(frag);
+      }
+    } catch (err) {
+      if (err.message === "AUTH_REQUIRED") return;
+      console.error("Failed to load stats details:", err);
+      // Show error in the table
+      if (el.statsDetailsTableBody) {
+        el.statsDetailsTableBody.innerHTML = `
+          <tr>
+            <td colspan="3" class="px-4 py-6 text-center text-red-400">
+              Fehler beim Laden der Detaildaten.
+            </td>
+          </tr>
+        `;
+      }
     }
   }
 
@@ -416,9 +553,12 @@
     const ok = await ensureSession();
     if (!ok) return;
     await loadUsers();
+    await loadStats();
+    await loadStatsDetails();
     if (el.createForm) el.createForm.addEventListener("submit", handleCreateUser);
     if (el.logout) el.logout.addEventListener("click", handleLogout);
     if (el.refresh) el.refresh.addEventListener("click", loadUsers);
+    if (el.refreshStatsDetails) el.refreshStatsDetails.addEventListener("click", loadStatsDetails);
   }
 
   document.addEventListener("DOMContentLoaded", init);

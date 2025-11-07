@@ -6,12 +6,13 @@
     <title>Music Sheets</title>
     
     <!-- CRITICAL: Base Path Helper - MUST be loaded FIRST -->
-    <script src="/base-path.js?v=2"></script>
-    <link rel="icon" href="/icon-maskable.svg" type="image/svg+xml">
-    <link rel="shortcut icon" href="/icon-maskable.svg" type="image/svg+xml">
+    <script src="/base-path.js?v=5.0.0"></script>
+    <script src="/version.js?v=5.0.2"></script>
+    <link rel="icon" href="/icon-maskable.svg?v=5.0.0" type="image/svg+xml">
+    <link rel="shortcut icon" href="/icon-maskable.svg?v=5.0.0" type="image/svg+xml">
     
     <!-- PWA Manifest -->
-    <link rel="manifest" href="/manifest.json">
+    <link rel="manifest" href="/manifest.json?v=5.0.0">
     <meta name="theme-color" content="#6366F1">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -21,14 +22,14 @@
     <script src="https://cdn.tailwindcss.com"></script>
 
     <!-- PDF.js & Fuse.js (local, served by server.js) -->
-    <script src="/vendor/pdfjs/pdf.min.js" defer></script>
-    <script src="/vendor/fuse.min.js" defer></script>
-  <script src="/vendor/nosleep.min.js" defer></script>
-  <script src="/jump-markers.js" defer></script>
-  <script src="/auth-status.js" defer></script>
+    <script src="/vendor/pdfjs/pdf.min.js?v=5.0.0" defer></script>
+    <script src="/vendor/fuse.min.js?v=5.0.0" defer></script>
+  <script src="/vendor/nosleep.min.js?v=5.0.0" defer></script>
+  <script src="/jump-markers.js?v=5.0.0" defer></script>
+  <script src="/auth-status.js?v=5.0.0" defer></script>
 
     <!-- Styles -->
-    <link rel="stylesheet" href="/styles.css">
+    <link rel="stylesheet" href="/styles.css?v=5.0.0">
   </head>
   <body class="min-h-screen bg-neutral-950 text-neutral-100 antialiased tap-highlight-none">
     <!-- Toast Container for notifications -->
@@ -178,7 +179,7 @@
     </div>
 
     <!-- SECURITY: CSRF Protection -->
-    <script src="/csrf-protection.js?v=2"></script>
+    <script src="/csrf-protection.js?v=5.0.1"></script>
 
     <!-- App logic embedded as module -->
     <script type="module">
@@ -220,6 +221,239 @@
           });
         });
       }
+
+      // ===== PWA Update Detection =====
+      let updateCheckInterval;
+      let expectedVersionCache = null;
+      let updateCheckAttempts = 0;
+
+      async function getCurrentVersion() {
+        try {
+          // Lade version.js dynamisch neu mit Cache-Busting, um Browser-Cache zu umgehen
+          const timestamp = Date.now();
+          const response = await fetch(`/version.js?v=${timestamp}`, { 
+            cache: 'no-cache',
+            headers: { 'Cache-Control': 'no-cache' }
+          });
+          
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+          }
+          
+          const scriptText = await response.text();
+          
+          // Extrahiere APP_VERSION aus dem Script-Text
+          const versionMatch = scriptText.match(/window\.APP_VERSION\s*=\s*['"]([^'"]+)['"]/);
+          if (versionMatch && versionMatch[1]) {
+            return versionMatch[1];
+          }
+          
+          throw new Error('Version not found in version.js');
+        } catch (error) {
+          console.warn('Could not fetch current version from server:', error);
+          // Fallback: Verwende die bereits geladene Version
+          return window.APP_VERSION || 'unknown';
+        }
+      }
+
+      async function getExpectedVersion() {
+        try {
+          // Hole erwartete Version vom Server-API
+          const response = await fetch('/api/version', {
+            cache: 'no-cache',
+            headers: { 'Cache-Control': 'no-cache' }
+          });
+          
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+          }
+          
+          const data = await response.json();
+          
+          if (data && data.version) {
+            return data.version;
+          }
+          
+          throw new Error('Version not found in API response');
+        } catch (error) {
+          console.warn('Could not fetch expected version from server:', error);
+          // Fallback: Verwende die aktuelle Version als erwartete Version
+          return window.APP_VERSION || 'unknown';
+        }
+      }
+
+      async function checkForUpdates() {
+        try {
+          // Prüfe ob version.js geladen wurde
+          if (typeof window.APP_VERSION === 'undefined') {
+            updateCheckAttempts++;
+            
+            // Exponentieller Backoff: max 5 Versuche, max 10 Sekunden Wartezeit
+            if (updateCheckAttempts < 5) {
+              const delay = Math.min(500 * Math.pow(2, updateCheckAttempts), 10000);
+              console.log(`Version info not loaded yet, retrying in ${delay}ms (attempt ${updateCheckAttempts}/5)`);
+              setTimeout(checkForUpdates, delay);
+              return;
+            } else {
+              console.warn('Version info could not be loaded after 5 attempts, giving up');
+              return;
+            }
+          }
+
+          // Reset Versuche bei erfolgreichem Laden
+          updateCheckAttempts = 0;
+
+          // Hole die aktuelle Version vom Server (um Cache zu umgehen)
+          const currentVersion = await getCurrentVersion();
+          const expectedVersion = await getExpectedVersion();
+
+          // Bei API-Fehler oder unbekannter erwarteter Version: nichts anzeigen
+          if (expectedVersion === 'unknown' || expectedVersion === currentVersion) {
+            console.log(`Version check passed: current=${currentVersion}, expected=${expectedVersion}`);
+            return;
+          }
+
+          // Prüfe ob Update bereits dismissed wurde
+          const dismissedVersion = localStorage.getItem('update-dismissed-version');
+          if (dismissedVersion === expectedVersion) {
+            console.log(`Update ${expectedVersion} was previously dismissed`);
+            return;
+          }
+
+          console.log(`Version mismatch: current=${currentVersion}, expected=${expectedVersion}`);
+          
+          // Zeige Update-Benachrichtigung
+          showUpdateBanner(expectedVersion);
+
+        } catch (error) {
+          console.error('Update check failed:', error);
+          // Bei kritischen Fehlern: nächste Prüfung in 5 Minuten
+          setTimeout(checkForUpdates, 5 * 60 * 1000);
+        }
+      }
+
+      function showUpdateBanner(expectedVersion) {
+        // Entferne existierendes Banner falls vorhanden
+        const existingBanner = document.getElementById('update-banner');
+        if (existingBanner) {
+          existingBanner.remove();
+        }
+
+        const updateBanner = document.createElement('div');
+        updateBanner.id = 'update-banner';
+        updateBanner.className = 'fixed top-4 left-4 right-4 z-50 bg-blue-600 text-white px-4 py-3 rounded-lg shadow-lg border border-blue-500';
+        updateBanner.innerHTML = `
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-3">
+              <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
+              </svg>
+              <div>
+                <div class="font-semibold">Neue Version verfügbar</div>
+                <div class="text-sm opacity-90">Version ${expectedVersion} ist bereit zum Download</div>
+              </div>
+            </div>
+            <div class="flex gap-2">
+              <button id="update-dismiss-forever" type="button" class="px-2 py-1 text-xs text-blue-300 hover:text-blue-100 underline whitespace-nowrap">
+                Nicht erinnern
+              </button>
+              <button id="update-dismiss" type="button" class="px-3 py-1 text-sm bg-blue-700 hover:bg-blue-800 rounded transition-colors">
+                Später
+              </button>
+              <button id="update-now" type="button" class="px-3 py-1 text-sm bg-white text-blue-600 hover:bg-blue-50 rounded font-semibold transition-colors">
+                Aktualisieren
+              </button>
+            </div>
+          </div>
+        `;
+
+        // Animation beim Einblenden
+        updateBanner.style.opacity = '0';
+        updateBanner.style.transform = 'translateY(-100%)';
+        document.body.appendChild(updateBanner);
+
+        // Animation starten
+        requestAnimationFrame(() => {
+          updateBanner.style.transition = 'all 0.3s ease-out';
+          updateBanner.style.opacity = '1';
+          updateBanner.style.transform = 'translateY(0)';
+        });
+
+        // Event Handler für Buttons
+        document.getElementById('update-dismiss').addEventListener('click', () => {
+          animateBannerOut(updateBanner);
+        });
+
+        document.getElementById('update-dismiss-forever').addEventListener('click', () => {
+          localStorage.setItem('update-dismissed-version', expectedVersion);
+          animateBannerOut(updateBanner);
+        });
+
+        document.getElementById('update-now').addEventListener('click', () => {
+          // Analytics tracking falls verfügbar
+          if (typeof gtag !== 'undefined') {
+            gtag('event', 'pwa_update_accepted', {
+              event_category: 'engagement',
+              event_label: expectedVersion
+            });
+          }
+          
+          // Force refresh to get new version
+          window.location.reload();
+        });
+
+        // Auto-hide nach 60 Sekunden
+        setTimeout(() => {
+          if (updateBanner.parentNode) {
+            animateBannerOut(updateBanner);
+          }
+        }, 60000);
+      }
+
+      function animateBannerOut(banner) {
+        if (!banner) return;
+        banner.style.transition = 'all 0.3s ease-in';
+        banner.style.opacity = '0';
+        banner.style.transform = 'translateY(-100%)';
+        setTimeout(() => {
+          if (banner.parentNode) {
+            banner.remove();
+          }
+        }, 300);
+      }
+
+      function startPeriodicUpdateCheck() {
+        clearInterval(updateCheckInterval);
+        // Prüfe alle 5 Minuten auf Updates
+        updateCheckInterval = setInterval(checkForUpdates, 5 * 60 * 1000);
+      }
+
+      function stopPeriodicUpdateCheck() {
+        clearInterval(updateCheckInterval);
+      }
+
+      // Starte Update-Prüfung beim Laden
+      window.addEventListener('load', () => {
+        setTimeout(checkForUpdates, 1000);
+      });
+
+      // Regelmäßige Prüfung bei Fokus
+      window.addEventListener('focus', () => {
+        checkForUpdates(); // Sofort prüfen
+        startPeriodicUpdateCheck(); // Regelmäßig weiterprüfen
+      });
+
+      // Stoppe regelmäßige Prüfung bei Blur
+      window.addEventListener('blur', () => {
+        stopPeriodicUpdateCheck();
+      });
+
+      // Prüfe bei Online-Status Änderung
+      window.addEventListener('online', () => {
+        // Cache invalidieren und neu prüfen
+        expectedVersionCache = null;
+        setTimeout(checkForUpdates, 1000);
+      });
 
       import { createAnnotationManager } from "./annotation-tools.js";
 
@@ -2231,14 +2465,10 @@
           const res = await fetch("/api/prefs", { cache: "no-store" });
           if (!res.ok) return;
           const prefs = await res.json();
-          console.log('[DEBUG] loadPrefsFromBackend - prefs:', prefs);
-          console.log('[DEBUG] loadPrefsFromBackend - prefs.favorites:', prefs.favorites);
           if (Array.isArray(prefs.favorites)) {
             state.library.favorites = new Set(prefs.favorites);
-            console.log('[DEBUG] loadPrefsFromBackend - state.library.favorites after set:', state.library.favorites);
           }
         } catch (err) {
-          console.error('[DEBUG] loadPrefsFromBackend error:', err);
         }
       }
       async function setFavoriteOnBackend(name, favorite) {
@@ -2979,7 +3209,7 @@
             <section id="offlineShelf" class="hidden"></section>
             <div class="flex flex-col flex-1 min-h-0 overflow-hidden">
               <section id="virtualWrap" class="relative flex-1 min-h-0 pb-4"></section>
-              <section id="libraryPager" class="flex items-center justify-between px-4 py-3 shrink-0 ${pagerHiddenClass} bg-neutral-950/80 backdrop-blur-sm border-t border-neutral-800/50">
+              <section id="libraryPager" class="flex items-center justify-between px-4 py-3 shrink-0 ${pagerHiddenClass}">
                 <button id="prevPage" class="px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-800 hover:bg-neutral-800 transition-colors ${prevDisabled?"invisible pointer-events-none select-none opacity-0":""}" ${prevDisabled?"aria-disabled=\"true\" tabindex=\"-1\"":""}>« Zurück</button>
                 <div class="text-sm text-neutral-400">Seite <span id="pNow">${currentPage}</span> / ${totalPages}</div>
                 <button id="nextPage" class="px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-800 hover:bg-neutral-800 transition-colors ${nextDisabled?"invisible pointer-events-none select-none opacity-0":""}" ${nextDisabled?"aria-disabled=\"true\" tabindex=\"-1\"":""}>Weiter »</button>
@@ -3840,11 +4070,11 @@
       function connectPlaylistEvents() {
         try { playlist.es?.close?.(); } catch {}
         
-        console.log('[SSE] Connecting to /api/playlists/events...');
+        // console.log('[SSE] Connecting to /api/playlists/events...');
         const es = new EventSource('/api/playlists/events');
         
         es.onopen = () => {
-          console.log('[SSE] ✅ Connected to playlist events');
+          // console.log('[SSE] ✅ Connected to playlist events');
           // Reset reconnection attempts on successful connection
           playlist.reconnectAttempts = 0;
         };
@@ -3852,7 +4082,7 @@
         es.onmessage = (ev) => {
           try {
             const data = JSON.parse(ev.data);
-            console.log('[SSE] 📨 Received playlist update:', data);
+            // console.log('[SSE] 📨 Received playlist update:', data);
             applyPlaylistState(data, { silent: true });
           } catch (err) {
             console.warn('[SSE] ⚠️ Parse failed:', err);
@@ -3869,7 +4099,7 @@
           const baseDelay = 2500; // Base 2.5 seconds
           const delay = Math.min(baseDelay * Math.pow(1.5, playlist.reconnectAttempts - 1), maxDelay);
           
-          console.log(`[SSE] Reconnecting in ${delay}ms (attempt ${playlist.reconnectAttempts})...`);
+          // console.log(`[SSE] Reconnecting in ${delay}ms (attempt ${playlist.reconnectAttempts})...`);
           setTimeout(connectPlaylistEvents, delay);
         };
         
@@ -6673,6 +6903,9 @@
       
       // ===== Viewer =====
       async function renderViewer(fileName) {
+        // Track viewer page view
+        trackPageView('viewer');
+        
         // Schließe offene Playlist-Docks/Manager, damit der Viewer sauber startet
         try { closePlaylistPanel(); } catch {}
         try { closePlaylistManager(); } catch {}
@@ -8520,6 +8753,29 @@
           btn.textContent = "☀︎ Nicht unterstützt";
         }
       }
+
+      // ===== Page View Tracking =====
+      async function trackPageView(pageType) {
+        try {
+          const response = await fetch('/api/stats/pageview', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ pageType })
+          });
+          if (!response.ok) {
+            console.warn('Failed to track page view:', response.status);
+          }
+        } catch (error) {
+          console.warn('Error tracking page view:', error);
+        }
+      }
+
+      // Track index page view on load
+      window.addEventListener('load', () => {
+        trackPageView('index');
+      });
     </script>
   </body>
 </html>
