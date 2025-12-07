@@ -28,6 +28,16 @@
         await retrieveCsrfToken();
         csrfToken = sessionStorage.getItem('csrfToken');
       }
+
+      // Attach token proactively when present
+      if (csrfToken) {
+        if (!options.headers) options.headers = {};
+        if (options.headers instanceof Headers) {
+          options.headers.set('X-CSRF-Token', csrfToken);
+        } else {
+          options.headers = { ...options.headers, 'X-CSRF-Token': csrfToken };
+        }
+      }
     }
     
     // Call original fetch

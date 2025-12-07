@@ -6,13 +6,13 @@
     <title>Music Sheets</title>
     
     <!-- CRITICAL: Base Path Helper - MUST be loaded FIRST -->
-    <script src="/base-path.js?v=5.0.8"></script>
-    <script src="/version.js?v=5.0.8"></script>
-    <link rel="icon" href="/icon-maskable.svg?v=5.0.8" type="image/svg+xml">
-    <link rel="shortcut icon" href="/icon-maskable.svg?v=5.0.8" type="image/svg+xml">
+    <script src="/base-path.js?v=5.0.10"></script>
+    <script src="/version.js?v=5.0.10"></script>
+    <link rel="icon" href="/icon-maskable.svg?v=5.0.10" type="image/svg+xml">
+    <link rel="shortcut icon" href="/icon-maskable.svg?v=5.0.10" type="image/svg+xml">
     
     <!-- PWA Manifest -->
-    <link rel="manifest" href="/manifest.json?v=5.0.8">
+    <link rel="manifest" href="/manifest.json?v=5.0.10">
     <meta name="theme-color" content="#6366F1">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -22,14 +22,14 @@
     <script src="https://cdn.tailwindcss.com"></script>
 
     <!-- PDF.js & Fuse.js (local, served by server.js) -->
-    <script src="/vendor/pdfjs/pdf.min.js?v=5.0.8" defer></script>
-    <script src="/vendor/fuse.min.js?v=5.0.8" defer></script>
-  <script src="/vendor/nosleep.min.js?v=5.0.8" defer></script>
-  <script src="/jump-markers.js?v=5.0.8" defer></script>
-  <script src="/auth-status.js?v=5.0.8" defer></script>
+    <script src="/vendor/pdfjs/pdf.min.js?v=5.0.10" defer></script>
+    <script src="/vendor/fuse.min.js?v=5.0.10" defer></script>
+  <script src="/vendor/nosleep.min.js?v=5.0.10" defer></script>
+  <script src="/jump-markers.js?v=5.0.10" defer></script>
+  <script src="/auth-status.js?v=5.0.10" defer></script>
 
     <!-- Styles -->
-    <link rel="stylesheet" href="/styles.css?v=5.0.8">
+    <link rel="stylesheet" href="/styles.css?v=5.0.10">
   </head>
   <body class="min-h-screen bg-neutral-950 text-neutral-100 antialiased tap-highlight-none">
     <!-- Toast Container for notifications -->
@@ -179,7 +179,7 @@
     </div>
 
     <!-- SECURITY: CSRF Protection -->
-    <script src="/csrf-protection.js?v=5.0.8"></script>
+    <script src="/csrf-protection.js?v=5.0.10"></script>
 
     <!-- App logic embedded as module -->
     <script type="module">
@@ -545,38 +545,6 @@
       
       // Initialize on load
       initHeaderSpacer();
-      // === Stabilisiertes Header-Scroll-Verhalten ===
-      const header = document.getElementById('mainHeader');
-      if (header) {
-        let lastScrollY = 0;
-        let ticking = false;
-        let lastToggle = 0;
-
-        window.addEventListener('scroll', () => {
-          if (!ticking) {
-            window.requestAnimationFrame(() => {
-              const now = Date.now();
-              const delta = window.scrollY - lastScrollY;
-              const absScroll = window.scrollY;
-
-              // Deadzone: erst toggeln, wenn Bewegung >15px und seit letztem Toggle >250ms
-              if (Math.abs(delta) > 15 && now - lastToggle > 250) {
-                if (delta > 0 && absScroll > 80) {
-                  header.classList.add('header-hidden');
-                } else if (delta < 0 || absScroll < 50) {
-                  header.classList.remove('header-hidden');
-                }
-                lastToggle = now;
-              }
-
-              lastScrollY = absScroll;
-              ticking = false;
-            });
-            ticking = true;
-          }
-        });
-      }
-
       // === Stabilisiertes Filter-Scroll-Verhalten ===
       (function () {
         const filterEl = document.getElementById('filterBlock') || document.getElementById('filterPanel');
@@ -3591,7 +3559,6 @@
         
         const virtualWrap = document.querySelector('#virtualWrap');
         const mainHeader = document.getElementById('mainHeader');
-        const headerSpacer = document.getElementById('headerSpacer');
         let headerHidden = false;
         
         // Wait for virtualizer to mount, then attach scroll listener
@@ -3600,55 +3567,38 @@
             const scroller = virtualWrap?.querySelector('.relative.w-full.h-full.overflow-auto');
             const filterContent = document.querySelector('#filterContent');
             const filterPanel = document.querySelector('#filterPanel');
+            if (!scroller) return;
             
-            if (scroller && filterContent && filterPanel) {
-              // Get initial full height
-              let fullHeight = 0;
-              if (!state.ui.filterCollapsed) {
-                filterContent.style.maxHeight = 'none';
-                filterContent.style.opacity = '1';
-                fullHeight = filterContent.scrollHeight;
-                filterContent.style.maxHeight = fullHeight + 'px';
+            // Get initial full height (if filter exists)
+            let fullHeight = 0;
+            if (filterContent && filterPanel && !state.ui.filterCollapsed) {
+              filterContent.style.maxHeight = 'none';
+              filterContent.style.opacity = '1';
+              fullHeight = filterContent.scrollHeight;
+              filterContent.style.maxHeight = fullHeight + 'px';
+            }
+            
+            let headerHidden = false;
+            const handleScroll = () => {
+              const currentScrollY = scroller.scrollTop;
+              const scrollDelta = currentScrollY - lastScrollY;
+              
+              // ===== HEADER AUTO-HIDE LOGIC =====
+              const HEADER_HIDE_THRESHOLD = 100; // Hide header after scrolling down 100px
+              
+              // Hide header when scrolling down
+              if (scrollDelta > 5 && currentScrollY > HEADER_HIDE_THRESHOLD && !headerHidden && mainHeader) {
+                headerHidden = true;
+                mainHeader.classList.add('header-hidden');
+              }
+              // Show header when scrolling up or near top
+              else if ((scrollDelta < -5 || currentScrollY < 50) && headerHidden && mainHeader) {
+                headerHidden = false;
+                mainHeader.classList.remove('header-hidden');
               }
               
-              const handleScroll = () => {
-                const currentScrollY = scroller.scrollTop;
-                const scrollDelta = currentScrollY - lastScrollY;
-                
-                // ===== HEADER AUTO-HIDE LOGIC =====
-                const HEADER_HIDE_THRESHOLD = 100; // Hide header after scrolling down 100px
-                
-                // Get current header height (responsive)
-                const getHeaderHeight = () => {
-                  if (window.innerWidth <= 380) return 48; // Ultra-small phones
-                  if (window.innerWidth <= 640) return 52; // Mobile
-                  if (window.innerWidth <= 768) return 56; // Tablet
-                  return 64; // Desktop
-                };
-                
-                // Hide header when scrolling down
-                if (scrollDelta > 5 && currentScrollY > HEADER_HIDE_THRESHOLD && !headerHidden && mainHeader) {
-                  headerHidden = true;
-                  mainHeader.classList.add('header-hidden');
-                  // IMMEDIATELY collapse spacer to reclaim space
-                  if (headerSpacer) {
-                    headerSpacer.style.height = '0px';
-                    headerSpacer.style.marginBottom = '0px';
-                  }
-                }
-                // Show header when scrolling up or near top
-                else if ((scrollDelta < -5 || currentScrollY < 50) && headerHidden && mainHeader) {
-                  headerHidden = false;
-                  mainHeader.classList.remove('header-hidden');
-                  // IMMEDIATELY restore spacer with responsive height
-                  if (headerSpacer) {
-                    const headerHeight = getHeaderHeight();
-                    headerSpacer.style.height = headerHeight + 'px';
-                    headerSpacer.style.marginBottom = '';
-                  }
-                }
-                
-                // ===== FILTER COLLAPSE LOGIC (unchanged) =====
+              // ===== FILTER COLLAPSE LOGIC (unchanged) =====
+              if (filterPanel && filterContent) {
                 // Scrolling down - progressively collapse
                 if (scrollDelta > 0 && currentScrollY > SCROLL_THRESHOLD) {
                   if (!isCollapsing && !state.ui.filterCollapsed) {
@@ -3718,13 +3668,13 @@
                     toggleBtn.title = 'Filter ausblenden';
                   }
                 }
-                
-                lastScrollY = currentScrollY;
-              };
+              }
               
-              scroller.addEventListener('scroll', handleScroll, { passive: true });
-              state.library.scrollListener = handleScroll;
-            }
+              lastScrollY = currentScrollY;
+            };
+            
+            scroller.addEventListener('scroll', handleScroll, { passive: true });
+            state.library.scrollListener = handleScroll;
           });
         });
 

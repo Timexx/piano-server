@@ -2099,7 +2099,7 @@ app.get("/api/version", (req, res) => {
   // No authentication required for version endpoint
   res.setHeader("Cache-Control", "public, max-age=0, must-revalidate"); // Always validate for freshest version
   res.json({
-    version: "5.0.8",
+    version: "5.0.10",
     buildTime: Date.now()
   });
 });

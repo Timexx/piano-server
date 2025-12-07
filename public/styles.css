@@ -676,6 +676,11 @@ button.grid.place-items-center svg {
   transform: translateY(-100%) !important;
 }
 
+#mainHeader.header-hidden + #headerSpacer {
+  height: 0 !important;
+  margin-bottom: 0 !important;
+}
+
 #headerSpacer {
   height: 64px; /* Default desktop height */
   transition: height 200ms cubic-bezier(0.4, 0.0, 0.2, 1), margin 200ms cubic-bezier(0.4, 0.0, 0.2, 1);
