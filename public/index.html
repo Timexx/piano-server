@@ -6,13 +6,13 @@
     <title>Music Sheets</title>
     
     <!-- CRITICAL: Base Path Helper - MUST be loaded FIRST -->
-    <script src="/base-path.js?v=5.0.7"></script>
-    <script src="/version.js?v=5.0.7"></script>
-    <link rel="icon" href="/icon-maskable.svg?v=5.0.7" type="image/svg+xml">
-    <link rel="shortcut icon" href="/icon-maskable.svg?v=5.0.7" type="image/svg+xml">
+    <script src="/base-path.js?v=5.0.8"></script>
+    <script src="/version.js?v=5.0.8"></script>
+    <link rel="icon" href="/icon-maskable.svg?v=5.0.8" type="image/svg+xml">
+    <link rel="shortcut icon" href="/icon-maskable.svg?v=5.0.8" type="image/svg+xml">
     
     <!-- PWA Manifest -->
-    <link rel="manifest" href="/manifest.json?v=5.0.7">
+    <link rel="manifest" href="/manifest.json?v=5.0.8">
     <meta name="theme-color" content="#6366F1">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -22,14 +22,14 @@
     <script src="https://cdn.tailwindcss.com"></script>
 
     <!-- PDF.js & Fuse.js (local, served by server.js) -->
-    <script src="/vendor/pdfjs/pdf.min.js?v=5.0.7" defer></script>
-    <script src="/vendor/fuse.min.js?v=5.0.7" defer></script>
-  <script src="/vendor/nosleep.min.js?v=5.0.7" defer></script>
-  <script src="/jump-markers.js?v=5.0.7" defer></script>
-  <script src="/auth-status.js?v=5.0.7" defer></script>
+    <script src="/vendor/pdfjs/pdf.min.js?v=5.0.8" defer></script>
+    <script src="/vendor/fuse.min.js?v=5.0.8" defer></script>
+  <script src="/vendor/nosleep.min.js?v=5.0.8" defer></script>
+  <script src="/jump-markers.js?v=5.0.8" defer></script>
+  <script src="/auth-status.js?v=5.0.8" defer></script>
 
     <!-- Styles -->
-    <link rel="stylesheet" href="/styles.css?v=5.0.7">
+    <link rel="stylesheet" href="/styles.css?v=5.0.8">
   </head>
   <body class="min-h-screen bg-neutral-950 text-neutral-100 antialiased tap-highlight-none">
     <!-- Toast Container for notifications -->
@@ -179,7 +179,7 @@
     </div>
 
     <!-- SECURITY: CSRF Protection -->
-    <script src="/csrf-protection.js?v=5.0.7"></script>
+    <script src="/csrf-protection.js?v=5.0.8"></script>
 
     <!-- App logic embedded as module -->
     <script type="module">
@@ -4170,6 +4170,8 @@
         };
         
         playlist.es = es;
+        // Ensure polling safety net stays alive
+        ensurePlaylistSyncHeartbeat();
       }
       
       let playlistSseWatchdog = null;
@@ -4186,6 +4188,27 @@
             connectPlaylistEvents();
           }
         }, 15000);
+      }
+
+      let playlistSyncHeartbeat = null;
+      function ensurePlaylistSyncHeartbeat() {
+        if (playlistSyncHeartbeat) return;
+        // Poll as safety net when SSE is stale or dropped (Safari/iOS flakiness)
+        playlistSyncHeartbeat = setInterval(async () => {
+          const now = Date.now();
+          const last = playlist.lastSseActivity || 0;
+          const sseHealthy = playlist.es && playlist.es.readyState === EventSource.OPEN && (now - last) < 8000;
+          if (sseHealthy) return;
+          try {
+            const data = await playlistApi.fetchState();
+            if (data) {
+              playlist.lastSseActivity = Date.now();
+              applyPlaylistState(data, { silent: true });
+            }
+          } catch (err) {
+            console.warn('[Playlist Sync] Poll fallback failed:', err?.message || err);
+          }
+        }, 8000);
       }
       function applyPlaylistState(data, { silent = false } = {}) {
         if (!data || typeof data !== 'object') return;

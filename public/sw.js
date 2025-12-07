@@ -1,6 +1,6 @@
 // Service Worker für Piano Sheets PWA
-// Version für Cache-Invalidierung - UPDATED: Swipe-to-dismiss refinements
-const CACHE_VERSION = 'v16-mobile-actions-gestures';
+// Version für Cache-Invalidierung - UPDATED: Playlist sync heartbeat
+const CACHE_VERSION = 'v17-mobile-actions-gestures';
 const STATIC_CACHE = `piano-static-${CACHE_VERSION}`;
 const DYNAMIC_CACHE = `piano-dynamic-${CACHE_VERSION}`;
 const PDF_CACHE = `piano-pdfs-${CACHE_VERSION}`;
