@@ -1,6 +1,6 @@
 // Service Worker für Piano Sheets PWA
-// Version für Cache-Invalidierung - UPDATED: Force cache refresh for transparent pager
-const CACHE_VERSION = 'v12-transparent-pager';
+// Version für Cache-Invalidierung - UPDATED: Swipe-to-dismiss refinements
+const CACHE_VERSION = 'v16-mobile-actions-gestures';
 const STATIC_CACHE = `piano-static-${CACHE_VERSION}`;
 const DYNAMIC_CACHE = `piano-dynamic-${CACHE_VERSION}`;
 const PDF_CACHE = `piano-pdfs-${CACHE_VERSION}`;
@@ -32,6 +32,7 @@ const VENDOR_ASSETS = [
 
 const KNOWN_CACHES = [STATIC_CACHE, DYNAMIC_CACHE, PDF_CACHE, THUMBNAIL_CACHE, API_CACHE];
 const OFFLINE_ONLY_CACHES = [DYNAMIC_CACHE, PDF_CACHE, THUMBNAIL_CACHE, API_CACHE];
+const SSE_ENDPOINTS = ['/api/playlists/events', '/api/playlist/events'];
 
 function resolveUrl(input) {
   try {
@@ -123,6 +124,13 @@ self.addEventListener('fetch', (event) => {
   if (!allowedOrigins.includes(url.origin)) {
     // Lass externe Requests direkt durch (keine Caching-Logik)
     console.log('[SW] Ignoring external origin:', url.origin);
+    return;
+  }
+
+  // SSE-Verbindungen niemals abfangen oder cachen
+  const acceptsSse = request.headers.get('accept')?.includes('text/event-stream');
+  const matchesSseEndpoint = SSE_ENDPOINTS.some((endpoint) => url.pathname.startsWith(endpoint));
+  if (acceptsSse || matchesSseEndpoint) {
     return;
   }
 

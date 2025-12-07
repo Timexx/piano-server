@@ -120,6 +120,7 @@ const FALLBACK_THUMB_BUFFER = Buffer.from(
 
 const SESSION_COOKIE_NAME = "ps_session";
 const SESSION_RENEW_THRESHOLD_MS = 1000 * 60 * 60 * 24; // 24 hours
+const SSE_EVENT_PATHS = ["/api/playlists/events", "/api/playlist/events"];
 
 // =============================================================================
 // SECURITY: Centralized error handling and sanitization
@@ -1688,8 +1689,18 @@ function broadcastPlaylists(userId = null) {
     const statePayload = serializePlaylistState(PLAYLIST_STATE);
     
     // SSE-Manager broadcastet bereits an alle Clients des Users
-    const sentActive = sseManager.broadcast(targetUserId, "playlist-active", activePayload);
-    const sentState = sseManager.broadcast(targetUserId, "playlist-state", statePayload);
+    const sentActive = sseManager.broadcast(
+      targetUserId,
+      "playlist-active",
+      activePayload,
+      "playlist-active"
+    );
+    const sentState = sseManager.broadcast(
+      targetUserId,
+      "playlist-state",
+      statePayload,
+      "playlist-state"
+    );
     
     console.log(`[SSE] Broadcasted playlist update to ${sentActive + sentState} clients for user ${targetUserId} (active: ${sentActive}, state: ${sentState})`);
     console.log(`[SSE] Active payload:`, JSON.stringify(activePayload).substring(0, 200) + '...');
@@ -2086,9 +2097,9 @@ app.use('/api/', csrfProtection);
 // =============================================================================
 app.get("/api/version", (req, res) => {
   // No authentication required for version endpoint
-  res.setHeader("Cache-Control", "public, max-age=300"); // Cache for 5 minutes
+  res.setHeader("Cache-Control", "public, max-age=0, must-revalidate"); // Always validate for freshest version
   res.json({
-    version: "5.0.1",
+    version: "5.0.7",
     buildTime: Date.now()
   });
 });
@@ -2890,13 +2901,22 @@ if (helmet) {
   console.warn('[SECURITY] Helmet not installed - security headers disabled');
 }
 
+function isSseRequest(req) {
+  if (!req) return false;
+  const accept = req.headers?.accept || "";
+  if (accept.includes("text/event-stream")) return true;
+  const reqPath = req.path || req.url || "";
+  return SSE_EVENT_PATHS.some((route) => reqPath.startsWith(route));
+}
+
 if (compression && MEMORY_SETTINGS.enableGzipCompression) {
   app.use(compression({
     level: 6, // Balanced compression level
     threshold: 1024, // Only compress files > 1KB
     filter: (req, res) => {
       // Don't compress PDFs or already compressed content
-      if (req.path.startsWith('/sheets/')) return false;
+      if (req.path?.startsWith('/sheets/')) return false;
+      if (isSseRequest(req)) return false;
       return compression.filter(req, res);
     }
   }));

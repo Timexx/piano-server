@@ -6,13 +6,13 @@
     <title>Music Sheets</title>
     
     <!-- CRITICAL: Base Path Helper - MUST be loaded FIRST -->
-    <script src="/base-path.js?v=5.0.1"></script>
-    <script src="/version.js?v=5.0.2"></script>
-    <link rel="icon" href="/icon-maskable.svg?v=5.0.1" type="image/svg+xml">
-    <link rel="shortcut icon" href="/icon-maskable.svg?v=5.0.1" type="image/svg+xml">
+    <script src="/base-path.js?v=5.0.7"></script>
+    <script src="/version.js?v=5.0.7"></script>
+    <link rel="icon" href="/icon-maskable.svg?v=5.0.7" type="image/svg+xml">
+    <link rel="shortcut icon" href="/icon-maskable.svg?v=5.0.7" type="image/svg+xml">
     
     <!-- PWA Manifest -->
-    <link rel="manifest" href="/manifest.json?v=5.0.1">
+    <link rel="manifest" href="/manifest.json?v=5.0.7">
     <meta name="theme-color" content="#6366F1">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -22,14 +22,14 @@
     <script src="https://cdn.tailwindcss.com"></script>
 
     <!-- PDF.js & Fuse.js (local, served by server.js) -->
-    <script src="/vendor/pdfjs/pdf.min.js?v=5.0.1" defer></script>
-    <script src="/vendor/fuse.min.js?v=5.0.1" defer></script>
-  <script src="/vendor/nosleep.min.js?v=5.0.1" defer></script>
-  <script src="/jump-markers.js?v=5.0.1" defer></script>
-  <script src="/auth-status.js?v=5.0.1" defer></script>
+    <script src="/vendor/pdfjs/pdf.min.js?v=5.0.7" defer></script>
+    <script src="/vendor/fuse.min.js?v=5.0.7" defer></script>
+  <script src="/vendor/nosleep.min.js?v=5.0.7" defer></script>
+  <script src="/jump-markers.js?v=5.0.7" defer></script>
+  <script src="/auth-status.js?v=5.0.7" defer></script>
 
     <!-- Styles -->
-    <link rel="stylesheet" href="/styles.css?v=5.0.1">
+    <link rel="stylesheet" href="/styles.css?v=5.0.7">
   </head>
   <body class="min-h-screen bg-neutral-950 text-neutral-100 antialiased tap-highlight-none">
     <!-- Toast Container for notifications -->
@@ -179,7 +179,7 @@
     </div>
 
     <!-- SECURITY: CSRF Protection -->
-    <script src="/csrf-protection.js?v=5.0.1"></script>
+    <script src="/csrf-protection.js?v=5.0.7"></script>
 
     <!-- App logic embedded as module -->
     <script type="module">
@@ -475,6 +475,7 @@
       const controlsEl = document.querySelector('#controls');
       const headerActionsEl = document.querySelector('#header-actions');
   let uploadBtn = null;
+  let mobileActionSheetCleanup = null;
 
       const ZOOM_STORAGE_KEY = "viewer.zoom";
       const MIN_ZOOM = 0.6;
@@ -2448,6 +2449,7 @@
         // Initialize playlist sync early for UI affordances
         try { await fetchPlaylists(); } catch {}
         connectPlaylistEvents();
+        ensurePlaylistSseWatchdog();
         if (currentFile) {
           await hydrateCategories();
           await renderViewer(decodeURIComponent(currentFile));
@@ -2547,9 +2549,14 @@
       }
       async function setFileSecsOnBackend(name, secs) {
         try {
+          const headers = { "Content-Type": "application/json" };
+          const csrfToken = sessionStorage.getItem('csrfToken');
+          if (csrfToken) {
+            headers["X-CSRF-Token"] = csrfToken;
+          }
           await fetch("/api/prefs/file", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers,
             body: JSON.stringify({ name, secsPerPage: secs })
           });
         } catch {}
@@ -2557,9 +2564,14 @@
 
       async function setFileCategoriesOnBackend(name, categories) {
         try {
+          const headers = { "Content-Type": "application/json" };
+          const csrfToken = sessionStorage.getItem('csrfToken');
+          if (csrfToken) {
+            headers["X-CSRF-Token"] = csrfToken;
+          }
           const res = await fetch("/api/prefs/file", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers,
             body: JSON.stringify({ name, categories })
           });
           if (res?.ok) {
@@ -2588,9 +2600,14 @@
 
       async function createCategoryOnBackend(payload) {
         try {
+          const headers = { "Content-Type": "application/json" };
+          const csrfToken = sessionStorage.getItem('csrfToken');
+          if (csrfToken) {
+            headers["X-CSRF-Token"] = csrfToken;
+          }
           const res = await fetch("/api/categories", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers,
             body: JSON.stringify(payload)
           });
           if (res?.ok) {
@@ -2606,9 +2623,14 @@
 
       async function updateCategoryOnBackend(id, payload) {
         try {
+          const headers = { "Content-Type": "application/json" };
+          const csrfToken = sessionStorage.getItem('csrfToken');
+          if (csrfToken) {
+            headers["X-CSRF-Token"] = csrfToken;
+          }
           const res = await fetch(`/api/categories/${encodeURIComponent(id)}`, {
             method: "PUT",
-            headers: { "Content-Type": "application/json" },
+            headers,
             body: JSON.stringify(payload)
           });
           if (res?.ok) {
@@ -2624,8 +2646,14 @@
 
       async function deleteCategoryOnBackend(id) {
         try {
+          const headers = {};
+          const csrfToken = sessionStorage.getItem('csrfToken');
+          if (csrfToken) {
+            headers["X-CSRF-Token"] = csrfToken;
+          }
           const res = await fetch(`/api/categories/${encodeURIComponent(id)}`, {
-            method: "DELETE"
+            method: "DELETE",
+            headers
           });
           if (res?.ok) {
             const data = await res.json();
@@ -3069,6 +3097,7 @@
       // ===== Library UI =====
       function renderLibrary() {
         annotations.leaveViewer();
+        closeMobileActionSheet();
         document.body.classList.remove('in-viewer');
         // Ensure fullscreen is exited when returning to library
         if (document.fullscreenElement) {
@@ -3111,7 +3140,6 @@
         const nextDisabled = offlineFilterActive || currentPage >= totalPages;
         const pagerHiddenClass = offlineFilterActive ? 'hidden' : '';
 
-        const isSmallScreen = window.innerWidth <= 540;
         const filterCollapsed = state.ui.filterCollapsed;
 
         appEl.innerHTML = `
@@ -4072,18 +4100,25 @@
       }
       function connectPlaylistEvents() {
         try { playlist.es?.close?.(); } catch {}
+        const sseUrl = typeof withBasePath === 'function'
+          ? withBasePath('/api/playlists/events')
+          : '/api/playlists/events';
         
-        // console.log('[SSE] Connecting to /api/playlists/events...');
-        const es = new EventSource('/api/playlists/events');
+        const es = new EventSource(sseUrl, { withCredentials: true });
+        const markSseActivity = () => {
+          playlist.lastSseActivity = Date.now();
+        };
         
         es.onopen = () => {
           // console.log('[SSE] ✅ Connected to playlist events');
           // Reset reconnection attempts on successful connection
           playlist.reconnectAttempts = 0;
+          markSseActivity();
         };
         
         es.onmessage = (ev) => {
           try {
+            markSseActivity();
             const data = JSON.parse(ev.data);
             console.log('[SSE] 📨 Received generic message:', data);
             applyPlaylistState(data, { silent: true });
@@ -4095,6 +4130,7 @@
         // Handle specific event types for playlist updates
         es.addEventListener('playlist-active', (ev) => {
           try {
+            markSseActivity();
             const data = JSON.parse(ev.data);
             console.log('[SSE] 📨 Received playlist-active update:', data);
             applyPlaylistState(data, { silent: true });
@@ -4105,6 +4141,7 @@
         
         es.addEventListener('playlist-state', (ev) => {
           try {
+            markSseActivity();
             const data = JSON.parse(ev.data);
             console.log('[SSE] 📨 Received playlist-state update:', data);
             applyPlaylistState(data, { silent: true });
@@ -4113,8 +4150,13 @@
           }
         });
         
+        es.addEventListener('ping', () => {
+          markSseActivity();
+        });
+        
         es.onerror = (err) => {
           console.error('[SSE] ❌ Connection error:', err, 'ReadyState:', es.readyState);
+          markSseActivity();
           try { es.close(); } catch {}
           
           // Implement exponential backoff for reconnection
@@ -4128,6 +4170,22 @@
         };
         
         playlist.es = es;
+      }
+      
+      let playlistSseWatchdog = null;
+      function ensurePlaylistSseWatchdog() {
+        if (playlistSseWatchdog) return;
+        playlistSseWatchdog = setInterval(() => {
+          if (!playlist.es || playlist.es.readyState !== EventSource.OPEN) return;
+          const last = playlist.lastSseActivity || 0;
+          if (Date.now() - last > 30000) {
+            console.warn('[SSE] ⚠️ Playlist stream stale, forcing refresh');
+            try { playlist.es.close(); } catch {}
+            playlist.es = null;
+            fetchPlaylists().catch(() => {});
+            connectPlaylistEvents();
+          }
+        }, 15000);
       }
       function applyPlaylistState(data, { silent = false } = {}) {
         if (!data || typeof data !== 'object') return;
@@ -5156,12 +5214,13 @@
         if (fuse) items = fuse.search(L.q).map(r => r.item);
 
         const isGrid = L.view === "grid";
+        const isSmallScreen = window.innerWidth <= 720;
         const wrapW = wrap.clientWidth;
         const minCardW = 220;      // minimal card width
         const maxCardW = 320;      // cap card width for medium screens to avoid huge tiles
         const minGap = 16;         // minimal horizontal gap between cards
         let cols = isGrid ? Math.max(1, Math.floor((wrapW + minGap) / (minCardW + minGap))) : 1;
-        const cardH = isGrid ? 360 : 88; // list rows a bit taller for nicer padding
+        const cardH = isGrid ? 360 : (isSmallScreen ? 104 : 88); // allow a bit more breathing room on phones
         const listGap = 10;              // add vertical spacing between list items
         // Base computation with min width
         let gridCardW = isGrid ? Math.floor((wrapW - (cols - 1) * minGap) / cols) : wrapW;
@@ -5293,6 +5352,199 @@
         // Yellow star when selected
         btn.classList.toggle('text-yellow-400', !!active);
         btn.classList.toggle('text-neutral-300', !active);
+      }
+
+      function closeMobileActionSheet() {
+        if (typeof mobileActionSheetCleanup === 'function') {
+          mobileActionSheetCleanup();
+          mobileActionSheetCleanup = null;
+        }
+      }
+
+      function openMobileActionSheet(item) {
+        // Only show the condensed action sheet on small screens
+        if (window.innerWidth > 720) return;
+        closeMobileActionSheet();
+
+        const displayName = item.displayName || item.name;
+        const subtitleParts = [formatSize(item.size), new Date(item.mtime).toLocaleDateString()];
+        if (item.folder) subtitleParts.push(item.folder);
+        const subtitle = subtitleParts.join(" • ");
+        const rowEl = document.querySelector(`[data-item-name="${cssEscape(item.name)}"]`);
+        const isFav = state.library.favorites.has(item.name);
+        const playlistActive = Boolean(playlist.activeId);
+        const playlistName = playlist.name || 'Aktive Playlist';
+        const inPlaylist = playlistActive && Array.isArray(playlist.items) && playlist.items.includes(item.name);
+        const canShare = rowEl?.dataset?.canShare === 'true' || rowEl?.querySelector('.share-pdf')?.style.display !== 'none';
+        const canRemoveShared = rowEl?.dataset?.canRemoveShared === 'true' || rowEl?.querySelector('.remove-shared')?.style.display !== 'none';
+        const canDelete = rowEl?.dataset?.canDelete === 'true' || rowEl?.querySelector('.delete-pdf')?.style.display !== 'none';
+        const ownerEmail = rowEl?.dataset?.ownerEmail || '';
+
+        const actions = [
+          { key: 'open', label: 'Öffnen', sub: 'PDF anzeigen', icon: SVG_PLAY_SMALL },
+          { key: 'favorite', label: isFav ? 'Aus Favoriten entfernen' : 'Als Favorit markieren', sub: isFav ? 'Schnellzugriff entfernen' : 'Schnell finden', icon: SVG_STAR, active: isFav },
+          playlistActive ? { key: 'playlist', label: inPlaylist ? 'Aus Playlist entfernen' : 'Zur Playlist hinzufügen', sub: playlistName ? `Playlist: ${playlistName}` : 'Aktive Playlist', icon: inPlaylist ? SVG_PLAYLIST_REMOVE : SVG_PLAYLIST_ADD } : null,
+          { key: 'assign', label: 'Kategorien', sub: 'Zuordnen oder ändern', icon: SVG_CATEGORY_ADD },
+          canShare ? { key: 'share', label: 'Teilen', sub: 'Mit anderen Personen', icon: SVG_SHARE } : null,
+          canRemoveShared ? { key: 'remove-shared', label: 'Aus geteilten entfernen', sub: ownerEmail ? `Von ${ownerEmail}` : 'Zugriff aufheben', icon: SVG_TRASH_MINI } : null,
+          canDelete ? { key: 'delete', label: 'Löschen', sub: 'PDF dauerhaft entfernen', icon: SVG_TRASH_MINI, destructive: true } : null
+        ].filter(Boolean);
+
+        if (!actions.length) return;
+
+        const backdrop = document.createElement('div');
+        backdrop.className = 'mobile-action-sheet-backdrop';
+        backdrop.innerHTML = `
+          <div class="mobile-action-sheet" role="dialog" aria-modal="true" aria-label="Aktionen für ${escapeHtml(displayName)}">
+            <div class="sheet-handle" aria-hidden="true"></div>
+            <div class="sheet-meta">
+              <div class="sheet-title">${escapeHtml(displayName)}</div>
+              <div class="sheet-subtitle">${escapeHtml(subtitle)}</div>
+            </div>
+            <div class="sheet-actions" role="menu">
+              ${actions.map((act) => `
+                <button type="button" class="sheet-btn ${act.destructive ? 'destructive' : ''} ${act.active ? 'is-active' : ''}" data-action="${act.key}">
+                  <span class="sheet-icon">${act.icon}</span>
+                  <div class="sheet-labels">
+                    <div class="sheet-label">${escapeHtml(act.label)}</div>
+                    ${act.sub ? `<div class="sheet-sublabel">${escapeHtml(act.sub)}</div>` : ''}
+                  </div>
+                </button>
+              `).join('')}
+            </div>
+          </div>
+        `;
+        const sheet = backdrop.querySelector('.mobile-action-sheet');
+        const handleEl = sheet?.querySelector('.sheet-handle') || sheet;
+        let dragStartY = null;
+        let lastDragDelta = 0;
+        let dragStartTime = 0;
+
+        const cleanupSheetListeners = () => {
+          handleEl?.removeEventListener('touchstart', onTouchStart);
+          handleEl?.removeEventListener('touchmove', onTouchMove);
+          handleEl?.removeEventListener('touchend', onTouchEnd);
+        };
+
+        const onTouchStart = (ev) => {
+          // Nicht swipen starten, wenn auf einen Aktions-Button getippt wird
+          if (ev.target?.closest('.sheet-actions button')) return;
+          const t = ev.touches?.[0];
+          if (!t) return;
+          dragStartY = t.clientY;
+          lastDragDelta = 0;
+          dragStartTime = Date.now();
+          if (sheet) sheet.style.transition = 'none';
+          ev.preventDefault();
+        };
+
+        const onTouchMove = (ev) => {
+          if (dragStartY === null) return;
+          const t = ev.touches?.[0];
+          if (!t) return;
+          const delta = Math.max(0, t.clientY - dragStartY);
+          lastDragDelta = delta;
+          if (sheet) sheet.style.transform = `translateY(${delta}px)`;
+          if (delta > 0) ev.preventDefault();
+        };
+
+        const onTouchEnd = () => {
+          if (dragStartY === null) return;
+          const duration = Date.now() - dragStartTime;
+          const shouldClose = lastDragDelta > 80 || (lastDragDelta > 40 && duration < 220);
+          dragStartY = null;
+          lastDragDelta = 0;
+          if (sheet) {
+            sheet.style.transition = 'transform 0.2s ease, opacity 0.2s ease';
+            sheet.style.transform = '';
+          }
+          if (shouldClose) close();
+        };
+
+        handleEl?.addEventListener('touchstart', onTouchStart, { passive: false });
+        handleEl?.addEventListener('touchmove', onTouchMove, { passive: false });
+        handleEl?.addEventListener('touchend', onTouchEnd);
+
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+
+        const close = () => {
+          backdrop.classList.remove('open');
+          backdrop.classList.add('closing');
+          setTimeout(() => backdrop.remove(), 180);
+          document.removeEventListener('keydown', onKeyDown);
+          cleanupSheetListeners();
+          mobileActionSheetCleanup = null;
+        };
+        const onKeyDown = (ev) => {
+          if (ev.key === 'Escape') {
+            ev.preventDefault();
+            close();
+          }
+        };
+
+        mobileActionSheetCleanup = close;
+
+        document.addEventListener('keydown', onKeyDown);
+        backdrop.addEventListener('click', (ev) => {
+          if (ev.target === backdrop) {
+            close();
+          }
+        });
+
+        const syncFavorites = (active) => {
+          document.querySelectorAll(`[data-item-name="${cssEscape(item.name)}"] .fav`).forEach((btn) => {
+            setFavVisual(btn, active);
+            btn.setAttribute('aria-pressed', String(active));
+          });
+        };
+
+        backdrop.querySelectorAll('[data-action]').forEach((btn) => {
+          btn.addEventListener('click', async () => {
+            const action = btn.getAttribute('data-action');
+            close();
+            try {
+              switch (action) {
+                case 'open':
+                  acquireWakeLockSync();
+                  history.replaceState(null, '', `/?file=${item.id}`);
+                  renderViewer(item.name);
+                  break;
+                case 'favorite': {
+                  const makeFav = !state.library.favorites.has(item.name);
+                  try {
+                    await setFavoriteOnBackend(item.name, makeFav);
+                    if (makeFav) state.library.favorites.add(item.name);
+                    else state.library.favorites.delete(item.name);
+                    syncFavorites(makeFav);
+                    updateFavoritesChipCounter();
+                  } catch (err) {
+                    console.error('Favoriten-Update fehlgeschlagen', err);
+                    syncFavorites(state.library.favorites.has(item.name));
+                  }
+                  break;
+                }
+                case 'playlist':
+                  openPlaylistAssignmentDialog(item.name);
+                  break;
+                case 'assign':
+                  openCategoryAssignDialog(item);
+                  break;
+                case 'share':
+                  await openShareDialog(item);
+                  break;
+                case 'remove-shared':
+                  await confirmAndRemoveSharedDocument(item);
+                  break;
+                case 'delete':
+                  await confirmAndDeletePdf(item);
+                  break;
+              }
+            } catch (err) {
+              console.error('Aktion fehlgeschlagen', err);
+            }
+          });
+        });
       }
 
       function renderCard(item) {
@@ -5451,7 +5703,7 @@
         a.href = `/?file=${item.id}`;
         // Align list design to new card style: rounded, padded, subtly tinted background
         const accent = Array.isArray(item.categories) && item.categories[0]?.color ? item.categories[0].color : null;
-        a.className = "relative h-full flex items-center gap-3 px-3 py-2 rounded-xl border border-neutral-800/40 bg-neutral-900/80 hover:bg-neutral-800/80 transition-colors";
+        a.className = "list-row relative h-full flex items-center gap-3 px-3 py-2 rounded-xl border border-neutral-800/40 bg-neutral-900/80 hover:bg-neutral-800/80 transition-colors";
         a.dataset.itemName = item.name;
         if (accent) {
           a.style.setProperty('--row-accent', accent);
@@ -5462,6 +5714,7 @@
         const displayName = item.displayName || item.name;
         const subtitleParts = [formatSize(item.size), new Date(item.mtime).toLocaleDateString()];
         if (item.folder) subtitleParts.push(item.folder);
+        const subtitle = subtitleParts.join(" • ");
         a.innerHTML = `
           <img src="${item.thumbnail}" alt="${item.name}" 
                class="thumb shrink-0 rounded bg-neutral-950 w-14 h-18 object-cover"
@@ -5469,26 +5722,31 @@
                onerror="this.style.display='none'; this.nextElementSibling.style.display='block'">
           <div class="thumb shrink-0 rounded bg-neutral-950 w-14 h-18 hidden flex items-center justify-center text-neutral-500 text-xs">PDF</div>
           <div class="flex-1 min-w-0">
-            <div class="font-medium truncate" title="${displayName}">${displayName}</div>
-            <div class="text-xs text-neutral-400 truncate">${subtitleParts.join(" • ")}</div>
+            <div class="font-medium truncate row-title" title="${displayName}">${displayName}</div>
+            <div class="text-xs text-neutral-400 truncate row-subtitle">${subtitle}</div>
             <div class="flex flex-wrap gap-1 mt-1">${renderCategoryBadges(item)}</div>
           </div>
-          <div class="flex items-center gap-2 shrink-0 whitespace-nowrap">
+          <div class="row-actions flex items-center gap-2 shrink-0 whitespace-nowrap ml-1">
             <button class="fav h-9 w-9 grid place-items-center rounded-full border border-neutral-700 text-neutral-300 bg-neutral-800/70 hover:bg-neutral-700 transition-transform" title="Als Favorit markieren" aria-pressed="false" style="padding:0;">☆</button>
-            <button class="add-playlist h-9 w-9 grid place-items-center rounded-full border border-neutral-700 text-neutral-200 bg-neutral-800/70 hover:bg-neutral-700 transition-transform" data-name="${item.name}" title="Zur Playlist hinzufügen" style="padding:0;">
-              ${SVG_PLAYLIST_ADD}
-            </button>
-            <button class="assign-cat h-9 w-9 grid place-items-center rounded-full border border-neutral-700 text-neutral-200 bg-neutral-800/70 hover:bg-neutral-700" title="Kategorien hinzufügen" style="padding:0;" aria-label="Kategorien hinzufügen">
-              ${SVG_CATEGORY_ADD}
-            </button>
-            <button class="share-pdf h-9 w-9 grid place-items-center rounded-full border border-neutral-700 text-neutral-200 bg-neutral-800/70 hover:bg-neutral-700" data-name="${item.name}" title="Teilen" style="display:none;padding:0;" aria-label="Teilen">
-              ${SVG_SHARE}
-            </button>
-            <button class="remove-shared h-9 w-9 grid place-items-center rounded-full border border-orange-700 text-orange-400 bg-neutral-800/70 hover:bg-orange-900/50 hover:text-orange-300 transition-transform" data-name="${item.name}" title="Von mir entfernen" style="display:none;padding:0;" aria-label="Von mir entfernen">
-              ${SVG_TRASH_MINI}
-            </button>
-            <button class="delete-pdf h-9 w-9 grid place-items-center rounded-full border border-red-700 text-red-400 bg-neutral-800/70 hover:bg-red-900/50 hover:text-red-300 transition-transform" data-name="${item.name}" title="PDF löschen" style="display:none;padding:0;" aria-label="PDF löschen">
-              ${SVG_TRASH_MINI}
+            <div class="row-action-group flex items-center gap-2">
+              <button class="add-playlist h-9 w-9 grid place-items-center rounded-full border border-neutral-700 text-neutral-200 bg-neutral-800/70 hover:bg-neutral-700 transition-transform" data-name="${item.name}" title="Zur Playlist hinzufügen" style="padding:0;">
+                ${SVG_PLAYLIST_ADD}
+              </button>
+              <button class="assign-cat h-9 w-9 grid place-items-center rounded-full border border-neutral-700 text-neutral-200 bg-neutral-800/70 hover:bg-neutral-700" title="Kategorien hinzufügen" style="padding:0;" aria-label="Kategorien hinzufügen">
+                ${SVG_CATEGORY_ADD}
+              </button>
+              <button class="share-pdf h-9 w-9 grid place-items-center rounded-full border border-neutral-700 text-neutral-200 bg-neutral-800/70 hover:bg-neutral-700" data-name="${item.name}" title="Teilen" style="display:none;padding:0;" aria-label="Teilen">
+                ${SVG_SHARE}
+              </button>
+              <button class="remove-shared h-9 w-9 grid place-items-center rounded-full border border-orange-700 text-orange-400 bg-neutral-800/70 hover:bg-orange-900/50 hover:text-orange-300 transition-transform" data-name="${item.name}" title="Von mir entfernen" style="display:none;padding:0;" aria-label="Von mir entfernen">
+                ${SVG_TRASH_MINI}
+              </button>
+              <button class="delete-pdf h-9 w-9 grid place-items-center rounded-full border border-red-700 text-red-400 bg-neutral-800/70 hover:bg-red-900/50 hover:text-red-300 transition-transform" data-name="${item.name}" title="PDF löschen" style="display:none;padding:0;" aria-label="PDF löschen">
+                ${SVG_TRASH_MINI}
+              </button>
+            </div>
+            <button class="row-more h-9 px-3 inline-flex items-center justify-center rounded-full border border-neutral-800 text-neutral-200 bg-neutral-900/70 hover:bg-neutral-800 transition-transform hidden" type="button" title="Mehr Aktionen" aria-label="Mehr Aktionen">
+              ${SVG_GRIP}
             </button>
           </div>
         `;
@@ -5569,6 +5827,15 @@
           ev.stopPropagation();
           await confirmAndRemoveSharedDocument(item);
         });
+
+        const moreBtn = a.querySelector('.row-more');
+        if (moreBtn) {
+          moreBtn.addEventListener('click', (ev) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+            openMobileActionSheet(item);
+          });
+        }
         
         // Click-Handler für direktes Laden (ohne Page-Reload) + Wake Lock Aktivierung
         a.addEventListener('click', (ev) => {
@@ -5582,7 +5849,7 @@
           }
         });
         
-        const actions = a.querySelector('.flex.items-center.gap-2');
+        const actions = a.querySelector('.row-action-group');
         if (actions) {
           // TODO: Offline-Button reaktivieren wenn Download-Funktion fertig ist
           /*
@@ -8413,10 +8680,15 @@
               
               // Share with new users
               if (toShare.length > 0) {
+                const headers = { 'Content-Type': 'application/json' };
+                const csrfToken = sessionStorage.getItem('csrfToken');
+                if (csrfToken) {
+                  headers["X-CSRF-Token"] = csrfToken;
+                }
                 const shareResp = await fetch('/api/share', {
                   method: 'POST',
                   credentials: 'include',
-                  headers: { 'Content-Type': 'application/json' },
+                  headers,
                   body: JSON.stringify({
                     fileName: item.name,
                     userIds: toShare
@@ -8431,10 +8703,15 @@
               
               // Unshare from users
               if (toUnshare.length > 0) {
+                const headers = { 'Content-Type': 'application/json' };
+                const csrfToken = sessionStorage.getItem('csrfToken');
+                if (csrfToken) {
+                  headers["X-CSRF-Token"] = csrfToken;
+                }
                 const unshareResp = await fetch('/api/share', {
                   method: 'DELETE',
                   credentials: 'include',
-                  headers: { 'Content-Type': 'application/json' },
+                  headers,
                   body: JSON.stringify({
                     fileName: item.name,
                     userIds: toUnshare
@@ -8515,10 +8792,15 @@
           confirmBtn.textContent = 'Entferne...';
           
           try {
+            const headers = { 'Content-Type': 'application/json' };
+            const csrfToken = sessionStorage.getItem('csrfToken');
+            if (csrfToken) {
+              headers["X-CSRF-Token"] = csrfToken;
+            }
             const response = await fetch('/api/share', {
               method: 'DELETE',
               credentials: 'include',
-              headers: { 'Content-Type': 'application/json' },
+              headers,
               body: JSON.stringify({
                 fileName: item.name
               })
@@ -8595,12 +8877,17 @@
           confirmBtn.textContent = 'Lösche...';
           
           try {
+            const headers = {
+              'Content-Type': 'application/json'
+            };
+            const csrfToken = sessionStorage.getItem('csrfToken');
+            if (csrfToken) {
+              headers["X-CSRF-Token"] = csrfToken;
+            }
             const response = await fetch(`/api/sheets/${encodeURIComponent(item.name)}`, {
               method: 'DELETE',
               credentials: 'include',
-              headers: {
-                'Content-Type': 'application/json'
-              }
+              headers
             });
             
             if (!response.ok) {
@@ -8680,6 +8967,11 @@
               // Find buttons for this item
               const itemEl = document.querySelector(`[data-item-name="${cssEscape(item.name)}"]`);
               if (!itemEl) continue;
+              itemEl.dataset.accessRole = accessRole || '';
+              itemEl.dataset.canShare = 'false';
+              itemEl.dataset.canDelete = 'false';
+              itemEl.dataset.canRemoveShared = 'false';
+              itemEl.dataset.ownerEmail = '';
               
               const shareBtn = itemEl.querySelector('.share-pdf');
               const removeBtn = itemEl.querySelector('.remove-shared');
@@ -8695,6 +8987,8 @@
                 if (removeBtn) removeBtn.style.display = 'none';
                 if (sharedBadge) sharedBadge.style.display = 'none';
                 if (sharedBadgeRow) sharedBadgeRow.style.display = 'none';
+                itemEl.dataset.canShare = 'true';
+                itemEl.dataset.canDelete = isAdmin ? 'true' : 'false';
               } else if (accessRole === 'shared') {
                 // Shared users can only remove from themselves
                 if (removeBtn) removeBtn.style.display = 'inline-flex';
@@ -8712,7 +9006,9 @@
                     sharedBadgeRow.style.display = 'flex';
                     sharedBadgeRow.dataset.ownerEmail = ownerEmail;
                   }
+                  itemEl.dataset.ownerEmail = ownerEmail || '';
                 }
+                itemEl.dataset.canRemoveShared = 'true';
               }
               
             } catch (err) {
