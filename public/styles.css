@@ -9,7 +9,11 @@
   --accent-contrast: #F9FAFB;
 }
 
-html, body { height: 100%; }
+/* Dynamic viewport height - works with iOS/iPad Safari toolbar */
+html, body { 
+  height: 100dvh; 
+  height: 100%; /* Fallback for older browsers */
+}
 
 body {
   background: linear-gradient(145deg, color-mix(in srgb, var(--accent-color) 10%, var(--surface-0)) 0%, var(--surface-0) 55%, var(--surface-1) 100%);
@@ -44,18 +48,14 @@ main#app {
 :root {
   --sat: env(safe-area-inset-top, 0px);
   --sab: env(safe-area-inset-bottom, 0px);
+  /* Control bar always needs space from bottom - unified across all modes */
+  --control-bar-height: 80px;
+  --control-bar-margin: 16px;
 }
 
-/* Controls bar: keep clear of Home indicator */
-#controls { padding-bottom: var(--sab); }
-
-/* In fullscreen hide header and add top/bottom safe padding to viewer */
+/* In fullscreen hide header and add top safe padding to viewer */
 html.is-fs header { 
   display: none !important; 
-}
-
-html.is-fs #viewerContent {
-  padding: var(--sat) 0 calc(var(--sab) + 80px) 0;
 }
 
 html.is-fs #viewerPdfContainer {
@@ -821,7 +821,8 @@ body.in-viewer #headerSpacer {
   flex-direction: column;
   min-height: 0;
   padding: 0;
-  padding-bottom: 0;
+  /* CRITICAL: Always leave space for the control bar at bottom */
+  padding-bottom: calc(var(--control-bar-height) + var(--control-bar-margin) + var(--sab));
 }
 
 #viewerPdfContainer {
@@ -842,6 +843,50 @@ body.in-viewer #headerSpacer {
   overflow-y: auto;
   overflow-x: hidden;
   scroll-behavior: smooth;
+}
+
+#viewerTapHints {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  justify-content: space-between;
+  pointer-events: none;
+  z-index: 35;
+}
+
+.viewer-tap-hint {
+  height: 100%;
+  pointer-events: none;
+  opacity: 0;
+  border-radius: 18px;
+  background: radial-gradient(circle at 30% 50%, rgba(99, 102, 241, 0.15), rgba(99, 102, 241, 0.04), transparent 68%);
+  border: 1px dashed rgba(255, 255, 255, 0.08);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.02) inset,
+    0 18px 40px -16px rgba(0, 0, 0, 0.5);
+  transition: opacity 0.25s ease, transform 0.25s ease, box-shadow 0.25s ease;
+  backdrop-filter: blur(6px);
+}
+
+.viewer-tap-hint--left {
+  background: radial-gradient(circle at 70% 50%, rgba(99, 102, 241, 0.18), rgba(99, 102, 241, 0.06), transparent 68%);
+}
+
+.viewer-tap-hint--right {
+  background: radial-gradient(circle at 30% 50%, rgba(99, 102, 241, 0.18), rgba(99, 102, 241, 0.06), transparent 68%);
+}
+
+.viewer-tap-hint.is-visible {
+  opacity: 0.28;
+}
+
+.viewer-tap-hint.is-active {
+  opacity: 0.58;
+  transform: scale(1.02);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.04) inset,
+    0 24px 48px -18px rgba(0, 0, 0, 0.6),
+    0 0 40px -10px color-mix(in srgb, var(--accent-color) 50%, transparent);
 }
 
 /* PDF Page Styling */
@@ -1143,41 +1188,48 @@ body.in-viewer #headerSpacer {
   }
 }
 
-/* Viewer Controls - Glassmorphism Style */
+/* ============================================
+   CONTROL BAR - UNIFIED ACROSS ALL MODES
+   ============================================ */
 #controls {
   position: fixed;
-  bottom: max(env(safe-area-inset-bottom, 0px), 8px); /* Ensure visibility above screen edge */
   left: 0;
   right: 0;
-  z-index: 70; /* High priority to ensure visibility above PDF viewer */
-  padding: 0;
+  bottom: 0;
+  z-index: 70;
+  /* Use padding to create space from bottom edge + safe area */
+  padding: 0 var(--control-bar-margin) calc(var(--control-bar-margin) + var(--sab));
   background: transparent;
-  border: none;
+  pointer-events: none;
 }
 
 #controlsInner {
   margin: 0 auto;
   max-width: 1280px;
-  padding: 0.7rem 0.9rem calc(0.7rem + var(--sab));
+  padding: 0;
   display: flex;
   flex-direction: column;
   gap: 0.6rem;
+  pointer-events: auto;
 }
 
 .control-panel {
   backdrop-filter: blur(24px);
-  background: linear-gradient(120deg, color-mix(in srgb, var(--accent-color) 16%, rgba(15, 18, 26, 0.9)) 0%, rgba(15, 18, 26, 0.85) 100%);
-  border: 1px solid rgba(148, 163, 184, 0.12);
+  -webkit-backdrop-filter: blur(24px);
+  background: linear-gradient(120deg, color-mix(in srgb, var(--accent-color) 16%, rgba(15, 18, 26, 0.92)) 0%, rgba(15, 18, 26, 0.88) 100%);
+  border: 1px solid rgba(148, 163, 184, 0.15);
   border-radius: 18px;
-  padding: 0.65rem 1rem;
+  padding: 0.75rem 1.1rem;
   box-shadow: 
-    0 18px 40px -18px rgba(0, 0, 0, 0.65),
-    0 0 0 1px rgba(255, 255, 255, 0.02) inset;
+    0 18px 40px -18px rgba(0, 0, 0, 0.7),
+    0 8px 24px -8px rgba(0, 0, 0, 0.4),
+    0 0 0 1px rgba(255, 255, 255, 0.03) inset;
   display: flex;
   flex-wrap: nowrap;
   gap: 0.75rem;
   align-items: center;
   justify-content: space-between;
+  min-height: 60px; /* Ensure sufficient height */
 }
 
 .control-panel-left {
@@ -1621,17 +1673,9 @@ body.in-viewer #headerSpacer {
 
 /* iPad / Tablet specific styles (768px - 1024px) */
 @media (min-width: 641px) and (max-width: 1024px) {
-  /* Ensure control panel is fully visible on iPad */
-  #controls {
-    z-index: 60; /* Higher than most elements */
-    position: fixed;
-    bottom: max(env(safe-area-inset-bottom, 0px), 12px); /* Lift above screen edge */
-    pointer-events: auto;
-  }
-  
-  #controlsInner {
-    padding: 1rem 1.2rem;
-    max-width: 100%;
+  :root {
+    --control-bar-margin: 20px;
+    --control-bar-height: 90px;
   }
   
   .control-panel {
@@ -1683,7 +1727,7 @@ body.in-viewer #headerSpacer {
   
   /* Ensure viewer content doesn't overlap controls */
   #viewerContent {
-    padding-bottom: calc(140px + var(--sab)); /* Extra space for controls */
+    padding-bottom: calc(var(--control-bar-height) + var(--control-bar-margin) + var(--sab));
   }
 }
 
@@ -1722,23 +1766,29 @@ body.in-viewer #headerSpacer {
   
   #viewerContent {
     padding: 0;
-    padding-bottom: calc(160px + var(--sab)); /* Extra space for controls on mobile */
+    padding-bottom: calc(var(--control-bar-height) + var(--control-bar-margin) + var(--sab));
   }
   
   #viewerPdfContainer {
     border-radius: 0;
   }
   
+  :root {
+    --control-bar-margin: 12px;
+    --control-bar-height: 100px; /* More height for wrapped controls on mobile */
+  }
+
   #controlsInner {
-    padding: 0.5rem 0.6rem calc(0.5rem + var(--sab));
+    padding: 0.6rem 0.75rem;
   }
   
   .control-panel {
-    padding: 0.5rem 0.75rem;
+    padding: 0.65rem 0.85rem;
     border-radius: 16px;
     flex-wrap: wrap;
-    gap: 0.5rem;
+    gap: 0.6rem;
     justify-content: center;
+    min-height: 56px;
   }
   
   .control-panel-left,

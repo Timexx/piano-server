@@ -5,31 +5,30 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>Music Sheets</title>
     
-    <!-- CRITICAL: Base Path Helper - MUST be loaded FIRST -->
-    <script src="/base-path.js?v=5.0.10"></script>
-    <script src="/version.js?v=5.0.10"></script>
-    <link rel="icon" href="/icon-maskable.svg?v=5.0.10" type="image/svg+xml">
-    <link rel="shortcut icon" href="/icon-maskable.svg?v=5.0.10" type="image/svg+xml">
+    <!-- Base Path Helper for proxy setups -->
+    <script src="/base-path.js"></script>
+    <link rel="icon" href="/icon-maskable.svg" type="image/svg+xml">
+    <link rel="shortcut icon" href="/icon-maskable.svg" type="image/svg+xml">
     
-    <!-- PWA Manifest -->
-    <link rel="manifest" href="/manifest.json?v=5.0.10">
+    <!-- App Manifest for desktop shortcuts -->
+    <link rel="manifest" href="/manifest.json">
     <meta name="theme-color" content="#6366F1">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="Piano Sheets">
+    <meta name="apple-mobile-web-app-title" content="Piano Sheets">
 
     <!-- Tailwind CSS (CDN) -->
     <script src="https://cdn.tailwindcss.com"></script>
 
     <!-- PDF.js & Fuse.js (local, served by server.js) -->
-    <script src="/vendor/pdfjs/pdf.min.js?v=5.0.10" defer></script>
-    <script src="/vendor/fuse.min.js?v=5.0.10" defer></script>
-  <script src="/vendor/nosleep.min.js?v=5.0.10" defer></script>
-  <script src="/jump-markers.js?v=5.0.10" defer></script>
-  <script src="/auth-status.js?v=5.0.10" defer></script>
+    <script src="/vendor/pdfjs/pdf.min.js" defer></script>
+    <script src="/vendor/fuse.min.js" defer></script>
+    <script src="/vendor/nosleep.min.js" defer></script>
+    <script src="/jump-markers.js" defer></script>
+    <script src="/auth-status.js" defer></script>
 
     <!-- Styles -->
-    <link rel="stylesheet" href="/styles.css?v=5.0.10">
+    <link rel="stylesheet" href="/styles.css">
   </head>
   <body class="min-h-screen bg-neutral-950 text-neutral-100 antialiased tap-highlight-none">
     <!-- Toast Container for notifications -->
@@ -179,282 +178,10 @@
     </div>
 
     <!-- SECURITY: CSRF Protection -->
-    <script src="/csrf-protection.js?v=5.0.10"></script>
+    <script src="/csrf-protection.js"></script>
 
     <!-- App logic embedded as module -->
     <script type="module">
-      // ===== PWA Service Worker Registration =====
-      if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-          navigator.serviceWorker.register('/sw.js')
-            .then((registration) => {
-              console.log('✅ Service Worker registered:', registration.scope);
-              
-              // Update verfügbar
-              registration.addEventListener('updatefound', () => {
-                const newWorker = registration.installing;
-                newWorker.addEventListener('statechange', () => {
-                  if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                    // Neuer Service Worker verfügbar
-                    if (confirm('Neue Version verfügbar! Jetzt aktualisieren?')) {
-                      newWorker.postMessage({ type: 'SKIP_WAITING' });
-                      window.location.reload();
-                    }
-                  }
-                });
-              });
-            })
-            .catch((error) => {
-              console.warn('❌ Service Worker registration failed:', error);
-            });
-          
-          // Reload wenn neuer SW aktiviert wird (aber nicht im Offline-Modus)
-          let refreshing = false;
-          navigator.serviceWorker.addEventListener('controllerchange', () => {
-            if (!refreshing && navigator.onLine) {
-              refreshing = true;
-              console.log('[SW] New service worker activated, reloading...');
-              window.location.reload();
-            } else if (!navigator.onLine) {
-              console.log('[SW] New service worker activated, but offline - skipping reload');
-            }
-          });
-        });
-      }
-
-      // ===== PWA Update Detection =====
-      let updateCheckInterval;
-      let expectedVersionCache = null;
-      let updateCheckAttempts = 0;
-
-      async function getCurrentVersion() {
-        try {
-          // Lade version.js dynamisch neu mit Cache-Busting, um Browser-Cache zu umgehen
-          const timestamp = Date.now();
-          const response = await fetch(`/version.js?v=${timestamp}`, { 
-            cache: 'no-cache',
-            headers: { 'Cache-Control': 'no-cache' }
-          });
-          
-          if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-          }
-          
-          const scriptText = await response.text();
-          
-          // Extrahiere APP_VERSION aus dem Script-Text
-          const versionMatch = scriptText.match(/window\.APP_VERSION\s*=\s*['"]([^'"]+)['"]/);
-          if (versionMatch && versionMatch[1]) {
-            return versionMatch[1];
-          }
-          
-          throw new Error('Version not found in version.js');
-        } catch (error) {
-          console.warn('Could not fetch current version from server:', error);
-          // Fallback: Verwende die bereits geladene Version
-          return window.APP_VERSION || 'unknown';
-        }
-      }
-
-      async function getExpectedVersion() {
-        try {
-          // Hole erwartete Version vom Server-API
-          const response = await fetch('/api/version', {
-            cache: 'no-cache',
-            headers: { 'Cache-Control': 'no-cache' }
-          });
-          
-          if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-          }
-          
-          const data = await response.json();
-          
-          if (data && data.version) {
-            return data.version;
-          }
-          
-          throw new Error('Version not found in API response');
-        } catch (error) {
-          console.warn('Could not fetch expected version from server:', error);
-          // Fallback: Verwende die aktuelle Version als erwartete Version
-          return window.APP_VERSION || 'unknown';
-        }
-      }
-
-      async function checkForUpdates() {
-        try {
-          // Prüfe ob version.js geladen wurde
-          if (typeof window.APP_VERSION === 'undefined') {
-            updateCheckAttempts++;
-            
-            // Exponentieller Backoff: max 5 Versuche, max 10 Sekunden Wartezeit
-            if (updateCheckAttempts < 5) {
-              const delay = Math.min(500 * Math.pow(2, updateCheckAttempts), 10000);
-              console.log(`Version info not loaded yet, retrying in ${delay}ms (attempt ${updateCheckAttempts}/5)`);
-              setTimeout(checkForUpdates, delay);
-              return;
-            } else {
-              console.warn('Version info could not be loaded after 5 attempts, giving up');
-              return;
-            }
-          }
-
-          // Reset Versuche bei erfolgreichem Laden
-          updateCheckAttempts = 0;
-
-          // Hole die aktuelle Version vom Server (um Cache zu umgehen)
-          const currentVersion = await getCurrentVersion();
-          const expectedVersion = await getExpectedVersion();
-
-          // Bei API-Fehler oder unbekannter erwarteter Version: nichts anzeigen
-          if (expectedVersion === 'unknown' || expectedVersion === currentVersion) {
-            console.log(`Version check passed: current=${currentVersion}, expected=${expectedVersion}`);
-            return;
-          }
-
-          // Prüfe ob Update bereits dismissed wurde
-          const dismissedVersion = localStorage.getItem('update-dismissed-version');
-          if (dismissedVersion === expectedVersion) {
-            console.log(`Update ${expectedVersion} was previously dismissed`);
-            return;
-          }
-
-          console.log(`Version mismatch: current=${currentVersion}, expected=${expectedVersion}`);
-          
-          // Zeige Update-Benachrichtigung
-          showUpdateBanner(expectedVersion);
-
-        } catch (error) {
-          console.error('Update check failed:', error);
-          // Bei kritischen Fehlern: nächste Prüfung in 5 Minuten
-          setTimeout(checkForUpdates, 5 * 60 * 1000);
-        }
-      }
-
-      function showUpdateBanner(expectedVersion) {
-        // Entferne existierendes Banner falls vorhanden
-        const existingBanner = document.getElementById('update-banner');
-        if (existingBanner) {
-          existingBanner.remove();
-        }
-
-        const updateBanner = document.createElement('div');
-        updateBanner.id = 'update-banner';
-        updateBanner.className = 'fixed top-4 left-4 right-4 z-50 bg-blue-600 text-white px-4 py-3 rounded-lg shadow-lg border border-blue-500';
-        updateBanner.innerHTML = `
-          <div class="flex items-center justify-between">
-            <div class="flex items-center gap-3">
-              <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
-              </svg>
-              <div>
-                <div class="font-semibold">Neue Version verfügbar</div>
-                <div class="text-sm opacity-90">Version ${expectedVersion} ist bereit zum Download</div>
-              </div>
-            </div>
-            <div class="flex gap-2">
-              <button id="update-dismiss-forever" type="button" class="px-2 py-1 text-xs text-blue-300 hover:text-blue-100 underline whitespace-nowrap">
-                Nicht erinnern
-              </button>
-              <button id="update-dismiss" type="button" class="px-3 py-1 text-sm bg-blue-700 hover:bg-blue-800 rounded transition-colors">
-                Später
-              </button>
-              <button id="update-now" type="button" class="px-3 py-1 text-sm bg-white text-blue-600 hover:bg-blue-50 rounded font-semibold transition-colors">
-                Aktualisieren
-              </button>
-            </div>
-          </div>
-        `;
-
-        // Animation beim Einblenden
-        updateBanner.style.opacity = '0';
-        updateBanner.style.transform = 'translateY(-100%)';
-        document.body.appendChild(updateBanner);
-
-        // Animation starten
-        requestAnimationFrame(() => {
-          updateBanner.style.transition = 'all 0.3s ease-out';
-          updateBanner.style.opacity = '1';
-          updateBanner.style.transform = 'translateY(0)';
-        });
-
-        // Event Handler für Buttons
-        document.getElementById('update-dismiss').addEventListener('click', () => {
-          animateBannerOut(updateBanner);
-        });
-
-        document.getElementById('update-dismiss-forever').addEventListener('click', () => {
-          localStorage.setItem('update-dismissed-version', expectedVersion);
-          animateBannerOut(updateBanner);
-        });
-
-        document.getElementById('update-now').addEventListener('click', () => {
-          // Analytics tracking falls verfügbar
-          if (typeof gtag !== 'undefined') {
-            gtag('event', 'pwa_update_accepted', {
-              event_category: 'engagement',
-              event_label: expectedVersion
-            });
-          }
-          
-          // Force refresh to get new version
-          window.location.reload();
-        });
-
-        // Auto-hide nach 60 Sekunden
-        setTimeout(() => {
-          if (updateBanner.parentNode) {
-            animateBannerOut(updateBanner);
-          }
-        }, 60000);
-      }
-
-      function animateBannerOut(banner) {
-        if (!banner) return;
-        banner.style.transition = 'all 0.3s ease-in';
-        banner.style.opacity = '0';
-        banner.style.transform = 'translateY(-100%)';
-        setTimeout(() => {
-          if (banner.parentNode) {
-            banner.remove();
-          }
-        }, 300);
-      }
-
-      function startPeriodicUpdateCheck() {
-        clearInterval(updateCheckInterval);
-        // Prüfe alle 5 Minuten auf Updates
-        updateCheckInterval = setInterval(checkForUpdates, 5 * 60 * 1000);
-      }
-
-      function stopPeriodicUpdateCheck() {
-        clearInterval(updateCheckInterval);
-      }
-
-      // Starte Update-Prüfung beim Laden
-      window.addEventListener('load', () => {
-        setTimeout(checkForUpdates, 1000);
-      });
-
-      // Regelmäßige Prüfung bei Fokus
-      window.addEventListener('focus', () => {
-        checkForUpdates(); // Sofort prüfen
-        startPeriodicUpdateCheck(); // Regelmäßig weiterprüfen
-      });
-
-      // Stoppe regelmäßige Prüfung bei Blur
-      window.addEventListener('blur', () => {
-        stopPeriodicUpdateCheck();
-      });
-
-      // Prüfe bei Online-Status Änderung
-      window.addEventListener('online', () => {
-        // Cache invalidieren und neu prüfen
-        expectedVersionCache = null;
-        setTimeout(checkForUpdates, 1000);
-      });
-
       import { createAnnotationManager } from "./annotation-tools.js";
 
       // force same-origin worker to avoid blob/CORS issues (Safari/iPad)
@@ -1152,25 +879,6 @@
         }
       }
 
-      // Load offline state from localStorage
-      let offlineStorageRaw = {};
-      try {
-        const stored = localStorage.getItem('offlineState');
-        if (stored) {
-          offlineStorageRaw = JSON.parse(stored);
-        }
-      } catch (err) {
-        console.warn('Failed to load offline state:', err);
-        offlineStorageRaw = {};
-      }
-      const offlineStoredItems = Array.isArray(offlineStorageRaw?.items) ? offlineStorageRaw.items : [];
-      const offlineStoredManifest = offlineStorageRaw?.manifest && typeof offlineStorageRaw.manifest === 'object'
-        ? offlineStorageRaw.manifest
-        : {};
-      const offlineStoredLastSync = Number(offlineStorageRaw?.lastSync) || null;
-      const offlineStoredPrimed = Boolean(offlineStorageRaw?.libraryPrimed);
-      const offlineStoredFilter = Boolean(offlineStorageRaw?.filterOnly);
-
       // ---- Global State (simplified for server-side thumbnails) ----
       const state = {
         library: {
@@ -1220,7 +928,21 @@
           zoomTimer: null,
           zoomControlsReady: false,
           zoomVersion: 0,
-          cacheToken: null
+          cacheToken: null,
+          tapZones: {
+            overlay: null,
+            left: null,
+            right: null,
+            hintTimer: null,
+            flashTimers: { left: null, right: null },
+            resizeObserver: null,
+            introShown: false,
+            width: 0,
+            enabled: false,
+            bounds: null,
+            handlerTarget: null,
+            pointerHandler: null
+          }
         },
         categories: [],
         ui: {
@@ -1240,20 +962,6 @@
           lastCheck: 0,
           isLowMemory: false,
           checkInterval: 10000 // Check every 10s
-        },
-        offline: {
-          supported: typeof navigator !== 'undefined' && 'serviceWorker' in navigator,
-          workerReady: false,
-          cached: new Set(offlineStoredItems.filter((item) => typeof item === 'string')),
-          manifest: offlineStoredManifest,
-          busy: false,
-          pending: new Set(),
-          inFlight: new Map(),
-          lastError: null,
-          lastSync: offlineStoredLastSync,
-          libraryPrimed: offlineStoredPrimed,
-          filterOnly: offlineStoredFilter,
-          online: navigator.onLine
         }
       };
 
@@ -1268,462 +976,6 @@
           .replace(/>/g, '&gt;')
           .replace(/"/g, '&quot;')
           .replace(/'/g, '&#39;');
-      }
-
-      function persistOfflineState() {
-        if (!state.offline.supported) return;
-        const snapshot = {
-          items: Array.from(state.offline.cached),
-          manifest: state.offline.manifest,
-          lastSync: state.offline.lastSync,
-          libraryPrimed: state.offline.libraryPrimed,
-          filterOnly: !!state.offline.filterOnly
-        };
-        try {
-          localStorage.setItem('offlineState', JSON.stringify(snapshot));
-        } catch (err) {
-          console.warn('Persist offline state failed:', err);
-        }
-      }
-
-      function updateOfflineOnlineStatus() {
-        if (!state.offline.supported) return;
-        state.offline.online = navigator.onLine;
-        document.body.dataset.network = state.offline.online ? 'online' : 'offline';
-      }
-
-      async function sendMessageToServiceWorker(type, payload = {}) {
-        if (!state.offline.supported) {
-          throw new Error('Service Worker not available');
-        }
-        let registration;
-        try {
-          registration = await navigator.serviceWorker.ready;
-        } catch (err) {
-          throw new Error('Service Worker not ready');
-        }
-        const target = navigator.serviceWorker.controller || registration.active;
-        if (!target) {
-          throw new Error('Service Worker controller unavailable');
-        }
-        return new Promise((resolve, reject) => {
-          const channel = new MessageChannel();
-          const timeout = window.setTimeout(() => {
-            channel.port1.close();
-            reject(new Error('Service Worker response timeout'));
-          }, 12000);
-          channel.port1.onmessage = (event) => {
-            window.clearTimeout(timeout);
-            resolve(event.data || {});
-          };
-          try {
-            target.postMessage({ ...payload, type }, [channel.port2]);
-          } catch (err) {
-            window.clearTimeout(timeout);
-            reject(err);
-          }
-        });
-      }
-
-      function offlineResourceUrlsForItem(item) {
-        if (!item || !item.name) return [];
-        const encoded = encodePathSegments(item.name);
-        const urls = [
-          `/sheets/${encoded}`,
-          item.thumbnail || `/thumbnails/${encodePathSegments(item.name.replace(/\.pdf$/i, '.jpg'))}`,
-          `/api/prefs/file?name=${encodeURIComponent(item.name)}`,
-          `/api/annotations?name=${encodeURIComponent(item.name)}`
-        ];
-        return [...new Set(urls.filter(Boolean))];
-      }
-
-      function buildOfflineManifestEntry(item) {
-        if (!item || !item.name) return null;
-        const categories = Array.isArray(item.categories)
-          ? item.categories.map((cat) => ({
-              id: cat.id,
-              name: cat.name,
-              color: cat.color,
-              icon: cat.icon
-            }))
-          : [];
-        return {
-          name: item.name,
-          displayName: item.displayName || item.name.split('/').pop(),
-          folder: item.folder || '',
-          thumbnail: item.thumbnail || `/thumbnails/${encodePathSegments(item.name.replace(/\.pdf$/i, '.jpg'))}`,
-          url: item.url || `/sheets/${encodePathSegments(item.name)}`,
-          categories,
-          size: Number(item.size) || null,
-          mtime: Number(item.mtime) || null
-        };
-      }
-
-      function getOfflineManifestEntry(name) {
-        if (!name) return null;
-        const manifest = state.offline.manifest || {};
-        return manifest[name] || null;
-      }
-
-      function refreshOfflineIndicators() {
-        requestAnimationFrame(() => {
-          document.querySelectorAll('[data-item-name]').forEach((el) => {
-            updateOfflineIndicatorForElement(el);
-          });
-        });
-      }
-
-      function updateOfflineIndicatorForElement(el) {
-        if (!el || !el.dataset) return;
-        const rel = el.dataset.itemName;
-        if (!rel) return;
-        const isCached = state.offline.supported && state.offline.cached.has(rel);
-        const badgeSelector = '[data-offline-badge="1"]';
-        let badge = el.querySelector(badgeSelector);
-        if (isCached) {
-          if (!badge) {
-            badge = document.createElement('span');
-            badge.dataset.offlineBadge = '1';
-            badge.className = 'badge-offline';
-            badge.textContent = 'Offline';
-            el.appendChild(badge);
-          }
-        } else if (badge) {
-          badge.remove();
-        }
-
-        const btn = el.querySelector('[data-action="offline"]');
-        if (btn) {
-          updateOfflineButtonAppearance(btn, rel);
-        }
-      }
-
-      function updateOfflineButtonAppearance(btn, rel) {
-        if (!btn) return;
-        const busy = btn.dataset.offlineBusy === '1';
-        const name = rel || btn.dataset.offlineName || '';
-        if (!state.offline.supported) {
-          if (!busy) {
-            btn.innerHTML = SVG_CLOUD_DOWNLOAD;
-            btn.classList.remove('offline-active');
-            btn.setAttribute('aria-pressed', 'false');
-          }
-          btn.disabled = true;
-          btn.setAttribute('aria-disabled', 'true');
-          btn.title = 'Offline-Funktion nicht verfügbar';
-          btn.dataset.offlineName = name;
-          return;
-        }
-        const isCached = state.offline.cached.has(name);
-        const controllerReady = state.offline.workerReady || !!navigator.serviceWorker?.controller;
-        const onlineNow = navigator.onLine !== false;
-        const allowDownload = controllerReady && onlineNow;
-
-        if (!busy) {
-          btn.innerHTML = isCached ? SVG_CLOUD_CHECK : SVG_CLOUD_DOWNLOAD;
-          btn.classList.toggle('offline-active', isCached);
-          btn.setAttribute('aria-pressed', String(isCached));
-        }
-
-        btn.disabled = false;
-        btn.removeAttribute('disabled');
-        btn.setAttribute('aria-disabled', 'false');
-        if (!busy) {
-          if (!controllerReady) {
-            btn.title = 'Initialisiere Offline-Unterstützung…';
-          } else if (!onlineNow && !isCached) {
-            btn.title = 'Keine Verbindung – Download nicht möglich.';
-          } else {
-            btn.title = isCached ? 'Offline-Version entfernen' : 'Offline speichern';
-          }
-        }
-
-        if (!isCached && (!allowDownload || busy)) {
-          btn.classList.remove('offline-active');
-        }
-        btn.dataset.offlineName = name;
-      }
-
-      function setOfflineButtonBusy(btn, busy) {
-        if (!btn) return;
-        if (busy) {
-          btn.dataset.offlineBusy = '1';
-          btn.disabled = true;
-          btn.setAttribute('aria-disabled', 'true');
-          btn.innerHTML = SVG_SPINNER;
-        } else {
-          delete btn.dataset.offlineBusy;
-          btn.setAttribute('aria-disabled', 'false');
-          updateOfflineButtonAppearance(btn, btn.dataset.offlineName);
-        }
-      }
-
-      function forEachOfflineButton(name, callback) {
-        if (!name || typeof callback !== 'function') return;
-        document.querySelectorAll('.btn-offline').forEach((btn) => {
-          if (btn.dataset && btn.dataset.offlineName === name) {
-            callback(btn);
-          }
-        });
-      }
-
-      function setOfflineButtonsBusyByName(name, busy) {
-        forEachOfflineButton(name, (btn) => setOfflineButtonBusy(btn, busy));
-      }
-
-      const pendingControllerReadyActions = [];
-
-      function handleOfflineCacheResult(payload) {
-        if (!payload || typeof payload !== 'object') return;
-        const name = payload.name;
-        if (!name) return;
-
-        state.offline.pending.delete(name);
-        state.offline.inFlight.delete(name);
-        setOfflineButtonsBusyByName(name, false);
-
-        if (payload.success) {
-          state.offline.cached.add(name);
-          if (payload.manifest && typeof payload.manifest === 'object') {
-            state.offline.manifest[name] = payload.manifest;
-          }
-          state.offline.lastSync = Date.now();
-          persistOfflineState();
-          refreshOfflineIndicators();
-          renderOfflineShelf();
-          const label = payload.manifest?.displayName || payload.displayName || name;
-          showToast(`Offline verfügbar: ${label}`, 2600);
-        } else {
-          state.offline.lastError = payload.error || 'Download fehlgeschlagen';
-          refreshOfflineIndicators();
-          renderOfflineShelf();
-          const label = payload.displayName || payload.manifest?.displayName || name;
-          showToast(payload.error ? `Download fehlgeschlagen: ${label}` : 'Download fehlgeschlagen.', 3200);
-        }
-      }
-
-      async function cacheItemForOffline(item) {
-        if (!state.offline.supported) {
-          const error = new Error('Offline caching not supported');
-          error.userMessage = 'Offline-Funktion nicht verfügbar.';
-          throw error;
-        }
-        const urls = offlineResourceUrlsForItem(item);
-        const manifestEntry = buildOfflineManifestEntry(item);
-        const requestId = `offline-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-        const response = await sendMessageToServiceWorker('CACHE_URLS', {
-          urls,
-          name: item.name,
-          manifest: manifestEntry,
-          displayName: manifestEntry?.displayName || item.displayName || item.name,
-          requestId
-        });
-        if (response && response.success === false) {
-          const error = new Error(response.error || 'Caching failed');
-          error.userMessage = 'Download fehlgeschlagen.';
-          throw error;
-        }
-        state.offline.workerReady = true;
-        return { requestId, manifest: manifestEntry };
-      }
-
-      async function removeItemFromOffline(item) {
-        if (!state.offline.supported) {
-          const error = new Error('Offline caching not supported');
-          error.userMessage = 'Offline-Funktion nicht verfügbar.';
-          throw error;
-        }
-        const urls = offlineResourceUrlsForItem(item);
-        const response = await sendMessageToServiceWorker('REMOVE_URLS', { urls });
-        if (response && response.success === false) {
-          const error = new Error(response.error || 'Remove failed');
-          error.userMessage = 'Offline-Daten konnten nicht entfernt werden.';
-          throw error;
-        }
-        state.offline.workerReady = true;
-        state.offline.cached.delete(item.name);
-        delete state.offline.manifest[item.name];
-        state.offline.lastSync = Date.now();
-        persistOfflineState();
-      }
-
-      function buildOfflineLibraryItems() {
-        const items = [];
-        state.offline.cached.forEach((name) => {
-          const manifest = getOfflineManifestEntry(name) || {};
-          items.push({
-            id: encodeURIComponent(name),
-            name,
-            displayName: manifest.displayName || name.split('/').pop(),
-            folder: manifest.folder || '',
-            thumbnail: manifest.thumbnail || `/thumbnails/${encodePathSegments(name.replace(/\.pdf$/i, '.jpg'))}`,
-            url: manifest.url || `/sheets/${encodePathSegments(name)}`,
-            categories: Array.isArray(manifest.categories) ? manifest.categories : [],
-            size: manifest.size || 0,
-            mtime: manifest.mtime || 0
-          });
-        });
-        return items.sort((a, b) => a.displayName.localeCompare(b.displayName, 'de', { sensitivity: 'base' }));
-      }
-
-      function deriveOfflineCategories() {
-        const seen = new Map();
-        const manifest = state.offline.manifest || {};
-        Object.keys(manifest).forEach((name) => {
-          const entry = manifest[name];
-          if (!entry || !Array.isArray(entry.categories)) return;
-          entry.categories.forEach((cat) => {
-            if (!cat || !cat.id) return;
-            if (!seen.has(cat.id)) {
-              seen.set(cat.id, { ...cat });
-            }
-          });
-        });
-        return Array.from(seen.values());
-      }
-
-      function buildOfflineLibraryFallbackData() {
-        const items = buildOfflineLibraryItems();
-        return {
-          items,
-          total: items.length,
-          categories: deriveOfflineCategories()
-        };
-      }
-
-      async function syncOfflineInventory({ silent = false } = {}) {
-        if (!state.offline.supported) return;
-        try {
-          const response = await sendMessageToServiceWorker('GET_CACHED_PDFS');
-          state.offline.workerReady = true;
-          const pdfs = Array.isArray(response?.pdfs) ? response.pdfs : [];
-          state.offline.cached = new Set(pdfs);
-          Object.keys(state.offline.manifest).forEach((key) => {
-            if (!state.offline.cached.has(key)) {
-              delete state.offline.manifest[key];
-            }
-          });
-          state.offline.lastSync = Date.now();
-          persistOfflineState();
-          refreshOfflineIndicators();
-          renderOfflineShelf();
-          if (!silent) {
-            showToast(`Offline-Inhalte aktualisiert (${pdfs.length})`, 2600);
-          }
-        } catch (error) {
-          state.offline.lastError = error?.message || String(error);
-          if (!silent) {
-            showToast('Offline-Status konnte nicht aktualisiert werden.', 3200);
-          }
-          console.warn('Offline sync failed:', error);
-        }
-      }
-
-      async function clearOfflineCaches() {
-        if (!state.offline.supported) return;
-        try {
-          await sendMessageToServiceWorker('CLEAR_OFFLINE');
-          state.offline.workerReady = true;
-        } catch (err) {
-          console.warn('CLEAR_OFFLINE failed:', err);
-        }
-        state.offline.cached = new Set();
-        state.offline.manifest = {};
-        state.offline.libraryPrimed = false;
-        state.offline.lastSync = Date.now();
-        persistOfflineState();
-        refreshOfflineIndicators();
-        renderOfflineShelf();
-      }
-
-      function renderOfflineShelf() {
-        const shelf = document.querySelector('#offlineShelf');
-        if (!shelf) return;
-        if (!state.offline.supported) {
-          shelf.classList.add('hidden');
-          shelf.innerHTML = '';
-          return;
-        }
-        const count = state.offline.cached.size;
-        if (!count) {
-          shelf.classList.add('hidden');
-          shelf.innerHTML = '';
-          return;
-        }
-        shelf.classList.remove('hidden');
-        const filterActive = !!state.offline.filterOnly;
-        const entries = buildOfflineLibraryItems();
-        const pills = entries.length
-          ? entries.map((entry) => `
-              <button type="button" class="offline-pill" data-offline-open="${entry.name}" title="Im Viewer öffnen">
-                <span class="offline-dot"></span>
-                <span>${escapeHtml(entry.displayName)}</span>
-              </button>
-            `).join('')
-          : '<span class="text-sm text-neutral-400">Noch keine Metadaten verfügbar.</span>';
-        shelf.innerHTML = `
-          <div class="rounded-2xl border border-neutral-800/60 bg-neutral-900/80 backdrop-blur-sm p-4 sm:p-5 flex flex-col gap-4">
-            <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <div>
-                <div class="text-xs uppercase tracking-[0.25em] text-neutral-500">Offline</div>
-                <div class="mt-1 flex items-center gap-2 text-lg font-semibold text-neutral-100">
-                  Offline verfügbar
-                  <span class="offline-pill" aria-label="Anzahl offline verfügbarer Titel"><span class="offline-dot"></span>${count}</span>
-                </div>
-                <p class="text-sm text-neutral-400 mt-1">Diese Titel kannst du ohne Internet öffnen.</p>
-              </div>
-              <div class="flex flex-wrap gap-2 sm:justify-end">
-                <button id="btnOfflineFilter" type="button" class="btn btn-secondary ${filterActive ? 'offline-active' : ''}">
-                  ${filterActive ? 'Offline-Filter aktiv' : 'Nur offline anzeigen'}
-                </button>
-                <button id="btnOfflineRefresh" type="button" class="btn btn-secondary btn-icon" title="Status aktualisieren">${SVG_REFRESH}</button>
-                <button id="btnOfflineClear" type="button" class="btn btn-secondary btn-icon" title="Offline-Speicher leeren">${SVG_TRASH_MINI}</button>
-              </div>
-            </div>
-            <div class="flex flex-wrap gap-2" role="list">
-              ${pills}
-            </div>
-          </div>
-        `;
-
-        const filterBtn = shelf.querySelector('#btnOfflineFilter');
-        if (filterBtn) {
-          filterBtn.addEventListener('click', () => {
-            state.offline.filterOnly = !state.offline.filterOnly;
-            state.library.page = 1;
-            persistOfflineState();
-            renderLibrary();
-          });
-        }
-        const refreshBtn = shelf.querySelector('#btnOfflineRefresh');
-        if (refreshBtn) refreshBtn.addEventListener('click', () => syncOfflineInventory());
-        const clearBtn = shelf.querySelector('#btnOfflineClear');
-        if (clearBtn) {
-          clearBtn.addEventListener('click', () => {
-            showConfirmDialog({
-              title: 'Offline-Speicher leeren?',
-              message: 'Alle offline gespeicherten Titel werden entfernt.',
-              confirmText: 'Ja, löschen',
-              cancelText: 'Abbrechen',
-              isDangerous: true,
-              onConfirm: async () => {
-                await clearOfflineCaches();
-                showToast('Offline-Speicher geleert.', 2600);
-              }
-            });
-          });
-        }
-        shelf.querySelectorAll('[data-offline-open]').forEach((btn) => {
-          btn.addEventListener('click', (ev) => {
-            ev.preventDefault();
-            ev.stopPropagation();
-            const rel = btn.getAttribute('data-offline-open');
-            if (!rel) return;
-            acquireWakeLockSync();
-            history.replaceState(null, '', `/?file=${encodeURIComponent(rel)}`);
-            renderViewer(rel);
-          });
-        });
       }
 
       function saveLibrarySnapshot(snapshot) {
@@ -1748,177 +1000,27 @@
         return JSON.stringify(a || {}) === JSON.stringify(b || {});
       }
 
-      async function handleOfflineToggle(buttonEl, item) {
-        if (!item || !item.name) return;
-        if (!state.offline.supported) {
-          showToast('Offline-Funktion nicht verfügbar.', 3200);
-          return;
-        }
-        const rel = item.name;
-        if (state.offline.pending.has(rel)) return;
-
-        const targetBtn = document.querySelector(`.btn-offline[data-offline-name="${cssEscape(rel)}"]`) || buttonEl;
-        if (targetBtn) {
-          targetBtn.disabled = false;
-          targetBtn.removeAttribute('disabled');
-          targetBtn.setAttribute('aria-disabled', 'false');
-        }
-        const isCached = state.offline.cached.has(rel);
-
-        if (isCached) {
-          state.offline.pending.add(rel);
-          setOfflineButtonsBusyByName(rel, true);
-          try {
-            const confirmed = await new Promise((resolve) => {
-              showConfirmDialog({
-                title: 'Offline-Version entfernen?',
-                message: `Soll "${escapeHtml(item.displayName || item.name)}" aus dem Offline-Speicher entfernt werden?`,
-                confirmText: 'Entfernen',
-                cancelText: 'Abbrechen',
-                isDangerous: true,
-                onConfirm: () => resolve(true),
-                onCancel: () => resolve(false)
-              });
-            });
-            if (!confirmed) return;
-            await removeItemFromOffline(item);
-            showToast(`Offline-Version entfernt: ${item.displayName || item.name}`, 2600);
-            refreshOfflineIndicators();
-            renderOfflineShelf();
-          } catch (error) {
-            state.offline.lastError = error?.message || String(error);
-            showToast(error?.userMessage || 'Offline-Aktion fehlgeschlagen.', 3600);
-            console.warn('Offline toggle failed:', error);
-          } finally {
-            state.offline.pending.delete(rel);
-            setOfflineButtonsBusyByName(rel, false);
-          }
-          return;
-        }
-
-        const controllerReady = state.offline.workerReady || !!navigator.serviceWorker?.controller;
-        const onlineNow = navigator.onLine !== false;
-        if (!onlineNow) {
-          showToast('Keine Verbindung – Download nicht möglich.', 3200);
-          return;
-        }
-        if (!controllerReady) {
-          showToast('Offline-Unterstützung wird vorbereitet. Bitte kurz warten.', 3200);
-          pendingControllerReadyActions.push({ type: 'cache', item, button: targetBtn || buttonEl });
-          return;
-        }
-
-        state.offline.pending.add(rel);
-        state.offline.inFlight.set(rel, { displayName: item.displayName || item.name });
-        setOfflineButtonsBusyByName(rel, true);
-
-        try {
-          const { manifest } = await cacheItemForOffline(item);
-          state.offline.pending.delete(rel);
-          state.offline.inFlight.delete(rel);
-          state.offline.cached.add(rel);
-          if (manifest && typeof manifest === 'object') {
-            state.offline.manifest[rel] = manifest;
-          }
-          state.offline.lastSync = Date.now();
-          persistOfflineState();
-          setOfflineButtonsBusyByName(rel, false);
-          refreshOfflineIndicators();
-          renderOfflineShelf();
-          updateOfflineButtonAppearance(targetBtn || buttonEl, rel);
-          showToast(`Download abgeschlossen: ${item.displayName || item.name}`, 2600);
-        } catch (error) {
-          state.offline.lastError = error?.message || String(error);
-          state.offline.pending.delete(rel);
-          state.offline.inFlight.delete(rel);
-          setOfflineButtonsBusyByName(rel, false);
-          showToast(error?.userMessage || 'Offline-Aktion fehlgeschlagen.', 3600);
-          console.warn('Offline toggle failed:', error);
-        }
-      }
-
-      function processPendingControllerReady() {
-        if (!pendingControllerReadyActions.length) return;
-          const queue = [...pendingControllerReadyActions];
-          pendingControllerReadyActions.length = 0;
-          queue.forEach((entry) => {
-            if (!entry || typeof entry !== 'object') return;
-            const btnEl = entry.button;
-            if (btnEl) {
-              btnEl.disabled = false;
-              btnEl.removeAttribute('disabled');
-              btnEl.setAttribute('aria-disabled', 'false');
-            }
-            if (entry.type === 'cache' && entry.item) {
-              state.offline.pending.delete(entry.item.name);
-              setOfflineButtonsBusyByName(entry.item.name, false);
-              Promise.resolve().then(() => handleOfflineToggle(btnEl || null, entry.item));
-            }
-          });
-        }
-
-      function handleOfflineStatusChange() {
-        if (!state.offline.supported) return;
-        const previous = state.offline.online;
-        updateOfflineOnlineStatus();
-        refreshOfflineIndicators();
-        renderOfflineShelf();
-        if (state.offline.online && !previous) {
-          showToast('Zurück online.', 2400);
-          syncOfflineInventory({ silent: true });
-        } else if (!state.offline.online && previous) {
-          showToast('Offline. Nur gespeicherte Inhalte verfügbar.', 3600);
-        }
-      }
-
-      function initializeOfflineSupport() {
-        if (!state.offline.supported) return;
-        updateOfflineOnlineStatus();
-        renderOfflineShelf();
-        refreshOfflineIndicators();
-        const controller = navigator.serviceWorker.controller;
-        if (controller) {
-          state.offline.workerReady = true;
-          processPendingControllerReady();
-        }
-        navigator.serviceWorker.ready
-          .then(() => {
-            state.offline.workerReady = true;
-            processPendingControllerReady();
-            if (!state.offline.lastSync) {
-              syncOfflineInventory({ silent: true });
-            } else {
-              refreshOfflineIndicators();
-              renderOfflineShelf();
-            }
-          })
-          .catch((err) => console.warn('Service Worker ready failed:', err));
-      }
-
-      if (state.offline.supported) {
-        window.addEventListener('online', handleOfflineStatusChange);
-        window.addEventListener('offline', handleOfflineStatusChange);
-        initializeOfflineSupport();
-        navigator.serviceWorker.addEventListener?.('controllerchange', () => {
-          state.offline.workerReady = true;
-          processPendingControllerReady();
-          refreshOfflineIndicators();
-          renderOfflineShelf();
-        });
-        navigator.serviceWorker.addEventListener?.('message', (event) => {
-          const data = event?.data;
-          if (data && data.type === 'OFFLINE_CACHE_RESULT') {
-            handleOfflineCacheResult(data);
-          }
-        });
-      }
+      // Offline functionality removed - stub functions for compatibility
+      function persistOfflineState() {}
+      function updateOfflineOnlineStatus() {}
+      function refreshOfflineIndicators() {}
+      function updateOfflineIndicatorForElement(el) {}
+      function updateOfflineButtonAppearance(btn, rel) {}
+      function setOfflineButtonBusy(btn, busy) {}
+      function forEachOfflineButton(name, callback) {}
+      function setOfflineButtonsBusyByName(name, busy) {}
+      function handleOfflineCacheResult(payload) {}
+      function renderOfflineShelf() {}
+      function handleOfflineToggle(buttonEl, item) { return Promise.resolve(); }
+      function processPendingControllerReady() {}
+      function handleOfflineStatusChange() {}
+      function initializeOfflineSupport() {}
 
       function updatePaginationDisplay() {
-        const offlineActive = state.offline.supported && state.offline.filterOnly && state.offline.cached.size > 0;
-        const totalPages = offlineActive ? 1 : Math.max(1, Math.ceil(state.library.total / state.library.pageSize));
-        const currentPage = offlineActive ? 1 : state.library.page;
-        const prevDisabled = offlineActive || currentPage <= 1;
-        const nextDisabled = offlineActive || currentPage >= totalPages;
+        const totalPages = Math.max(1, Math.ceil(state.library.total / state.library.pageSize));
+        const currentPage = state.library.page;
+        const prevDisabled = currentPage <= 1;
+        const nextDisabled = currentPage >= totalPages;
 
         const pNow = document.querySelector('#pNow');
         if (pNow) pNow.textContent = currentPage;
@@ -1951,11 +1053,6 @@
             nextBtn.removeAttribute('aria-disabled');
             nextBtn.removeAttribute('tabindex');
           }
-        }
-
-        const pager = document.querySelector('#libraryPager');
-        if (pager) {
-          pager.classList.toggle('hidden', offlineActive);
         }
       }
 
@@ -2321,6 +1418,7 @@
         if (state.viewer.autoScroll.running) {
           state.viewer.autoScroll.lastTs = performance.now();
         }
+        refreshTapZones();
         updateStatus();
         state.viewer.committedZoom = state.viewer.zoom;
         state.viewer.zoomPreview = null;
@@ -3023,17 +2121,9 @@
           const snapshot = loadLibrarySnapshot();
           if (snapshot && snapshot.payload && snapshotParamsEqual(snapshot.params, snapshotParams)) {
             data = snapshot.payload;
-            showToast('Letzte Bibliothek wird offline angezeigt.', 3200);
+            showToast('Letzte Bibliothek wird angezeigt.', 3200);
           } else {
-            const fallback = buildOfflineLibraryFallbackData();
-            if (fallback.items.length) {
-              data = { items: fallback.items, total: fallback.total, categories: fallback.categories };
-              state.offline.libraryPrimed = true;
-              persistOfflineState();
-              showToast('Offline-Bibliothek geladen.', 3200);
-            } else {
-              throw err;
-            }
+            throw err;
           }
         }
 
@@ -3097,16 +2187,11 @@
 
         const L = state.library;
         applyAccentTheme(L.categoryFilter);
-        const offlineFilterActive = state.offline.supported && state.offline.filterOnly && state.offline.cached.size > 0;
-        if (offlineFilterActive) {
-          state.library.page = 1;
-        }
         const allMode = L.pageSize === "all";
-        const totalPages = offlineFilterActive ? 1 : Math.max(1, Math.ceil(L.total / L.pageSize));
-        const currentPage = offlineFilterActive ? 1 : L.page;
-        const prevDisabled = offlineFilterActive || currentPage <= 1;
-        const nextDisabled = offlineFilterActive || currentPage >= totalPages;
-        const pagerHiddenClass = offlineFilterActive ? 'hidden' : '';
+        const totalPages = Math.max(1, Math.ceil(L.total / L.pageSize));
+        const currentPage = L.page;
+        const prevDisabled = currentPage <= 1;
+        const nextDisabled = currentPage >= totalPages;
 
         const filterCollapsed = state.ui.filterCollapsed;
 
@@ -3202,10 +2287,9 @@
                 <span id="activeFilterCategoryName" class="flex items-center gap-1.5"></span>
               </div>
             </div>
-            <section id="offlineShelf" class="hidden"></section>
             <div class="flex flex-col flex-1 min-h-0 overflow-hidden">
               <section id="virtualWrap" class="relative flex-1 min-h-0 pb-4"></section>
-              <section id="libraryPager" class="flex items-center justify-between px-4 py-3 shrink-0 ${pagerHiddenClass}">
+              <section id="libraryPager" class="flex items-center justify-between px-4 py-3 shrink-0">
                 <button id="prevPage" class="px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-800 hover:bg-neutral-800 transition-colors ${prevDisabled?"invisible pointer-events-none select-none opacity-0":""}" ${prevDisabled?"aria-disabled=\"true\" tabindex=\"-1\"":""}>« Zurück</button>
                 <div class="text-sm text-neutral-400">Seite <span id="pNow">${currentPage}</span> / ${totalPages}</div>
                 <button id="nextPage" class="px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-800 hover:bg-neutral-800 transition-colors ${nextDisabled?"invisible pointer-events-none select-none opacity-0":""}" ${nextDisabled?"aria-disabled=\"true\" tabindex=\"-1\"":""}>Weiter »</button>
@@ -3214,11 +2298,7 @@
           </div>`;
 
   renderCategoryBar();
-  renderOfflineShelf();
   updatePaginationDisplay();
-  if (state.offline.supported) {
-    refreshOfflineIndicators();
-  }
 
         // Add header segmented mode switch + upload
         ensureModeSwitcher();
@@ -3681,9 +2761,6 @@
         const prevPageBtn = document.querySelector('#prevPage');
         if (prevPageBtn) {
           prevPageBtn.onclick = async () => {
-            if (state.offline.supported && state.offline.filterOnly && state.offline.cached.size > 0) {
-              return;
-            }
             if (L.page > 1) {
               L.page--;
               appEl.innerHTML = '<div class="flex items-center justify-center h-[70vh] text-neutral-400">Lade…</div>';
@@ -3695,9 +2772,6 @@
         const nextPageBtn = document.querySelector('#nextPage');
         if (nextPageBtn) {
           nextPageBtn.onclick = async () => {
-            if (state.offline.supported && state.offline.filterOnly && state.offline.cached.size > 0) {
-              return;
-            }
             const totalPagesDynamic = Math.max(1, Math.ceil(L.total / L.pageSize));
             if (L.page < totalPagesDynamic) {
               L.page++;
@@ -5178,8 +4252,7 @@
         wrap.innerHTML = "";
 
         const L = state.library;
-        const offlineFilterActive = state.offline.supported && state.offline.filterOnly && state.offline.cached.size > 0;
-        let items = offlineFilterActive ? buildOfflineLibraryItems() : L.items;
+        let items = L.items;
 
         const fuse = window.Fuse && L.q
           ? new Fuse(items, { keys: ["name", "displayName"], threshold: 0.3 })
@@ -7208,6 +6281,7 @@
         state.viewer.commitSecsPerPageInput = null;
         state.viewer.persistedSecsPerPage = null;
         state.viewer.secsPerPageDirty = false;
+        teardownTapZones();
         
         // Clear any existing memory before starting
         aggressiveCleanup();
@@ -7320,6 +6394,7 @@
         // Let the pianist adjust scroll position while auto-scroll runs;
         // resume from that position when released.
         registerUserScrollControls(container);
+        setupTapZones();
 
         // Pinch-to-Zoom Gesten-Steuerung für Tablets - flüssige Vorschau + Fokus-Erhalt
         (function setupPinchZoom() {
@@ -7811,6 +6886,214 @@
         el.addEventListener('scroll', onScroll, { passive: true });
       }
 
+      function teardownTapZones() {
+        const tz = state.viewer.tapZones;
+        if (!tz) return;
+        if (tz.hintTimer) { clearTimeout(tz.hintTimer); tz.hintTimer = null; }
+        if (tz.flashTimers?.left) { clearTimeout(tz.flashTimers.left); tz.flashTimers.left = null; }
+        if (tz.flashTimers?.right) { clearTimeout(tz.flashTimers.right); tz.flashTimers.right = null; }
+        if (tz.resizeObserver) {
+          try { tz.resizeObserver.disconnect(); } catch {}
+          tz.resizeObserver = null;
+        }
+        if (tz.handlerTarget && tz.pointerHandler) {
+          tz.handlerTarget.removeEventListener('pointerup', tz.pointerHandler);
+        }
+        tz.handlerTarget = null;
+        tz.pointerHandler = null;
+        if (tz.overlay?.parentElement) {
+          tz.overlay.remove();
+        }
+        tz.overlay = null;
+        tz.left = null;
+        tz.right = null;
+        tz.width = 0;
+        tz.enabled = false;
+        tz.bounds = null;
+        tz.introShown = false;
+        tz.flashTimers = { left: null, right: null };
+      }
+
+      function ensureTapZoneOverlay() {
+        const pdfContainer = document.querySelector('#viewerPdfContainer');
+        if (!pdfContainer) return null;
+        let overlay = document.querySelector('#viewerTapHints');
+        if (!overlay) {
+          overlay = document.createElement('div');
+          overlay.id = 'viewerTapHints';
+          overlay.innerHTML = `
+            <div class="viewer-tap-hint viewer-tap-hint--left"></div>
+            <div class="viewer-tap-hint viewer-tap-hint--right"></div>
+          `;
+          pdfContainer.appendChild(overlay);
+        }
+        const left = overlay.querySelector('.viewer-tap-hint--left');
+        const right = overlay.querySelector('.viewer-tap-hint--right');
+        state.viewer.tapZones.overlay = overlay;
+        state.viewer.tapZones.left = left;
+        state.viewer.tapZones.right = right;
+        return { overlay, left, right };
+      }
+
+      function computeTapZoneLayout() {
+        const pdfContainer = document.querySelector('#viewerPdfContainer');
+        const viewer = document.querySelector('#viewer');
+        if (!pdfContainer || !viewer) return { width: 0, enabled: false, bounds: null };
+        const bounds = pdfContainer.getBoundingClientRect();
+        const containerWidth = pdfContainer.clientWidth || bounds.width || 0;
+        let stageWidth = Number(state.viewer.pageStageWidth) || 0;
+        if (!stageWidth) {
+          const stage = viewer.querySelector('.viewer-page-stage');
+          if (stage instanceof HTMLElement) {
+            stageWidth = stage.getBoundingClientRect().width;
+          }
+        }
+        if (!stageWidth && containerWidth > 0) {
+          stageWidth = containerWidth * 0.78;
+        }
+        const whitespace = Math.max(0, containerWidth - stageWidth);
+        const width = Math.min(240, Math.max(0, whitespace / 2 - 12));
+        const enabled = width >= 36 && bounds.height > 0;
+        return { width, enabled, bounds };
+      }
+
+      function hideTapZoneHints() {
+        const tz = state.viewer.tapZones;
+        if (tz?.hintTimer) { clearTimeout(tz.hintTimer); tz.hintTimer = null; }
+        tz?.left?.classList.remove('is-visible');
+        tz?.right?.classList.remove('is-visible');
+      }
+
+      function showTapZoneHints(duration = 5000) {
+        const tz = state.viewer.tapZones;
+        if (!tz?.enabled) return;
+        if (!tz.left || !tz.right) return;
+        tz.left.classList.add('is-visible');
+        tz.right.classList.add('is-visible');
+        if (tz.hintTimer) { clearTimeout(tz.hintTimer); }
+        tz.hintTimer = window.setTimeout(() => hideTapZoneHints(), duration);
+      }
+
+      function flashTapZone(direction) {
+        const tz = state.viewer.tapZones;
+        if (!tz) return;
+        const zone = direction === 'next' ? tz.right : tz.left;
+        if (!zone) return;
+        zone.classList.add('is-visible');
+        zone.classList.add('is-active');
+        const key = direction === 'next' ? 'right' : 'left';
+        if (tz.flashTimers?.[key]) {
+          clearTimeout(tz.flashTimers[key]);
+        }
+        tz.flashTimers[key] = window.setTimeout(() => {
+          zone.classList.remove('is-active');
+          if (!tz.hintTimer) {
+            zone.classList.remove('is-visible');
+          }
+          tz.flashTimers[key] = null;
+        }, 420);
+      }
+
+      function refreshTapZones() {
+        const nodes = ensureTapZoneOverlay();
+        if (!nodes) return;
+        const layout = computeTapZoneLayout();
+        const tz = state.viewer.tapZones;
+        tz.width = layout.width;
+        tz.enabled = layout.enabled;
+        tz.bounds = layout.bounds;
+        if (!nodes.left || !nodes.right) return;
+        if (!layout.enabled) {
+          nodes.left.style.display = 'none';
+          nodes.right.style.display = 'none';
+          hideTapZoneHints();
+          return;
+        }
+        nodes.left.style.display = '';
+        nodes.right.style.display = '';
+        const widthPx = `${Math.round(layout.width)}px`;
+        nodes.left.style.width = widthPx;
+        nodes.right.style.width = widthPx;
+        if (!tz.introShown) {
+          showTapZoneHints();
+          tz.introShown = true;
+        }
+      }
+
+      function getNeighborPageTarget(delta = 1) {
+        const viewer = document.querySelector('#viewer');
+        if (!viewer) return null;
+        const pages = Array.from(viewer.querySelectorAll('[data-page]'));
+        if (!pages.length) return null;
+        const viewerRect = viewer.getBoundingClientRect();
+        const scrollTop = viewer.scrollTop || 0;
+
+        const pageMeta = pages.map((page, idx) => {
+          const rect = page.getBoundingClientRect();
+          const top = rect.top - viewerRect.top + scrollTop;
+          const height = rect.height || Number(page.dataset.blockHeight) || Number(state.viewer.pageBlockHeight) || 0;
+          return { idx, top, bottom: top + Math.max(height, 1) };
+        }).sort((a, b) => a.top - b.top);
+
+        let currentIdx = pageMeta.findIndex((meta) => scrollTop < meta.bottom - 1);
+        if (currentIdx === -1) currentIdx = pageMeta.length - 1;
+        let targetIdx = currentIdx + delta;
+        if (targetIdx < 0) return 0;
+        if (targetIdx >= pageMeta.length) {
+          const maxScroll = Math.max(0, viewer.scrollHeight - viewer.clientHeight);
+          return maxScroll;
+        }
+        const target = pageMeta[targetIdx];
+        const maxScroll = Math.max(0, viewer.scrollHeight - viewer.clientHeight);
+        return Math.max(0, Math.min(maxScroll, target.top));
+      }
+
+      function setupTapZones() {
+        const pdfContainer = document.querySelector('#viewerPdfContainer');
+        const viewer = document.querySelector('#viewer');
+        if (!pdfContainer || !viewer) return;
+        teardownTapZones();
+        ensureTapZoneOverlay();
+
+        const onPointerUp = (event) => {
+          if (event.pointerType === 'mouse' && event.button !== 0) return;
+          refreshTapZones();
+          const { enabled, bounds, width } = state.viewer.tapZones;
+          if (!enabled || !bounds || !width) return;
+          const x = event.clientX;
+          const y = event.clientY;
+          if (y < bounds.top || y > bounds.bottom) return;
+          let direction = null;
+          if (x < bounds.left + width) direction = 'prev';
+          else if (x > bounds.right - width) direction = 'next';
+          if (!direction) return;
+          event.preventDefault();
+          hideTapZoneHints();
+          flashTapZone(direction);
+          if (state.viewer.autoScroll.running || state.viewer.autoScroll.pending) {
+            stopAutoScroll();
+            refreshPlayPauseUI();
+          }
+          const targetTop = getNeighborPageTarget(direction === 'next' ? 1 : -1);
+          if (targetTop === null || targetTop === undefined) return;
+          viewer.scrollTo({ top: targetTop, behavior: 'smooth' });
+        };
+
+        pdfContainer.addEventListener('pointerup', onPointerUp);
+        state.viewer.tapZones.handlerTarget = pdfContainer;
+        state.viewer.tapZones.pointerHandler = onPointerUp;
+
+        if (typeof ResizeObserver === "function") {
+          const ro = new ResizeObserver(() => refreshTapZones());
+          ro.observe(pdfContainer);
+          const wrap = viewer.firstElementChild;
+          if (wrap) ro.observe(wrap);
+          state.viewer.tapZones.resizeObserver = ro;
+        }
+
+        refreshTapZones();
+      }
+
       async function mountPdfVirtual(container, url) {
         if (!window.pdfjsLib) {
           container.innerHTML = `
@@ -8097,6 +7380,7 @@
           ph.style.height = 'auto';
           ph.style.minHeight = `${blockHeight}px`;
           adjustPlaceholderHeights(blockHeight);
+          refreshTapZones();
 
           state.viewer.autoScroll.needsRecalc = true;
           if (state.viewer.autoScroll.running) {
