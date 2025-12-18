@@ -904,35 +904,135 @@ body.in-viewer #headerSpacer {
   height: 100%;
   pointer-events: none;
   opacity: 0;
-  border-radius: 18px;
-  background: radial-gradient(circle at 30% 50%, rgba(99, 102, 241, 0.15), rgba(99, 102, 241, 0.04), transparent 68%);
-  border: 1px dashed rgba(255, 255, 255, 0.08);
-  box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.02) inset,
-    0 18px 40px -16px rgba(0, 0, 0, 0.5);
-  transition: opacity 0.25s ease, transform 0.25s ease, box-shadow 0.25s ease;
-  backdrop-filter: blur(6px);
+  border-radius: 0;
+  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
 }
 
+/* Große Flächen-Hintergrund für die Tap-Zones */
 .viewer-tap-hint--left {
-  background: radial-gradient(circle at 70% 50%, rgba(99, 102, 241, 0.18), rgba(99, 102, 241, 0.06), transparent 68%);
+  background: linear-gradient(to right, rgba(99, 102, 241, 0.25) 0%, rgba(99, 102, 241, 0) 100%);
 }
 
 .viewer-tap-hint--right {
-  background: radial-gradient(circle at 30% 50%, rgba(99, 102, 241, 0.18), rgba(99, 102, 241, 0.06), transparent 68%);
+  background: linear-gradient(to left, rgba(99, 102, 241, 0.25) 0%, rgba(99, 102, 241, 0) 100%);
+}
+
+/* Pfeil-Icons in den Tap-Zones */
+.viewer-tap-hint::before {
+  content: '';
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.12);
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+.viewer-tap-hint--left::before {
+  content: '‹';
+  font-size: 36px;
+  font-weight: 300;
+  color: rgba(255, 255, 255, 0.8);
+  padding-right: 4px;
+}
+
+.viewer-tap-hint--right::before {
+  content: '›';
+  font-size: 36px;
+  font-weight: 300;
+  color: rgba(255, 255, 255, 0.8);
+  padding-left: 4px;
+}
+
+/* Initial sichtbar beim Laden - Intro-Animation */
+.viewer-tap-hint.is-intro {
+  opacity: 1;
+  animation: tapZoneIntro 2.5s ease-out forwards;
 }
 
 .viewer-tap-hint.is-visible {
-  opacity: 0.28;
+  opacity: 1;
 }
 
+.viewer-tap-hint.is-visible::before {
+  background: rgba(99, 102, 241, 0.25);
+  border-color: rgba(99, 102, 241, 0.5);
+  color: rgba(255, 255, 255, 1);
+  box-shadow: 
+    0 4px 24px rgba(99, 102, 241, 0.4),
+    0 0 0 1px rgba(99, 102, 241, 0.3) inset;
+}
+
+/* Magisches Aufleuchten beim Klicken */
 .viewer-tap-hint.is-active {
-  opacity: 0.58;
-  transform: scale(1.02);
-  box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.04) inset,
-    0 24px 48px -18px rgba(0, 0, 0, 0.6),
-    0 0 40px -10px color-mix(in srgb, var(--accent-color) 50%, transparent);
+  opacity: 1;
+}
+
+.viewer-tap-hint.is-active.viewer-tap-hint--left {
+  background: linear-gradient(to right, rgba(99, 102, 241, 0.5) 0%, rgba(99, 102, 241, 0) 100%);
+}
+
+.viewer-tap-hint.is-active.viewer-tap-hint--right {
+  background: linear-gradient(to left, rgba(99, 102, 241, 0.5) 0%, rgba(99, 102, 241, 0) 100%);
+}
+
+.viewer-tap-hint.is-active::before {
+  transform: scale(1.2);
+  background: rgba(99, 102, 241, 0.45);
+  border-color: rgba(255, 255, 255, 0.6);
+  color: #fff;
+  box-shadow: 
+    0 0 60px 20px rgba(99, 102, 241, 0.5),
+    0 0 100px 40px rgba(99, 102, 241, 0.25),
+    0 8px 32px rgba(99, 102, 241, 0.6),
+    0 0 0 2px rgba(255, 255, 255, 0.4) inset;
+  animation: tapZonePulse 0.5s ease-out;
+}
+
+@keyframes tapZoneIntro {
+  0% {
+    opacity: 0;
+  }
+  15% {
+    opacity: 1;
+  }
+  70% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes tapZonePulse {
+  0% {
+    transform: scale(1);
+    box-shadow: 
+      0 0 0 0 rgba(99, 102, 241, 0.6),
+      0 4px 20px rgba(0, 0, 0, 0.3);
+  }
+  50% {
+    transform: scale(1.3);
+    box-shadow: 
+      0 0 80px 30px rgba(99, 102, 241, 0.6),
+      0 0 120px 50px rgba(99, 102, 241, 0.3),
+      0 8px 40px rgba(99, 102, 241, 0.7);
+  }
+  100% {
+    transform: scale(1.2);
+    box-shadow: 
+      0 0 60px 20px rgba(99, 102, 241, 0.5),
+      0 0 100px 40px rgba(99, 102, 241, 0.25),
+      0 8px 32px rgba(99, 102, 241, 0.6);
+  }
 }
 
 /* PDF Page Styling */

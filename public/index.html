@@ -7044,29 +7044,25 @@
       function getNeighborPageTarget(delta = 1) {
         const viewer = document.querySelector('#viewer');
         if (!viewer) return null;
-        const pages = Array.from(viewer.querySelectorAll('[data-page]'));
-        if (!pages.length) return null;
-        const viewerRect = viewer.getBoundingClientRect();
+        
+        // Einfache Logik: Scrolle um die sichtbare Höhe des Viewers
+        const viewportHeight = viewer.clientHeight;
         const scrollTop = viewer.scrollTop || 0;
-
-        const pageMeta = pages.map((page, idx) => {
-          const rect = page.getBoundingClientRect();
-          const top = rect.top - viewerRect.top + scrollTop;
-          const height = rect.height || Number(page.dataset.blockHeight) || Number(state.viewer.pageBlockHeight) || 0;
-          return { idx, top, bottom: top + Math.max(height, 1) };
-        }).sort((a, b) => a.top - b.top);
-
-        let currentIdx = pageMeta.findIndex((meta) => scrollTop < meta.bottom - 1);
-        if (currentIdx === -1) currentIdx = pageMeta.length - 1;
-        let targetIdx = currentIdx + delta;
-        if (targetIdx < 0) return 0;
-        if (targetIdx >= pageMeta.length) {
-          const maxScroll = Math.max(0, viewer.scrollHeight - viewer.clientHeight);
-          return maxScroll;
+        const maxScroll = Math.max(0, viewer.scrollHeight - viewportHeight);
+        
+        // Scrolle um 90% der Viewport-Höhe (etwas Überlappung für Orientierung)
+        const scrollAmount = viewportHeight * 0.9;
+        
+        let targetScrollTop;
+        if (delta > 0) {
+          // Nach unten/rechts scrollen
+          targetScrollTop = scrollTop + scrollAmount;
+        } else {
+          // Nach oben/links scrollen
+          targetScrollTop = scrollTop - scrollAmount;
         }
-        const target = pageMeta[targetIdx];
-        const maxScroll = Math.max(0, viewer.scrollHeight - viewer.clientHeight);
-        return Math.max(0, Math.min(maxScroll, target.top));
+        
+        return Math.max(0, Math.min(maxScroll, targetScrollTop));
       }
 
       function setupTapZones() {
@@ -7113,6 +7109,25 @@
         }
 
         refreshTapZones();
+        
+        // Zeige Intro-Animation beim ersten Öffnen
+        showTapZoneIntro();
+      }
+      
+      function showTapZoneIntro() {
+        const tz = state.viewer.tapZones;
+        if (!tz?.enabled) return;
+        if (!tz.left || !tz.right) return;
+        
+        // Füge Intro-Klasse für Animation hinzu
+        tz.left.classList.add('is-intro');
+        tz.right.classList.add('is-intro');
+        
+        // Nach Animation entfernen
+        window.setTimeout(() => {
+          if (tz.left) tz.left.classList.remove('is-intro');
+          if (tz.right) tz.right.classList.remove('is-intro');
+        }, 2500);
       }
 
       async function mountPdfVirtual(container, url) {
