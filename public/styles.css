@@ -690,18 +690,24 @@ button.grid.place-items-center svg {
 }
 
 #mainHeader {
-  will-change: transform;
-  transition: transform 200ms ease-out;
+  will-change: auto; /* No transform needed anymore */
 }
 
-/* ===== FILTER PANEL AUTO-COLLAPSE (stabilisiert) ===== */
+/* ===== FILTER PANEL AUTO-COLLAPSE (smooth & elegant) ===== */
 #filterPanel,
 #filterBlock {
-  transition: max-height 200ms ease-out, opacity 150ms ease-out, transform 150ms ease-out, margin 150ms ease-out;
+  transition: none; /* Transitions handled by JS for smooth scroll-linked animation */
   will-change: max-height, opacity, transform;
   overflow: hidden;
   /* Große Obergrenze, damit echte Höhe Platz hat; wird animiert */
   max-height: 1000px;
+}
+
+#filterContent {
+  transition: max-height 300ms cubic-bezier(0.4, 0.0, 0.2, 1), 
+              opacity 250ms cubic-bezier(0.4, 0.0, 0.2, 1), 
+              transform 250ms cubic-bezier(0.4, 0.0, 0.2, 1);
+  will-change: max-height, opacity, transform;
 }
 
 /* Zusammengeklappt: Platz freigeben + keine Klicks */
@@ -713,18 +719,8 @@ button.grid.place-items-center svg {
   pointer-events: none !important;
 }
 
-#mainHeader.header-hidden {
-  transform: translateY(-100%) !important;
-}
-
-#mainHeader.header-hidden + #headerSpacer {
-  height: 0 !important;
-  margin-bottom: 0 !important;
-}
-
 #headerSpacer {
   height: 64px; /* Default desktop height */
-  transition: height 200ms cubic-bezier(0.4, 0.0, 0.2, 1), margin 200ms cubic-bezier(0.4, 0.0, 0.2, 1);
   flex-shrink: 0;
   overflow: hidden;
 }

@@ -34,8 +34,8 @@
     <!-- Toast Container for notifications -->
     <div id="toastContainer"></div>
     
-    <!-- Header - Modern Glassmorphism with Auto-Hide -->
-    <header id="mainHeader" class="fixed top-0 left-0 right-0 z-40 transition-transform duration-300 ease-out" style="transform: translateY(0);">
+    <!-- Header - Modern Glassmorphism (always visible) -->
+    <header id="mainHeader" class="fixed top-0 left-0 right-0 z-40">
       <div class="relative bg-gradient-to-b from-neutral-950/95 via-neutral-950/90 to-neutral-950/85 backdrop-blur-xl border-b border-white/[0.08] shadow-lg shadow-black/20">
         <!-- Subtle gradient overlay for depth -->
         <div class="absolute inset-0 bg-gradient-to-r from-transparent via-[--accent-color]/5 to-transparent pointer-events-none"></div>
@@ -2679,9 +2679,77 @@
 
         if (filterToggleBtn) {
           filterToggleBtn.addEventListener('click', () => {
-            state.ui.filterCollapsed = !state.ui.filterCollapsed;
+            const filterContent = document.querySelector('#filterContent');
+            const isCollapsed = state.ui.filterCollapsed;
+            
+            // Toggle state
+            state.ui.filterCollapsed = !isCollapsed;
             localStorage.setItem('filterCollapsed', String(state.ui.filterCollapsed));
-            renderLibrary();
+            
+            if (!filterContent) {
+              renderLibrary();
+              return;
+            }
+            
+            // Smooth animation without re-rendering
+            if (state.ui.filterCollapsed) {
+              // Collapse with animation
+              const currentHeight = filterContent.scrollHeight;
+              filterContent.style.maxHeight = currentHeight + 'px';
+              filterContent.style.transition = 'none';
+              
+              // Force reflow
+              filterContent.offsetHeight;
+              
+              // Animate to collapsed
+              filterContent.style.transition = 'max-height 300ms cubic-bezier(0.4, 0.0, 0.2, 1), opacity 250ms cubic-bezier(0.4, 0.0, 0.2, 1), transform 250ms cubic-bezier(0.4, 0.0, 0.2, 1)';
+              filterContent.style.maxHeight = '0';
+              filterContent.style.opacity = '0';
+              filterContent.style.transform = 'translateY(-8px)';
+              filterContent.style.overflow = 'hidden';
+              
+              // Update button
+              const iconContainer = filterToggleBtn.querySelector('div:last-child');
+              if (iconContainer) iconContainer.innerHTML = SVG_CHEVRON_DOWN;
+              filterToggleBtn.setAttribute('aria-expanded', 'false');
+              filterToggleBtn.title = 'Filter anzeigen';
+            } else {
+              // Expand with animation
+              filterContent.style.transition = 'none';
+              filterContent.style.maxHeight = '0';
+              filterContent.style.opacity = '0';
+              filterContent.style.transform = 'translateY(-8px)';
+              
+              // Force reflow
+              filterContent.offsetHeight;
+              
+              // Get target height
+              filterContent.style.maxHeight = 'none';
+              const targetHeight = filterContent.scrollHeight;
+              filterContent.style.maxHeight = '0';
+              
+              // Force reflow again
+              filterContent.offsetHeight;
+              
+              // Animate to expanded
+              filterContent.style.transition = 'max-height 350ms cubic-bezier(0.4, 0.0, 0.2, 1), opacity 300ms cubic-bezier(0.4, 0.0, 0.2, 1), transform 300ms cubic-bezier(0.4, 0.0, 0.2, 1)';
+              filterContent.style.maxHeight = targetHeight + 'px';
+              filterContent.style.opacity = '1';
+              filterContent.style.transform = 'translateY(0)';
+              
+              // After animation, set overflow visible
+              setTimeout(() => {
+                if (!state.ui.filterCollapsed) {
+                  filterContent.style.overflow = 'visible';
+                }
+              }, 350);
+              
+              // Update button
+              const iconContainer = filterToggleBtn.querySelector('div:last-child');
+              if (iconContainer) iconContainer.innerHTML = SVG_CHEVRON_UP;
+              filterToggleBtn.setAttribute('aria-expanded', 'true');
+              filterToggleBtn.title = 'Filter ausblenden';
+            }
           });
         }
 
@@ -2697,12 +2765,10 @@
         
         let lastScrollY = 0;
         let isCollapsing = false;
-        const SCROLL_THRESHOLD = 20; // Start collapsing after minimal scroll
-        const COLLAPSE_DISTANCE = 80; // Distance to fully collapse
+        const SCROLL_THRESHOLD = 40; // Start collapsing after this scroll distance
+        const COLLAPSE_DISTANCE = 120; // Distance to fully collapse (increased for smoother transition)
         
         const virtualWrap = document.querySelector('#virtualWrap');
-        const mainHeader = document.getElementById('mainHeader');
-        let headerHidden = false;
         
         // Wait for virtualizer to mount, then attach scroll listener
         requestAnimationFrame(() => {
@@ -2721,53 +2787,45 @@
               filterContent.style.maxHeight = fullHeight + 'px';
             }
             
-            let headerHidden = false;
+            // Use requestAnimationFrame for smooth scroll-linked animations
+            let ticking = false;
+            
             const handleScroll = () => {
               const currentScrollY = scroller.scrollTop;
               const scrollDelta = currentScrollY - lastScrollY;
               
-              // ===== HEADER AUTO-HIDE LOGIC =====
-              const HEADER_HIDE_THRESHOLD = 100; // Hide header after scrolling down 100px
-              
-              // Hide header when scrolling down
-              if (scrollDelta > 5 && currentScrollY > HEADER_HIDE_THRESHOLD && !headerHidden && mainHeader) {
-                headerHidden = true;
-                mainHeader.classList.add('header-hidden');
-              }
-              // Show header when scrolling up or near top
-              else if ((scrollDelta < -5 || currentScrollY < 50) && headerHidden && mainHeader) {
-                headerHidden = false;
-                mainHeader.classList.remove('header-hidden');
-              }
-              
-              // ===== FILTER COLLAPSE LOGIC (unchanged) =====
-              if (filterPanel && filterContent) {
-                // Scrolling down - progressively collapse
-                if (scrollDelta > 0 && currentScrollY > SCROLL_THRESHOLD) {
-                  if (!isCollapsing && !state.ui.filterCollapsed) {
-                    isCollapsing = true;
-                    // Ensure we have the full height
-                    if (fullHeight === 0) {
-                      filterContent.style.maxHeight = 'none';
-                      fullHeight = filterContent.scrollHeight;
+              // ===== FILTER COLLAPSE LOGIC (smooth & elegant) =====
+              if (filterPanel && filterContent && !ticking) {
+                ticking = true;
+                requestAnimationFrame(() => {
+                  // Scrolling down - progressively collapse
+                  if (currentScrollY > SCROLL_THRESHOLD && !state.ui.filterCollapsed) {
+                    if (!isCollapsing) {
+                      isCollapsing = true;
+                      // Ensure we have the full height
+                      if (fullHeight === 0) {
+                        filterContent.style.maxHeight = 'none';
+                        fullHeight = filterContent.scrollHeight;
+                      }
+                      // Disable CSS transitions for scroll-linked animation
+                      filterContent.style.transition = 'none';
                     }
-                  }
-                  
-                  if (isCollapsing && !state.ui.filterCollapsed) {
-                    // Calculate collapse progress (0 to 1)
-                    const scrollProgress = Math.min((currentScrollY - SCROLL_THRESHOLD) / COLLAPSE_DISTANCE, 1);
-                    const currentHeight = fullHeight * (1 - scrollProgress);
-                    const currentOpacity = 1 - (scrollProgress * 0.6); // Fade to 40% opacity
                     
-                    // Apply smooth transform with NO transition (immediate response)
-                    filterContent.style.transition = 'none';
+                    // Calculate collapse progress (0 to 1) with easing
+                    const rawProgress = Math.min((currentScrollY - SCROLL_THRESHOLD) / COLLAPSE_DISTANCE, 1);
+                    // Apply ease-out curve for smoother feel
+                    const scrollProgress = 1 - Math.pow(1 - rawProgress, 2);
+                    const currentHeight = fullHeight * (1 - scrollProgress);
+                    const currentOpacity = 1 - (scrollProgress * 0.8); // Fade to 20% opacity
+                    
+                    // Apply smooth transform
                     filterContent.style.maxHeight = Math.max(0, currentHeight) + 'px';
-                    filterContent.style.opacity = String(Math.max(0.4, currentOpacity));
+                    filterContent.style.opacity = String(Math.max(0.2, currentOpacity));
                     filterContent.style.overflow = 'hidden';
-                    filterContent.style.transform = `translateY(${-scrollProgress * 8}px)`; // Slide up slightly
+                    filterContent.style.transform = `translateY(${-scrollProgress * 4}px)`; // Subtle slide up
                     
                     // Fully collapsed?
-                    if (scrollProgress >= 1) {
+                    if (rawProgress >= 1) {
                       state.ui.filterCollapsed = true;
                       localStorage.setItem('filterCollapsed', 'true');
                       filterContent.style.maxHeight = '0';
@@ -2786,31 +2844,44 @@
                       isCollapsing = false;
                     }
                   }
-                }
-                // Scrolling up - expand if collapsed or near top
-                else if (scrollDelta < 0 && currentScrollY < SCROLL_THRESHOLD * 2 && state.ui.filterCollapsed) {
-                  state.ui.filterCollapsed = false;
-                  localStorage.setItem('filterCollapsed', 'false');
-                  isCollapsing = false;
-                  
-                  // Smooth expand animation
-                  filterContent.style.transition = 'max-height 350ms cubic-bezier(0.4, 0.0, 0.2, 1), opacity 350ms cubic-bezier(0.4, 0.0, 0.2, 1), transform 350ms cubic-bezier(0.4, 0.0, 0.2, 1)';
-                  filterContent.style.maxHeight = fullHeight + 'px';
-                  filterContent.style.opacity = '1';
-                  filterContent.style.transform = 'translateY(0)';
-                  filterContent.style.overflow = 'visible';
-                  
-                  // Update toggle button icon
-                  const toggleBtn = document.querySelector('#filterToggle');
-                  if (toggleBtn) {
-                    const iconContainer = toggleBtn.querySelector('div:last-child');
-                    if (iconContainer) {
-                      iconContainer.innerHTML = SVG_CHEVRON_UP;
+                  // Near top - expand if collapsed
+                  else if (currentScrollY < SCROLL_THRESHOLD && state.ui.filterCollapsed) {
+                    state.ui.filterCollapsed = false;
+                    localStorage.setItem('filterCollapsed', 'false');
+                    isCollapsing = false;
+                    
+                    // Smooth expand animation with CSS transition
+                    filterContent.style.transition = 'max-height 350ms cubic-bezier(0.4, 0.0, 0.2, 1), opacity 300ms cubic-bezier(0.4, 0.0, 0.2, 1), transform 300ms cubic-bezier(0.4, 0.0, 0.2, 1)';
+                    filterContent.style.maxHeight = fullHeight + 'px';
+                    filterContent.style.opacity = '1';
+                    filterContent.style.transform = 'translateY(0)';
+                    filterContent.style.overflow = 'visible';
+                    
+                    // Update toggle button icon
+                    const toggleBtn = document.querySelector('#filterToggle');
+                    if (toggleBtn) {
+                      const iconContainer = toggleBtn.querySelector('div:last-child');
+                      if (iconContainer) {
+                        iconContainer.innerHTML = SVG_CHEVRON_UP;
+                      }
+                      toggleBtn.setAttribute('aria-expanded', 'true');
+                      toggleBtn.title = 'Filter ausblenden';
                     }
-                    toggleBtn.setAttribute('aria-expanded', 'true');
-                    toggleBtn.title = 'Filter ausblenden';
                   }
-                }
+                  // Not collapsed and scrolling back up but not at top yet - restore partially
+                  else if (isCollapsing && scrollDelta < 0 && !state.ui.filterCollapsed) {
+                    const rawProgress = Math.min((currentScrollY - SCROLL_THRESHOLD) / COLLAPSE_DISTANCE, 1);
+                    const scrollProgress = 1 - Math.pow(1 - rawProgress, 2);
+                    const currentHeight = fullHeight * (1 - scrollProgress);
+                    const currentOpacity = 1 - (scrollProgress * 0.8);
+                    
+                    filterContent.style.maxHeight = Math.max(0, currentHeight) + 'px';
+                    filterContent.style.opacity = String(Math.max(0.2, currentOpacity));
+                    filterContent.style.transform = `translateY(${-scrollProgress * 4}px)`;
+                  }
+                  
+                  ticking = false;
+                });
               }
               
               lastScrollY = currentScrollY;
