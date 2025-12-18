@@ -508,17 +508,50 @@ async function ensureAnnotationWritable(rel) {
 
   for (const dir of dirsToCheck) {
     try { await fs.promises.mkdir(dir, { recursive: true, mode: 0o777 }); } catch {}
+    
+    // First check if writable
     try {
       await fs.promises.access(dir, fs.constants.W_OK);
       continue;
     } catch {}
 
+    // Try to fix permissions
     try { await fs.promises.chmod(dir, 0o777); } catch {}
+    
+    // Try with maybeChown as well
+    try { await maybeChown(dir); } catch {}
+    
+    // Check again
     try {
       await fs.promises.access(dir, fs.constants.W_OK);
     } catch (err) {
-      throw createAnnotationPermissionError(dir, err);
+      // Get more detailed information for debugging
+      let debugInfo = { dir };
+      try {
+        const stats = await fs.promises.stat(dir);
+        debugInfo.mode = stats.mode.toString(8);
+        debugInfo.uid = stats.uid;
+        debugInfo.gid = stats.gid;
+        debugInfo.processUid = process.getuid?.();
+        debugInfo.processGid = process.getgid?.();
+      } catch {}
+      
+      const detailedErr = createAnnotationPermissionError(dir, err);
+      detailedErr.debugInfo = debugInfo;
+      throw detailedErr;
     }
+  }
+}
+
+async function checkAnnotationWritable(rel) {
+  // Check if annotation store is writable without throwing errors
+  try {
+    await ensureAnnotationPermissions(rel);
+    const dir = getAnnotationVersionsDir(rel);
+    await fs.promises.access(dir, fs.constants.W_OK);
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -733,6 +766,12 @@ async function serializeAnnotationPages(info, index) {
 
 async function ensureAnnotationStore(rel) {
   await ensureAnnotationWritable(rel);
+  return getAnnotationDir(rel);
+}
+
+async function ensureAnnotationReadable(rel) {
+  // For read operations, just ensure basic permissions without requiring write access
+  await ensureAnnotationPermissions(rel);
   return getAnnotationDir(rel);
 }
 
@@ -4174,8 +4213,8 @@ app.get("/api/annotations", async (req, res) => {
   }
 
   try {
-    await ensureAnnotationStore(info.rel);
-    await ensureAnnotationPermissions(info.rel);
+    // For read operations, only ensure readable access (not writable)
+    await ensureAnnotationReadable(info.rel);
     let index = await loadAnnotationIndex(info.rel);
     let pages = await serializeAnnotationPages(info, index);
     let historyEntries = [];
@@ -4184,46 +4223,50 @@ app.get("/api/annotations", async (req, res) => {
     } catch {}
 
     // Auto-heal: if active annotations are empty but snapshots exist, restore latest snapshot
+    // Only attempt restore if we have write permissions
     if (!pages.length) {
       const latestSnapshot = historyEntries.length ? historyEntries[historyEntries.length - 1] : null;
       if (latestSnapshot && latestSnapshot.dir) {
-        try {
-          await withAnnotationLock(info.rel, async () => {
-            // Re-check inside the lock to avoid races with concurrent saves
-            await ensureAnnotationPermissions(info.rel);
-            const currentIndex = await loadAnnotationIndex(info.rel);
-            const currentPages = await serializeAnnotationPages(info, currentIndex);
-            if (currentPages.length) {
-              pages = currentPages;
-              return;
-            }
-
-            const snapshotIndex = await loadSnapshotIndex(latestSnapshot);
-            const snapshotPages = snapshotIndex?.pages || {};
-            const snapshotKeys = Object.keys(snapshotPages)
-              .map((key) => Number(key))
-              .filter((num) => Number.isInteger(num) && num > 0);
-            if (!snapshotKeys.length) return;
-
-            // Restore missing annotation PNGs from the snapshot
-            for (const key of snapshotKeys) {
-              const src = path.join(latestSnapshot.dir, `page-${key}.png`);
-              const dest = getAnnotationPagePath(info.rel, key);
-              try {
-                await fs.promises.copyFile(src, dest);
-              } catch (copyErr) {
-                if (copyErr && copyErr.code === "ENOENT") continue;
-                throw copyErr;
+        const isWritable = await checkAnnotationWritable(info.rel);
+        if (isWritable) {
+          try {
+            await withAnnotationLock(info.rel, async () => {
+              // Re-check inside the lock to avoid races with concurrent saves
+              await ensureAnnotationPermissions(info.rel);
+              const currentIndex = await loadAnnotationIndex(info.rel);
+              const currentPages = await serializeAnnotationPages(info, currentIndex);
+              if (currentPages.length) {
+                pages = currentPages;
+                return;
               }
-            }
 
-            const restoredIndex = { rel: info.rel, pages: snapshotPages };
-            await saveAnnotationIndex(info.rel, restoredIndex);
-            await rebuildPdfFromAnnotations(info, restoredIndex);
-            pages = await serializeAnnotationPages(info, restoredIndex);
-          });
-        } catch (restoreErr) {
-          logError("Annotation auto-restore failed", restoreErr, { rel: info.rel, snapshot: latestSnapshot?.name });
+              const snapshotIndex = await loadSnapshotIndex(latestSnapshot);
+              const snapshotPages = snapshotIndex?.pages || {};
+              const snapshotKeys = Object.keys(snapshotPages)
+                .map((key) => Number(key))
+                .filter((num) => Number.isInteger(num) && num > 0);
+              if (!snapshotKeys.length) return;
+
+              // Restore missing annotation PNGs from the snapshot
+              for (const key of snapshotKeys) {
+                const src = path.join(latestSnapshot.dir, `page-${key}.png`);
+                const dest = getAnnotationPagePath(info.rel, key);
+                try {
+                  await fs.promises.copyFile(src, dest);
+                } catch (copyErr) {
+                  if (copyErr && copyErr.code === "ENOENT") continue;
+                  throw copyErr;
+                }
+              }
+
+              const restoredIndex = { rel: info.rel, pages: snapshotPages };
+              await saveAnnotationIndex(info.rel, restoredIndex);
+              await rebuildPdfFromAnnotations(info, restoredIndex);
+              pages = await serializeAnnotationPages(info, restoredIndex);
+            });
+          } catch (restoreErr) {
+            logError("Annotation auto-restore failed", restoreErr, { rel: info.rel, snapshot: latestSnapshot?.name });
+          }
         }
       }
     }

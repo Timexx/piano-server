@@ -7050,8 +7050,8 @@
         const scrollTop = viewer.scrollTop || 0;
         const maxScroll = Math.max(0, viewer.scrollHeight - viewportHeight);
         
-        // Scrolle um 90% der Viewport-Höhe (etwas Überlappung für Orientierung)
-        const scrollAmount = viewportHeight * 0.9;
+        // Scrolle um 75% der Viewport-Höhe (etwas Überlappung für Orientierung)
+        const scrollAmount = viewportHeight * 0.75;
         
         let targetScrollTop;
         if (delta > 0) {
