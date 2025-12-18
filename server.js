@@ -1063,7 +1063,9 @@ const MEMORY_SETTINGS = {
   enableGzipCompression: true,
   thumbnailSize: 600,        // Thumbnail width in pixels
   thumbnailQuality: 100,      // JPEG quality for thumbnails
-  maxThumbnailAge: 7 * 24 * 60 * 60 * 1000 // 7 days thumbnail cache
+  maxThumbnailAge: 7 * 24 * 60 * 60 * 1000, // 7 days thumbnail cache
+  thumbnailPrefetchConcurrency: 4, // Parallel thumbnail generation on startup
+  thumbnailPrefetchDelay: 5000     // Delay before starting background prefetch (ms)
 };
 
 // Local vendor cache (offline/CDN failure resilience)
@@ -1196,11 +1198,29 @@ function encodePathSegments(relPath) {
 }
 
 /* ---------------- Thumbnail Generation (Server-side) ---------------- */
+// Lock mechanism to prevent concurrent thumbnail generation for the same file
+const thumbnailLocks = new Map();
+
 async function ensureThumbnail(pdfInfo) {
   const relPdf = pdfInfo.rel;
   const pdfPath = pdfInfo.abs;
   const thumbRel = thumbnailRelPath(relPdf);
   const thumbPath = path.join(THUMBS_DIR, thumbRel);
+
+  // Check if another process is already generating this thumbnail
+  if (thumbnailLocks.has(relPdf)) {
+    // Wait for the existing generation to complete
+    try {
+      await thumbnailLocks.get(relPdf);
+    } catch {
+      // Ignore errors from other generation attempt
+    }
+    // Re-check if thumbnail now exists
+    const existingStat = await statSafe(thumbPath);
+    if (existingStat) {
+      return { thumbPath, thumbStat: existingStat };
+    }
+  }
 
   await fs.promises.mkdir(path.dirname(thumbPath), { recursive: true });
 
@@ -1225,12 +1245,32 @@ async function ensureThumbnail(pdfInfo) {
     return { thumbPath, thumbStat: fallbackStat };
   }
 
+  // Create a promise for this generation and store it
+  const generationPromise = (async () => {
+    try {
+      await createThumbnailFromPdf(pdfPath, thumbPath, relPdf);
+    } catch (err) {
+      // Only log non-permission errors (permission errors often mean concurrent access)
+      if (!err.message?.includes('EACCES') && !err.message?.includes('EBUSY')) {
+        logError(`createThumbnailFromPdf failed`, err, { relPdf });
+      }
+      // Try to write fallback, but don't fail if that also has permission issues
+      try {
+        await writeFallbackThumbnail(thumbPath);
+      } catch {
+        // Silently ignore - thumbnail will be retried on next request
+      }
+    }
+  })();
+  
+  thumbnailLocks.set(relPdf, generationPromise);
+  
   try {
-    await createThumbnailFromPdf(pdfPath, thumbPath, relPdf);
-  } catch (err) {
-    logError(`createThumbnailFromPdf failed`, err, { relPdf });
-    await writeFallbackThumbnail(thumbPath);
+    await generationPromise;
+  } finally {
+    thumbnailLocks.delete(relPdf);
   }
+  
   const refreshedStat = await statSafe(thumbPath);
   return { thumbPath, thumbStat: refreshedStat };
 }
@@ -1247,47 +1287,69 @@ async function createThumbnailFromPdf(pdfPath, thumbPath, relPdf) {
     cMapPacked: false
   });
 
-  const pdf = await loadingTask.promise;
-  const page = await pdf.getPage(1);
+  let pdf = null;
+  let page = null;
+  
+  try {
+    pdf = await loadingTask.promise;
+    page = await pdf.getPage(1);
 
-  const baseViewport = page.getViewport({ scale: 1 });
-  const scale = MEMORY_SETTINGS.thumbnailSize / baseViewport.width;
-  const scaledViewport = page.getViewport({ scale });
+    const baseViewport = page.getViewport({ scale: 1 });
+    const scale = MEMORY_SETTINGS.thumbnailSize / baseViewport.width;
+    const scaledViewport = page.getViewport({ scale });
 
-  if (!canvas || typeof canvas.createCanvas !== "function") {
-    throw new Error("Canvas library not available");
+    if (!canvas || typeof canvas.createCanvas !== "function") {
+      throw new Error("Canvas library not available");
+    }
+
+    const canvasInstance = canvas.createCanvas(scaledViewport.width, scaledViewport.height);
+    const context = canvasInstance.getContext("2d");
+
+    await page.render({
+      canvasContext: context,
+      viewport: scaledViewport
+    }).promise;
+
+    let imageBuffer = canvasInstance.toBuffer("image/jpeg", {
+      quality: MEMORY_SETTINGS.thumbnailQuality / 100
+    });
+
+    if (sharp && imageBuffer) {
+      imageBuffer = await sharp(imageBuffer)
+        .jpeg({ quality: MEMORY_SETTINGS.thumbnailQuality })
+        .resize(MEMORY_SETTINGS.thumbnailSize, null, {
+          withoutEnlargement: true,
+          fit: "inside"
+        })
+        .toBuffer();
+    }
+
+    // Atomic write: write to temp file first, then rename
+    await fs.promises.mkdir(path.dirname(thumbPath), { recursive: true });
+    const tempPath = `${thumbPath}.${Date.now()}.tmp`;
+    
+    try {
+      await fs.promises.writeFile(tempPath, imageBuffer, { mode: 0o644 });
+      await fs.promises.rename(tempPath, thumbPath);
+    } catch (writeErr) {
+      // Clean up temp file if rename failed
+      try { await fs.promises.unlink(tempPath); } catch {}
+      throw writeErr;
+    }
+  } finally {
+    // Always cleanup PDF resources
+    if (page && typeof page.cleanup === "function") {
+      try { page.cleanup(); } catch {}
+    }
+    if (pdf) {
+      if (typeof pdf.cleanup === "function") {
+        try { pdf.cleanup(); } catch {}
+      }
+      if (typeof pdf.destroy === "function") {
+        try { pdf.destroy(); } catch {}
+      }
+    }
   }
-
-  const canvasInstance = canvas.createCanvas(scaledViewport.width, scaledViewport.height);
-  const context = canvasInstance.getContext("2d");
-
-  await page.render({
-    canvasContext: context,
-    viewport: scaledViewport
-  }).promise;
-
-  let imageBuffer = canvasInstance.toBuffer("image/jpeg", {
-    quality: MEMORY_SETTINGS.thumbnailQuality / 100
-  });
-
-  if (sharp && imageBuffer) {
-    imageBuffer = await sharp(imageBuffer)
-      .jpeg({ quality: MEMORY_SETTINGS.thumbnailQuality })
-      .resize(MEMORY_SETTINGS.thumbnailSize, null, {
-        withoutEnlargement: true,
-        fit: "inside"
-      })
-      .toBuffer();
-  }
-
-  await fs.promises.mkdir(path.dirname(thumbPath), { recursive: true });
-  await fs.promises.writeFile(thumbPath, imageBuffer);
-
-  if (typeof page.cleanup === "function") page.cleanup();
-  if (typeof pdf.cleanup === "function") pdf.cleanup();
-  if (typeof pdf.destroy === "function") pdf.destroy();
-
-  // console.log(`Generated thumbnail for: ${relPdf}`);
 }
 
 async function getThumbnailPath(relPdf) {
@@ -5200,6 +5262,108 @@ function initSheetWatcher() {
   }
 }
 
+/* ---------------- Background Thumbnail Prefetch ---------------- */
+/**
+ * Pre-generates thumbnails for all PDFs in the background after server startup.
+ * This dramatically improves initial load time for users as thumbnails are ready.
+ */
+let thumbnailPrefetchRunning = false;
+
+async function prefetchThumbnails() {
+  if (thumbnailPrefetchRunning) return;
+  if (!pdfjsLib || !canvas) {
+    console.log("⏭️  Thumbnail prefetch skipped: PDF.js or Canvas not available");
+    return;
+  }
+  
+  thumbnailPrefetchRunning = true;
+  console.log("🖼️  Starting background thumbnail prefetch...");
+  
+  try {
+    const items = await getIndex();
+    if (!items || items.length === 0) {
+      console.log("✅ No PDFs to prefetch thumbnails for");
+      return;
+    }
+    
+    // Find PDFs that don't have thumbnails yet
+    const needsThumbnail = [];
+    for (const item of items) {
+      const thumbRel = thumbnailRelPath(item.name);
+      const thumbPath = path.join(THUMBS_DIR, thumbRel);
+      const thumbStat = await statSafe(thumbPath);
+      
+      // Check if thumbnail exists and is fresh
+      const pdfPath = path.join(SHEETS_DIR, item.name);
+      const pdfStat = await statSafe(pdfPath);
+      
+      if (!thumbStat || 
+          (pdfStat && thumbStat.mtimeMs < pdfStat.mtimeMs) ||
+          Date.now() - thumbStat.mtimeMs > MEMORY_SETTINGS.maxThumbnailAge) {
+        needsThumbnail.push(item);
+      }
+    }
+    
+    if (needsThumbnail.length === 0) {
+      console.log("✅ All thumbnails are up to date");
+      thumbnailPrefetchRunning = false;
+      return;
+    }
+    
+    console.log(`📷  Generating ${needsThumbnail.length} missing thumbnails...`);
+    
+    // Process in parallel with concurrency limit
+    const concurrency = MEMORY_SETTINGS.thumbnailPrefetchConcurrency;
+    let completed = 0;
+    let failed = 0;
+    let cursor = 0;
+    
+    const workers = [];
+    for (let i = 0; i < concurrency; i++) {
+      workers.push((async () => {
+        while (true) {
+          const idx = cursor++;
+          if (idx >= needsThumbnail.length) break;
+          
+          const item = needsThumbnail[idx];
+          try {
+            const info = resolvePdfName(item.name);
+            if (info) {
+              await ensureThumbnail(info);
+              completed++;
+            }
+          } catch (err) {
+            failed++;
+            // Silent failure - don't spam console
+          }
+          
+          // Progress update every 10 thumbnails
+          if ((completed + failed) % 10 === 0) {
+            console.log(`   📷 Progress: ${completed + failed}/${needsThumbnail.length} (${failed} failed)`);
+          }
+        }
+      })());
+    }
+    
+    await Promise.all(workers);
+    
+    console.log(`✅ Thumbnail prefetch complete: ${completed} generated, ${failed} failed`);
+  } catch (err) {
+    console.warn("⚠️  Thumbnail prefetch error:", err.message);
+  } finally {
+    thumbnailPrefetchRunning = false;
+  }
+}
+
+// Start prefetch after delay (don't block startup)
+function scheduleThumbnailPrefetch() {
+  setTimeout(() => {
+    prefetchThumbnails().catch(err => {
+      console.warn("Thumbnail prefetch failed:", err.message);
+    });
+  }, MEMORY_SETTINGS.thumbnailPrefetchDelay);
+}
+
 /* ---------------- Database Cleanup Helper ---------------- */
 /**
  * Cleans up orphaned document entries from the database.
@@ -5608,6 +5772,9 @@ function csrfProtection(req, res, next) {
     // Initial scan
     getIndex().then(items => {
       console.log(`Initial scan complete: ${items.length} PDF files found`);
+      
+      // Schedule background thumbnail prefetch after initial scan
+      scheduleThumbnailPrefetch();
     }).catch(e => {
       console.warn("Initial scan failed:", e.message);
     });

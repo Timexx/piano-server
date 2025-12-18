@@ -186,6 +186,31 @@ body[data-accent-active="true"] #mainHeader > div {
   display: block;
 }
 
+/* Lazy loading thumbnail styles for fast initial render */
+.music-card .card-bg.lazy-thumb {
+  background: linear-gradient(135deg, #1a1a1f 0%, #262630 50%, #1a1a1f 100%);
+  background-size: 200% 200%;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+
+.music-card .card-bg.thumb-loading {
+  opacity: 0;
+}
+
+.music-card .card-bg.thumb-loaded {
+  animation: fadeIn 0.3s ease-out forwards;
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: scale(0.98); }
+  to { opacity: 1; transform: scale(1); }
+}
+
 @media (min-width: 640px) { 
   .music-card .card-bg { height: 240px; } 
 }
@@ -454,6 +479,18 @@ button.grid.place-items-center svg {
 
 .list-row .row-more {
   transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+
+/* Lazy loading for list view thumbnails */
+.list-row .lazy-thumb-row {
+  background: linear-gradient(135deg, #1a1a1f 0%, #262630 50%, #1a1a1f 100%);
+  background-size: 200% 200%;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+
+.list-row .lazy-thumb-row.thumb-loaded {
+  animation: none;
+  background: none;
 }
 
 /* Compact list mode on phones */

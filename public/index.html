@@ -979,6 +979,57 @@
 
   window.state = state;
 
+      // ===== Thumbnail Lazy Loading with IntersectionObserver =====
+      // This dramatically improves initial page load by only loading visible thumbnails
+      let lazyThumbObserver = null;
+      const pendingThumbs = new Set();
+      
+      function initLazyThumbObserver() {
+        if (lazyThumbObserver) return;
+        
+        // Use IntersectionObserver for efficient lazy loading
+        lazyThumbObserver = new IntersectionObserver((entries) => {
+          entries.forEach(entry => {
+            if (entry.isIntersecting) {
+              const img = entry.target;
+              const src = img.dataset.src;
+              if (src && !img.src) {
+                img.src = src;
+                img.classList.add('thumb-loading');
+                img.onload = () => {
+                  img.classList.remove('thumb-loading', 'lazy-thumb');
+                  img.classList.add('thumb-loaded');
+                };
+                img.onerror = () => {
+                  img.classList.remove('thumb-loading');
+                  img.style.display = 'none';
+                  if (img.nextElementSibling) img.nextElementSibling.style.display = 'grid';
+                };
+              }
+              lazyThumbObserver.unobserve(img);
+              pendingThumbs.delete(img);
+            }
+          });
+        }, {
+          root: null,
+          rootMargin: '200px', // Load thumbnails 200px before they enter viewport
+          threshold: 0.01
+        });
+      }
+      
+      function registerLazyThumb(img) {
+        if (!lazyThumbObserver) initLazyThumbObserver();
+        pendingThumbs.add(img);
+        lazyThumbObserver.observe(img);
+      }
+      
+      function cleanupLazyObserver() {
+        if (lazyThumbObserver) {
+          pendingThumbs.forEach(img => lazyThumbObserver.unobserve(img));
+          pendingThumbs.clear();
+        }
+      }
+
       const LIBRARY_SNAPSHOT_KEY = 'librarySnapshot:last';
 
       function escapeHtml(value) {
@@ -4616,13 +4667,14 @@
         if (accent) a.style.setProperty('--card-accent', accent);
         a.dataset.itemName = item.name;
 
-        // Build inner
+        // Build inner - use data-src for lazy loading with IntersectionObserver
         const bg = document.createElement('img');
-        bg.src = item.thumbnail;
+        bg.dataset.src = item.thumbnail; // Lazy load: don't set src immediately
         bg.alt = item.name;
-        bg.loading = 'lazy';
-        bg.className = 'card-bg';
+        bg.className = 'card-bg lazy-thumb';
         bg.setAttribute('onerror', "this.style.display='none'; this.nextElementSibling.style.display='grid'");
+        // Register for lazy loading
+        registerLazyThumb(bg);
         a.appendChild(bg);
 
         const fallback = document.createElement('div');
@@ -4773,11 +4825,16 @@
         const subtitleParts = [formatSize(item.size), new Date(item.mtime).toLocaleDateString()];
         if (item.folder) subtitleParts.push(item.folder);
         const subtitle = subtitleParts.join(" • ");
+        
+        // Create thumbnail with lazy loading
+        const thumbImg = document.createElement('img');
+        thumbImg.alt = item.name;
+        thumbImg.className = 'thumb shrink-0 rounded bg-neutral-950 w-14 h-18 object-cover lazy-thumb-row';
+        thumbImg.dataset.src = item.thumbnail;
+        thumbImg.setAttribute('onerror', "this.style.display='none'; this.nextElementSibling.style.display='flex'");
+        registerLazyThumb(thumbImg);
+        
         a.innerHTML = `
-          <img src="${item.thumbnail}" alt="${item.name}" 
-               class="thumb shrink-0 rounded bg-neutral-950 w-14 h-18 object-cover"
-               loading="lazy"
-               onerror="this.style.display='none'; this.nextElementSibling.style.display='block'">
           <div class="thumb shrink-0 rounded bg-neutral-950 w-14 h-18 hidden flex items-center justify-center text-neutral-500 text-xs">PDF</div>
           <div class="flex-1 min-w-0">
             <div class="font-medium truncate row-title" title="${displayName}">${displayName}</div>
@@ -4808,6 +4865,8 @@
             </button>
           </div>
         `;
+        // Insert thumbnail at the beginning
+        a.insertBefore(thumbImg, a.firstChild);
         
         // Add shared badge (initially hidden, will be shown by checkAuthAndShowActions)
         const sharedBadgeRow = document.createElement('div');
