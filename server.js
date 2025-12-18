@@ -109,6 +109,7 @@ const PLAYLISTS_FILE = path.join(DATA_DIR, "playlists.json");
 const THUMBS_DIR = path.join(DATA_DIR, "thumbnails"); // New: thumbnail cache directory
 const ANNOTATIONS_DIR = path.join(DATA_DIR, "annotations");
 const MAX_ANNOTATION_VERSIONS = 20;
+const MAX_ANNOTATION_UPLOAD_BYTES = 12 * 1024 * 1024; // generous limit, validated per page payload
 const CPU_COUNT = Math.max(1, typeof os.cpus === "function" ? os.cpus().length : 1);
 
 const DEFAULT_CATEGORY_COLOR = "#6366F1";
@@ -420,8 +421,105 @@ function getAnnotationVersionsDir(rel) {
 
 async function ensureAnnotationVersionsDir(rel) {
   const dir = getAnnotationVersionsDir(rel);
-  await fs.promises.mkdir(dir, { recursive: true });
+  await fs.promises.mkdir(dir, { recursive: true, mode: 0o777 });
   return dir;
+}
+
+async function ensureAnnotationPermissions(rel) {
+  const dir = getAnnotationDir(rel);
+  const versions = getAnnotationVersionsDir(rel);
+  const files = [getAnnotationIndexPath(rel), getAnnotationBasePath(rel)];
+
+  const targetDirMode = 0o777;
+  const targetFileMode = 0o666;
+
+  const maybeChown = async (p) => {
+    if (typeof process.getuid !== "function" || typeof process.getgid !== "function") return;
+    try { await fs.promises.chown(p, process.getuid(), process.getgid()); } catch {}
+  };
+  const safeChmod = async (p, mode) => { try { await fs.promises.chmod(p, mode); } catch {} };
+
+  try { await fs.promises.mkdir(dir, { recursive: true, mode: targetDirMode }); } catch {}
+  await safeChmod(dir, targetDirMode);
+  await maybeChown(dir);
+
+  try { await fs.promises.mkdir(versions, { recursive: true, mode: targetDirMode }); } catch {}
+  await safeChmod(versions, targetDirMode);
+  await maybeChown(versions);
+
+  // Relax permissions on known files
+  for (const filePath of files) {
+    try {
+      const st = await fs.promises.stat(filePath);
+      if (st.isFile()) {
+        await safeChmod(filePath, targetFileMode);
+        await maybeChown(filePath);
+      }
+    } catch {}
+  }
+
+  // Also relax permissions on existing snapshot directories and their files
+  try {
+    const entries = await fs.promises.readdir(versions, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry || !entry.name) continue;
+      const snapshotDir = path.join(versions, entry.name);
+      if (entry.isDirectory()) {
+        await safeChmod(snapshotDir, targetDirMode);
+        await maybeChown(snapshotDir);
+        try {
+          const filesInSnapshot = await fs.promises.readdir(snapshotDir);
+          for (const f of filesInSnapshot) {
+            const p = path.join(snapshotDir, f);
+            await safeChmod(p, targetFileMode);
+            await maybeChown(p);
+          }
+        } catch {}
+      } else {
+        await safeChmod(snapshotDir, targetFileMode);
+        await maybeChown(snapshotDir);
+      }
+    }
+  } catch {}
+}
+
+function createAnnotationPermissionError(dir, cause) {
+  const err = new Error("Annotation store is not writable");
+  err.code = "EANNOT_PERM";
+  err.path = dir;
+  err.cause = cause;
+  return err;
+}
+
+async function ensureAnnotationWritable(rel) {
+  await ensureAnnotationPermissions(rel);
+
+  const dirsToCheck = [
+    DATA_DIR,
+    ANNOTATIONS_DIR,
+    getAnnotationDir(rel),
+    getAnnotationVersionsDir(rel),
+  ];
+  const filesToRelax = [getAnnotationIndexPath(rel), getAnnotationBasePath(rel)];
+
+  for (const filePath of filesToRelax) {
+    try { await fs.promises.chmod(filePath, 0o666); } catch {}
+  }
+
+  for (const dir of dirsToCheck) {
+    try { await fs.promises.mkdir(dir, { recursive: true, mode: 0o777 }); } catch {}
+    try {
+      await fs.promises.access(dir, fs.constants.W_OK);
+      continue;
+    } catch {}
+
+    try { await fs.promises.chmod(dir, 0o777); } catch {}
+    try {
+      await fs.promises.access(dir, fs.constants.W_OK);
+    } catch (err) {
+      throw createAnnotationPermissionError(dir, err);
+    }
+  }
 }
 
 async function listAnnotationSnapshots(rel) {
@@ -465,11 +563,13 @@ async function cleanupAnnotationSnapshots(rel) {
 
 async function createAnnotationSnapshot(info, index) {
   if (!info || !info.rel) return null;
+  await ensureAnnotationWritable(info.rel);
   const versionsDir = await ensureAnnotationVersionsDir(info.rel);
   const baseTs = Date.now();
   let attempt = 0;
   let token = null;
   let dir = null;
+  let fixedPermissions = false;
 
   while (true) {
     token = attempt ? `${baseTs}-${attempt}` : `${baseTs}`;
@@ -480,6 +580,11 @@ async function createAnnotationSnapshot(info, index) {
     } catch (err) {
       if (err && err.code === "EEXIST") {
         attempt += 1;
+        continue;
+      }
+      if (err && err.code === "EACCES" && !fixedPermissions) {
+        fixedPermissions = true;
+        await ensureAnnotationWritable(info.rel);
         continue;
       }
       throw err;
@@ -507,12 +612,24 @@ async function createAnnotationSnapshot(info, index) {
     pages: pageKeys,
   };
 
-  await fs.promises.writeFile(path.join(dir, "meta.json"), JSON.stringify(meta, null, 2), "utf8");
-  await fs.promises.writeFile(
-    path.join(dir, "index.json"),
-    JSON.stringify({ rel: info.rel, pages: pagesObject }, null, 2),
-    "utf8"
-  );
+  const metaPath = path.join(dir, "meta.json");
+  const idxPath = path.join(dir, "index.json");
+
+  const writeWithFix = async (targetPath, payload) => {
+    try {
+      await fs.promises.writeFile(targetPath, payload, "utf8");
+    } catch (err) {
+      if (err && err.code === "EACCES") {
+        await ensureAnnotationPermissions(info.rel);
+        await fs.promises.writeFile(targetPath, payload, "utf8");
+      } else {
+        throw err;
+      }
+    }
+  };
+
+  await writeWithFix(metaPath, JSON.stringify(meta, null, 2));
+  await writeWithFix(idxPath, JSON.stringify({ rel: info.rel, pages: pagesObject }, null, 2));
 
   for (const pageNumber of pageKeys) {
     const src = getAnnotationPagePath(info.rel, pageNumber);
@@ -615,9 +732,8 @@ async function serializeAnnotationPages(info, index) {
 }
 
 async function ensureAnnotationStore(rel) {
-  const dir = getAnnotationDir(rel);
-  await fs.promises.mkdir(dir, { recursive: true });
-  return dir;
+  await ensureAnnotationWritable(rel);
+  return getAnnotationDir(rel);
 }
 
 async function loadAnnotationIndex(rel) {
@@ -636,7 +752,17 @@ async function loadAnnotationIndex(rel) {
 async function saveAnnotationIndex(rel, index) {
   const indexPath = getAnnotationIndexPath(rel);
   const payload = JSON.stringify({ rel, pages: index.pages || {} }, null, 2);
-  await fs.promises.writeFile(indexPath, payload, "utf8");
+  await ensureAnnotationWritable(rel);
+  try {
+    await fs.promises.writeFile(indexPath, payload, "utf8");
+  } catch (err) {
+    if (err && err.code === "EACCES") {
+      await ensureAnnotationWritable(rel);
+      await fs.promises.writeFile(indexPath, payload, "utf8");
+    } else {
+      throw err;
+    }
+  }
 }
 
 async function ensureAnnotationBase(info) {
@@ -1956,11 +2082,35 @@ function registerApiRoutes() {
 // =============================================================================
 
 app.post("/api/auth/login", loginLimiter || ((req, res, next) => next()), (req, res) => {
+  console.log('[LOGIN] Request received:', { 
+    body: req.body ? 'present' : 'missing',
+    contentType: req.headers['content-type'],
+    bodyKeys: req.body ? Object.keys(req.body) : []
+  });
+  
   if (!authService) {
+    console.log('[LOGIN] Auth service unavailable');
     return res.status(503).json({ error: "Auth service unavailable" });
   }
   const { email, password } = req.body || {};
+  
+  // DEBUG: Log password details (first/last char only for security)
+  const pwDebug = password ? {
+    length: password.length,
+    first: password.charAt(0),
+    last: password.charAt(password.length - 1),
+    hasSpaces: password.includes(' '),
+    hasNewlines: password.includes('\n') || password.includes('\r'),
+    trimmedLength: password.trim().length
+  } : 'missing';
+  
+  console.log('[LOGIN] Credentials:', { 
+    email: email ? email.substring(0, 3) + '***@' + (email.split('@')[1] || '?') : 'missing',
+    passwordDebug: pwDebug
+  });
+  
   if (typeof email !== "string" || !email.trim() || typeof password !== "string" || !password) {
+    console.log('[LOGIN] Invalid credentials format');
     return res.status(400).json({ error: "INVALID_CREDENTIALS" });
   }
 
@@ -1978,6 +2128,12 @@ app.post("/api/auth/login", loginLimiter || ((req, res, next) => next()), (req, 
   }
 
   const record = authService.getUserByEmail(email);
+  console.log('[LOGIN] User lookup:', { 
+    found: !!record, 
+    email: email.substring(0, 3) + '***',
+    isActive: record?.isActive
+  });
+  
   if (!record) {
     recordFailedLogin(email);
     return res.status(401).json({ error: "INVALID_CREDENTIALS" });
@@ -1988,6 +2144,8 @@ app.post("/api/auth/login", loginLimiter || ((req, res, next) => next()), (req, 
   }
 
   const valid = authService.verifyPassword(password, record.passwordEncrypted);
+  console.log('[LOGIN] Password verification:', { valid });
+  
   if (!valid) {
     recordFailedLogin(email);
     return res.status(401).json({ error: "INVALID_CREDENTIALS" });
@@ -4017,12 +4175,59 @@ app.get("/api/annotations", async (req, res) => {
 
   try {
     await ensureAnnotationStore(info.rel);
-    const index = await loadAnnotationIndex(info.rel);
-    const pages = await serializeAnnotationPages(info, index);
+    await ensureAnnotationPermissions(info.rel);
+    let index = await loadAnnotationIndex(info.rel);
+    let pages = await serializeAnnotationPages(info, index);
     let historyEntries = [];
     try {
       historyEntries = await listAnnotationSnapshots(info.rel);
     } catch {}
+
+    // Auto-heal: if active annotations are empty but snapshots exist, restore latest snapshot
+    if (!pages.length) {
+      const latestSnapshot = historyEntries.length ? historyEntries[historyEntries.length - 1] : null;
+      if (latestSnapshot && latestSnapshot.dir) {
+        try {
+          await withAnnotationLock(info.rel, async () => {
+            // Re-check inside the lock to avoid races with concurrent saves
+            await ensureAnnotationPermissions(info.rel);
+            const currentIndex = await loadAnnotationIndex(info.rel);
+            const currentPages = await serializeAnnotationPages(info, currentIndex);
+            if (currentPages.length) {
+              pages = currentPages;
+              return;
+            }
+
+            const snapshotIndex = await loadSnapshotIndex(latestSnapshot);
+            const snapshotPages = snapshotIndex?.pages || {};
+            const snapshotKeys = Object.keys(snapshotPages)
+              .map((key) => Number(key))
+              .filter((num) => Number.isInteger(num) && num > 0);
+            if (!snapshotKeys.length) return;
+
+            // Restore missing annotation PNGs from the snapshot
+            for (const key of snapshotKeys) {
+              const src = path.join(latestSnapshot.dir, `page-${key}.png`);
+              const dest = getAnnotationPagePath(info.rel, key);
+              try {
+                await fs.promises.copyFile(src, dest);
+              } catch (copyErr) {
+                if (copyErr && copyErr.code === "ENOENT") continue;
+                throw copyErr;
+              }
+            }
+
+            const restoredIndex = { rel: info.rel, pages: snapshotPages };
+            await saveAnnotationIndex(info.rel, restoredIndex);
+            await rebuildPdfFromAnnotations(info, restoredIndex);
+            pages = await serializeAnnotationPages(info, restoredIndex);
+          });
+        } catch (restoreErr) {
+          logError("Annotation auto-restore failed", restoreErr, { rel: info.rel, snapshot: latestSnapshot?.name });
+        }
+      }
+    }
+
     const st = await statSafe(info.abs);
     res.setHeader("Cache-Control", "no-store");
     res.json({
@@ -4038,7 +4243,10 @@ app.get("/api/annotations", async (req, res) => {
     });
   } catch (err) {
     console.error("Annotation fetch failed:", err);
-    res.status(500).json({ error: "Failed to read annotations" });
+    const message = err && err.code === "EANNOT_PERM"
+      ? "Annotationspeicher ist nicht beschreibbar. Bitte Dateiberechtigungen prüfen."
+      : "Failed to read annotations";
+    res.status(500).json({ error: message });
   }
 });
 
@@ -4066,6 +4274,7 @@ app.post("/api/annotations/save", async (req, res) => {
 
   try {
     await withAnnotationLock(info.rel, async () => {
+      await ensureAnnotationPermissions(info.rel);
       await ensureAnnotationStore(info.rel);
       const index = await loadAnnotationIndex(info.rel);
       const pages = index.pages;
@@ -4106,8 +4315,12 @@ app.post("/api/annotations/save", async (req, res) => {
             
             // Check decoded size (prevent memory exhaustion)
             const estimatedSize = (base64.length * 3) / 4;
-            if (estimatedSize > 10 * 1024 * 1024) { // 10 MB limit per page
-              throw new Error(`Annotation too large for page ${pageNumber} (max 10MB)`);
+            if (estimatedSize > MAX_ANNOTATION_UPLOAD_BYTES) { // limit per page
+              const err = new Error(`Annotation too large for page ${pageNumber} (max ${(MAX_ANNOTATION_UPLOAD_BYTES / (1024 * 1024)).toFixed(1)}MB)`);
+              err.code = "E_OVERLAY_TOO_LARGE";
+              err.bytes = estimatedSize;
+              err.pageNumber = pageNumber;
+              throw err;
             }
           }
         }
@@ -4212,6 +4425,18 @@ app.post("/api/annotations/save", async (req, res) => {
     }
     
     // Send sanitized error (no internal details to client)
+    if (err.code === "E_OVERLAY_TOO_LARGE") {
+      const mb = Math.max(1, Math.round((err.bytes || 0) / (1024 * 1024)));
+      const limitMb = Math.round(MAX_ANNOTATION_UPLOAD_BYTES / (1024 * 1024));
+      const message = `Notiz zu groß (${mb}MB, Limit ${limitMb}MB) – bitte geringere Auflösung oder weniger Zoom verwenden.`;
+      return sendError(res, 413, message, err, 'Annotation save');
+    }
+
+    if (err.code === "EANNOT_PERM") {
+      const message = 'Keine Schreibrechte im Annotationsordner (data/annotations). Bitte Berechtigungen korrigieren (z.B. chown/chmod).';
+      return sendError(res, 500, message, err, 'Annotation save');
+    }
+
     const userMessage = err.message && err.message.includes('backup snapshot')
       ? 'Failed to create backup. Please try again.'
       : err.message && err.message.includes('Invalid')
@@ -4240,6 +4465,7 @@ app.post("/api/annotations/undo", async (req, res) => {
   let result = null;
   try {
     await withAnnotationLock(info.rel, async () => {
+      await ensureAnnotationPermissions(info.rel);
       await ensureAnnotationStore(info.rel);
       const snapshot = await getLatestAnnotationSnapshot(info.rel);
       if (!snapshot) {
@@ -4291,6 +4517,9 @@ app.post("/api/annotations/undo", async (req, res) => {
     });
   } catch (err) {
     console.error("Annotation undo failed:", err);
+    if (err && err.code === "EANNOT_PERM") {
+      return res.status(500).json({ error: "Annotationspeicher ist nicht beschreibbar. Bitte Berechtigungen prüfen." });
+    }
     return res.status(500).json({ error: "Failed to restore annotations" });
   }
 
@@ -4385,6 +4614,9 @@ app.post("/api/annotations/reset", async (req, res) => {
     res.json({ ok: true, mtime: st ? st.mtimeMs : null, size: st ? st.size : null });
   } catch (err) {
     console.error("Annotation reset failed:", err);
+    if (err && err.code === "EANNOT_PERM") {
+      return res.status(500).json({ error: "Annotationspeicher ist nicht beschreibbar. Bitte Berechtigungen prüfen." });
+    }
     res.status(500).json({ error: "Failed to reset annotations" });
   }
 });
@@ -5207,27 +5439,27 @@ function csrfProtection(req, res, next) {
   }
   
   // Skip CSRF for login endpoint (no session yet)
-  if (req.path === '/auth/login') {
+  if (req.path === '/api/auth/login' || req.path === '/auth/login') {
     return next();
   }
   
   // Skip CSRF for anonymous page view tracking
-  if (req.path === '/stats/pageview') {
+  if (req.path === '/api/stats/pageview' || req.path === '/stats/pageview') {
     return next();
   }
   
   // Skip CSRF for batch share info endpoint (makes many requests)
-  if (req.path === '/share/info/batch') {
+  if (req.path === '/api/share/info/batch' || req.path === '/share/info/batch') {
     return next();
   }
   
   // Skip CSRF for playlist current index updates (frequent navigation)
-  if (req.path.match(/^\/playlists\/[^\/]+\/items\/current$/)) {
+  if (req.path.match(/^\/api\/playlists\/[^\/]+\/items\/current$/) || req.path.match(/^\/playlists\/[^\/]+\/items\/current$/)) {
     return next();
   }
   
   // Skip CSRF for playlist activation (frequent switching between playlists)
-  if (req.path.match(/^\/playlists\/[^\/]+\/activate$/)) {
+  if (req.path.match(/^\/api\/playlists\/[^\/]+\/activate$/) || req.path.match(/^\/playlists\/[^\/]+\/activate$/)) {
     return next();
   }
   
@@ -5272,6 +5504,12 @@ function csrfProtection(req, res, next) {
     await ensureVendors(); 
   } catch { 
     console.warn("Vendor prefetch failed – will lazy-fetch on demand"); 
+  }
+  try {
+    await fs.promises.mkdir(ANNOTATIONS_DIR, { recursive: true, mode: 0o777 });
+    await fs.promises.access(ANNOTATIONS_DIR, fs.constants.W_OK);
+  } catch (err) {
+    console.warn("[ANNOTATION] Annotations root is not writable:", err?.message || err);
   }
   try {
     authService = await createAuthService({ dataDir: DATA_DIR, logger: console });

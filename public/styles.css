@@ -11,21 +11,22 @@
 
 /* Dynamic viewport height - works with iOS/iPad Safari toolbar */
 html, body { 
-  height: 100dvh; 
-  height: 100%; /* Fallback for older browsers */
+  height: 100%; 
+  height: 100dvh; /* Dynamic viewport height - shrinks when Safari shows toolbars */
 }
 
 body {
   background: linear-gradient(145deg, color-mix(in srgb, var(--accent-color) 10%, var(--surface-0)) 0%, var(--surface-0) 55%, var(--surface-1) 100%);
   transition: background 0.4s ease;
-  min-height: 100vh;
+  min-height: 0; /* Allow shrinking */
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
 
 main#app {
-  flex: 1 1 auto;
+  flex: 1 1 0; /* Take all available space, can shrink */
+  min-height: 0; /* Critical for flex children to shrink properly */
   width: 100%;
   display: flex;
   flex-direction: column;
@@ -38,7 +39,9 @@ main#app {
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 
 /* iOS smoother programmatic scrolling */
-#viewer { -webkit-overflow-scrolling: touch; }
+#viewer { 
+  -webkit-overflow-scrolling: touch;
+}
 
 .card:hover { transform: translateY(-2px); }
 
@@ -48,9 +51,10 @@ main#app {
 :root {
   --sat: env(safe-area-inset-top, 0px);
   --sab: env(safe-area-inset-bottom, 0px);
-  /* Control bar always needs space from bottom - unified across all modes */
-  --control-bar-height: 80px;
-  --control-bar-margin: 16px;
+  /* Control bar sizing - single source of truth */
+  --control-bar-height: 120px; /* Approximate height including padding */
+  --control-bottom-spacing: 8px; /* Minimal aesthetic spacing from screen edge */
+  --control-top-margin: 16px;    /* Space above control panel (scroll clearance) */
 }
 
 /* In fullscreen hide header and add top safe padding to viewer */
@@ -688,7 +692,7 @@ button.grid.place-items-center svg {
   overflow: hidden;
 }
 
-/* Safari-specific fixes */
+/* Safari-specific fixes - simplified for reliability */
 @supports (-webkit-touch-callout: none) {
   #mainHeader {
     -webkit-transform: translateZ(0);
@@ -702,6 +706,11 @@ button.grid.place-items-center svg {
   
   #app {
     -webkit-font-smoothing: antialiased;
+  }
+  
+  /* Safari: use -webkit-fill-available but let content handle padding */
+  body.in-viewer {
+    height: -webkit-fill-available;
   }
 }
 
@@ -796,7 +805,36 @@ button.grid.place-items-center svg {
 
 /* ===== VIEWER MODE STYLES ===== */
 body.in-viewer {
-  background: linear-gradient(145deg, #050506 0%, #0a0a0b 100%);
+  background: #050506;
+  overflow: hidden;
+  /* Viewport-Höhe mit dvh für Safari Toolbar-Anpassung */
+  height: 100vh;
+  height: 100dvh;
+  width: 100vw;
+  margin: 0;
+  padding: 0;
+}
+
+body.in-viewer main#app {
+  padding: 0 !important;
+  max-width: none;
+  width: 100%;
+  /* Volle Höhe MINUS Control-Bar-Höhe */
+  height: calc(100vh - 130px);
+  height: calc(100dvh - 130px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  margin: 0;
+}
+
+/* Viewer container - transparent, nimmt verfügbaren Platz */
+body.in-viewer #viewer {
+  flex: 1 1 0;
+  min-height: 0;
+  background: transparent;
+  border: none;
+  border-radius: 0;
 }
 
 /* Hide header completely in viewer mode for maximum space */
@@ -811,22 +849,25 @@ body.in-viewer #headerSpacer {
 #viewerShell {
   display: flex;
   flex-direction: column;
-  height: 100%;
   gap: 0;
+  overflow: hidden;
+  /* Volle Höhe - explizit für iPad Safari */
+  height: 100%;
+  width: 100%;
+  position: relative;
 }
 
 #viewerContent {
-  flex: 1;
+  flex: 1 1 0;
   display: flex;
   flex-direction: column;
   min-height: 0;
   padding: 0;
-  /* CRITICAL: Always leave space for the control bar at bottom */
-  padding-bottom: calc(var(--control-bar-height) + var(--control-bar-margin) + var(--sab));
+  overflow: hidden;
 }
 
 #viewerPdfContainer {
-  flex: 1;
+  flex: 1 1 0;
   min-height: 0;
   position: relative;
   border-radius: 0;
@@ -843,6 +884,11 @@ body.in-viewer #headerSpacer {
   overflow-y: auto;
   overflow-x: hidden;
   scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch; /* Wichtig für iOS smooth scrolling */
+  /* Kein Extra-Padding nötig - Controls sind jetzt Teil des Flex-Layouts */
+  padding-bottom: 24px;
+  padding-top: 16px;
+  box-sizing: border-box;
 }
 
 #viewerTapHints {
@@ -1189,18 +1235,34 @@ body.in-viewer #headerSpacer {
 }
 
 /* ============================================
-   CONTROL BAR - UNIFIED ACROSS ALL MODES
+   CONTROL BAR - POSITION WIRD VON JAVASCRIPT GESETZT
+   CSS definiert nur das Aussehen, JS setzt top/bottom
    ============================================ */
 #controls {
   position: fixed;
   left: 0;
   right: 0;
   bottom: 0;
+  padding: 8px 16px 12px 16px;
   z-index: 70;
-  /* Use padding to create space from bottom edge + safe area */
-  padding: 0 var(--control-bar-margin) calc(var(--control-bar-margin) + var(--sab));
-  background: transparent;
+  background: transparent; /* Komplett transparent */
   pointer-events: none;
+  box-sizing: border-box;
+}
+
+/* Hide controls in library mode */
+#controls.hidden {
+  display: none;
+}
+
+/* Show controls when in viewer */
+body.in-viewer #controls {
+  display: block !important;
+}
+
+/* Fullscreen mode */
+html.is-fs #controls {
+  background: transparent;
 }
 
 #controlsInner {
@@ -1219,7 +1281,7 @@ body.in-viewer #headerSpacer {
   background: linear-gradient(120deg, color-mix(in srgb, var(--accent-color) 16%, rgba(15, 18, 26, 0.92)) 0%, rgba(15, 18, 26, 0.88) 100%);
   border: 1px solid rgba(148, 163, 184, 0.15);
   border-radius: 18px;
-  padding: 0.75rem 1.1rem;
+  padding: 0.6rem 1rem; /* slightly tighter to reduce overall height */
   box-shadow: 
     0 18px 40px -18px rgba(0, 0, 0, 0.7),
     0 8px 24px -8px rgba(0, 0, 0, 0.4),
@@ -1229,7 +1291,7 @@ body.in-viewer #headerSpacer {
   gap: 0.75rem;
   align-items: center;
   justify-content: space-between;
-  min-height: 60px; /* Ensure sufficient height */
+  min-height: 56px; /* leaner footprint */
 }
 
 .control-panel-left {
@@ -1673,14 +1735,9 @@ body.in-viewer #headerSpacer {
 
 /* iPad / Tablet specific styles (768px - 1024px) */
 @media (min-width: 641px) and (max-width: 1024px) {
-  :root {
-    --control-bar-margin: 20px;
-    --control-bar-height: 90px;
-  }
-  
   .control-panel {
-    padding: 0.7rem 1rem;
-    border-radius: 16px;
+    padding: 0.6rem 0.95rem;
+    border-radius: 15px;
     background: linear-gradient(120deg, 
       color-mix(in srgb, var(--accent-color) 20%, rgba(15, 18, 26, 0.95)) 0%, 
       rgba(15, 18, 26, 0.92) 100%);
@@ -1690,30 +1747,33 @@ body.in-viewer #headerSpacer {
       0 0 0 1px rgba(255, 255, 255, 0.05) inset;
     backdrop-filter: blur(32px) saturate(180%);
     -webkit-backdrop-filter: blur(32px) saturate(180%);
+    flex-wrap: wrap;
+    gap: 0.5rem;
   }
   
   .control-panel-left,
   .control-panel-center,
   .control-panel-right {
-    gap: 0.6rem;
+    gap: 0.5rem;
+    flex-wrap: wrap;
   }
   
   /* Make buttons slightly larger for better touch targets */
   .btn {
-    padding: 0.55rem 1rem;
-    font-size: 0.875rem;
-    min-height: 44px; /* Apple's recommended minimum touch target */
+    padding: 0.45rem 0.85rem;
+    font-size: 0.8rem;
+    min-height: 38px;
   }
   
   .btn-icon {
-    padding: 0.5rem;
-    min-width: 44px;
-    min-height: 44px;
+    padding: 0.45rem;
+    min-width: 38px;
+    min-height: 38px;
   }
   
   /* Ensure annotation toolbar is visible */
   #annotationToolbar {
-    margin-bottom: 0.7rem;
+    margin-bottom: 0.6rem;
   }
   
   .annotation-toolbar {
@@ -1723,11 +1783,8 @@ body.in-viewer #headerSpacer {
     border: 1.5px solid rgba(148, 163, 184, 0.16);
     backdrop-filter: blur(28px) saturate(180%);
     -webkit-backdrop-filter: blur(28px) saturate(180%);
-  }
-  
-  /* Ensure viewer content doesn't overlap controls */
-  #viewerContent {
-    padding-bottom: calc(var(--control-bar-height) + var(--control-bar-margin) + var(--sab));
+    padding: 0.55rem 0.75rem;
+    gap: 0.4rem;
   }
 }
 
@@ -1764,18 +1821,8 @@ body.in-viewer #headerSpacer {
     display: none; /* Hide text on mobile, keep icons */
   }
   
-  #viewerContent {
-    padding: 0;
-    padding-bottom: calc(var(--control-bar-height) + var(--control-bar-margin) + var(--sab));
-  }
-  
   #viewerPdfContainer {
     border-radius: 0;
-  }
-  
-  :root {
-    --control-bar-margin: 12px;
-    --control-bar-height: 100px; /* More height for wrapped controls on mobile */
   }
 
   #controlsInner {

@@ -24,6 +24,10 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
     highlightAlpha: 0.35
   };
 
+  // Keep payloads well below server limit to avoid 500s on large zoom levels
+  const MAX_UPLOAD_BYTES = 9 * 1024 * 1024; // server rejects at 10MB
+  const MAX_COMPRESSION_ATTEMPTS = 3;
+
   const controls = {
     initialized: false,
     root: null,
@@ -325,6 +329,42 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
     canvas.style.height = `${Math.max(1, Math.round(cssHeight || height || 0))}px`;
   }
 
+  function estimateBase64Size(dataUrl) {
+    if (!dataUrl || typeof dataUrl !== "string") return 0;
+    const idx = dataUrl.indexOf(",");
+    const base64 = idx >= 0 ? dataUrl.slice(idx + 1) : dataUrl;
+    return Math.floor((base64.length * 3) / 4);
+  }
+
+  function scaleCanvas(source, scale) {
+    const target = document.createElement("canvas");
+    target.width = Math.max(1, Math.round(source.width * scale));
+    target.height = Math.max(1, Math.round(source.height * scale));
+    const ctx = target.getContext("2d");
+    ctx.drawImage(source, 0, 0, source.width, source.height, 0, 0, target.width, target.height);
+    return target;
+  }
+
+  function serializeCanvasPngLimited(canvas) {
+    if (!canvas || !canvas.width || !canvas.height) return null;
+
+    let current = canvas;
+    let dataUrl = current.toDataURL("image/png");
+    let sizeBytes = estimateBase64Size(dataUrl);
+
+    for (let attempt = 0; attempt < MAX_COMPRESSION_ATTEMPTS && sizeBytes > MAX_UPLOAD_BYTES; attempt += 1) {
+      const shrinkRatio = Math.sqrt(MAX_UPLOAD_BYTES / Math.max(1, sizeBytes));
+      // Prevent endless loops when the size is only slightly over the limit
+      const safeRatio = Math.min(0.95, shrinkRatio);
+      const scaled = scaleCanvas(current, safeRatio);
+      current = scaled;
+      dataUrl = current.toDataURL("image/png");
+      sizeBytes = estimateBase64Size(dataUrl);
+    }
+
+    return dataUrl;
+  }
+
   function handlePointerDown(event, entry) {
     if (!active || !fileName) return;
     if (event.pointerType === "mouse" && event.button !== 0) return;
@@ -504,7 +544,7 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
       if (entry.commitCanvas && entry.needsUpload) {
         if (!isCanvasEmpty(entry.commitCanvas)) {
           try {
-            dataUrl = entry.commitCanvas.toDataURL("image/png");
+            dataUrl = serializeCanvasPngLimited(entry.commitCanvas);
           } catch (err) {
             console.warn("Annotation serialization failed", err);
           }
@@ -557,7 +597,17 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
       });
 
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+        let serverMessage = null;
+        try {
+          const payload = await response.json();
+          if (payload && typeof payload.error === "string") {
+            serverMessage = payload.error;
+          }
+        } catch {}
+        const err = new Error(serverMessage ? serverMessage : `HTTP ${response.status}`);
+        err.status = response.status;
+        err.userMessage = serverMessage;
+        throw err;
       }
 
       let result = null;
@@ -578,7 +628,10 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
       }
     } catch (err) {
       console.error("Annotation save failed", err);
-      showStatus("Speichern fehlgeschlagen", 2000);
+      const message = typeof err?.userMessage === "string" && err.userMessage.trim()
+        ? err.userMessage
+        : "Speichern fehlgeschlagen";
+      showStatus(message, 2000);
       items.forEach(({ entry }) => {
         pendingPages.add(entry.pageNumber);
       });

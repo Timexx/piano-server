@@ -27,8 +27,8 @@
     <script src="/jump-markers.js" defer></script>
     <script src="/auth-status.js" defer></script>
 
-    <!-- Styles -->
-    <link rel="stylesheet" href="/styles.css">
+    <!-- Styles - Cache busting with timestamp -->
+    <link rel="stylesheet" href="/styles.css?v=20251218-1820">
   </head>
   <body class="min-h-screen bg-neutral-950 text-neutral-100 antialiased tap-highlight-none">
     <!-- Toast Container for notifications -->
@@ -62,8 +62,32 @@
     <!-- Main app mount point -->
     <main id="app" class="mx-auto max-w-7xl px-4 sm:px-6 pt-3 pb-6"></main>
 
-    <!-- Viewer Controls - Modern Glassmorphism Design -->
-    <div id="controls" class="hidden">
+    <script>
+      // Control-Bar Position mit JavaScript erzwingen (iPad Safari Fix)
+      function fixControlBarPosition() {
+        const controls = document.getElementById('controls');
+        if (!controls) return;
+        
+        const isViewer = document.body.classList.contains('in-viewer');
+        if (!isViewer) {
+          controls.style.bottom = '';
+          controls.style.top = '';
+          return;
+        }
+        
+        const vh = window.innerHeight;
+        const ctrlHeight = controls.offsetHeight || 100;
+        controls.style.bottom = 'auto';
+        controls.style.top = (vh - ctrlHeight) + 'px';
+      }
+      
+      setInterval(fixControlBarPosition, 200);
+      window.addEventListener('resize', fixControlBarPosition);
+      window.addEventListener('orientationchange', () => setTimeout(fixControlBarPosition, 100));
+    </script>
+
+    <!-- Viewer Controls -->
+    <div id="controls">
       <div id="controlsInner">
         <div id="annotationControls">
           <div id="annotationToolbar" class="annotation-toolbar" aria-hidden="true">
@@ -663,10 +687,7 @@
               state.viewer.wakeLock.addEventListener?.('release', () => {
                 state.viewer.wakeLock = null;
                 setWakeBtn(false);
-                if (document.body.classList.contains('in-viewer')) {
-                  // try to re-acquire silently
-                  acquireWakeLockAuto();
-                }
+                // Do NOT try to re-acquire automatically - needs user gesture
               });
             }
             if (state.viewer.wakeDesired) setWakeBtn(true);
@@ -675,9 +696,6 @@
         } catch (e) {
           // Silently fail - WakeLock permission not granted or not supported
           // This is expected behavior and not an error
-          if (e.name !== 'NotAllowedError') {
-            console.warn('WakeLock.request failed:', e.name);
-          }
         }
         // Fallback: NoSleep.js (must be created from a user gesture on iOS)
         try {
@@ -691,10 +709,7 @@
             return true;
           }
         } catch (e) {
-          // Silently fail - needs user gesture
-          if (e.name !== 'NotAllowedError') {
-            console.warn('NoSleep.enable failed:', e.name);
-          }
+          // Silently fail - needs user gesture on iOS/iPad
         }
         return false;
       }
@@ -712,10 +727,7 @@
             if (state.viewer.wakeDesired) setWakeBtn(true);
           }
         } catch (e) {
-          // Silently fail - needs user gesture
-          if (e.name !== 'NotAllowedError') {
-            console.warn('NoSleep sync activation failed:', e.name);
-          }
+          // Silently fail - needs user gesture on iOS/iPad
         }
         // Wake Lock API async im Hintergrund
         if ('wakeLock' in navigator && !state.viewer.wakeLock) {
@@ -6297,7 +6309,12 @@
           }
         }, 1000);
 
+        // FORCE show controls - beide Methoden für maximale Kompatibilität
         controlsEl.classList.remove("hidden");
+        controlsEl.style.display = "block";
+        controlsEl.style.visibility = "visible";
+        controlsEl.style.opacity = "1";
+        console.log("🎛️ Controls forced visible");
   updateZoomUI();
         
         headerActionsEl.innerHTML = `
@@ -6661,6 +6678,10 @@
         }
         
     await mountPdfVirtual(container, state.viewer.url);
+    
+    // Control-Bar ist jetzt Teil des Flex-Layouts - kein dynamisches Padding nötig
+    // Das Layout ist: body > main#app > #viewerShell > #viewer + #controls (am Ende)
+    
     annotations.refreshOverlayActivation();
         await new Promise((resolve) => requestAnimationFrame(resolve));
         computeSpeed();

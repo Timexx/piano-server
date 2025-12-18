@@ -395,21 +395,31 @@ function pumpQueue() {
 
 // ===== Viewer =====
 async function renderViewer(fileName) {
+  console.log("🎼 renderViewer called with:", fileName);
+  
+  // WICHTIG: Viewer-Modus aktivieren - entfernt Header, passt Layout an
+  document.body.classList.add("in-viewer");
+  console.log("✓ Added in-viewer class");
+  
   controlsEl.classList.remove("hidden");
+  console.log("✓ Controls shown (removed hidden)");
+  
   headerActionsEl.innerHTML = `<a href="/" class="px-3 py-2 rounded-lg bg-neutral-800 hover:bg-neutral-700 border border-neutral-700">← Library</a>`;
 
+  // Viewer nimmt den gesamten verfügbaren Platz ein (flex: 1)
+  // Kein festes vh - flexbox regelt die Höhe automatisch
   appEl.innerHTML = `
-    <section>
-      <h1 class="sr-only">Viewer ${fileName}</h1>
-      <div id="viewer" class="vh no-scrollbar overflow-y-auto rounded-xl border border-neutral-800 bg-neutral-900"></div>
-    </section>
+    <div id="viewer" class="flex-1 min-h-0 no-scrollbar overflow-y-auto"></div>
   `;
 
   const container = $("#viewer");
   state.viewer.fileName = fileName;
   state.viewer.url = `/sheets/${encodeURIComponent(fileName)}`;
 
-  $("#btnBack").onclick = () => (location.href = "/");
+  $("#btnBack").onclick = () => {
+    document.body.classList.remove("in-viewer");
+    location.href = "/";
+  };
   $("#btnFullscreen").onclick = toggleFullscreen;
   $("#btnWakeLock").onclick = toggleWakeLock;
 
@@ -443,8 +453,58 @@ async function renderViewer(fileName) {
 
   updateStatus("Lade…");
   await mountPdfVirtual(container, state.viewer.url);
+  
+  // KRITISCH: Control-Bar Positionierung basierend auf echtem Viewport
+  try {
+    adjustViewerPadding();
+  } catch (e) {
+    console.error("Error positioning control bar:", e);
+  }
+  
+  window.addEventListener("resize", () => {
+    try {
+      adjustViewerPadding();
+    } catch (e) {
+      console.error("Error in resize handler:", e);
+    }
+  }, { passive: true });
+  
+  // Auch bei Orientierungswechsel neu berechnen (wichtig für iPad)
+  window.addEventListener("orientationchange", () => {
+    setTimeout(() => {
+      try {
+        adjustViewerPadding();
+      } catch (e) {
+        console.error("Error in orientation handler:", e);
+      }
+    }, 100); // Kurze Verzögerung damit iOS das Layout aktualisiert hat
+  }, { passive: true });
+  
   updateStatus();
   refreshPlayPauseUI();
+
+  function adjustViewerPadding() {
+    const viewer = document.getElementById("viewer");
+    if (!viewer) {
+      console.warn("Viewer element not found");
+      return;
+    }
+    
+    const controlsInner = document.getElementById("controlsInner");
+    const ctrlHeight = controlsInner?.offsetHeight || 0;
+    
+    // Safe-Area-Bottom ermitteln (für iPhone/iPad mit Home-Indikator)
+    const safeAreaBottom = parseInt(
+      getComputedStyle(document.documentElement).getPropertyValue('--sab') || '0',
+      10
+    ) || 0;
+    
+    // Höhe = Control-Panel-Höhe + Safe-Area + Puffer
+    const padding = ctrlHeight + safeAreaBottom + 24;
+    viewer.style.paddingBottom = padding + "px";
+    
+    console.log(`📐 Viewer padding adjusted: ${padding}px (controls: ${ctrlHeight}px, safe-area: ${safeAreaBottom}px)`);
+  }
 }
 
 // Virtualized pages
@@ -460,7 +520,9 @@ async function mountPdfVirtual(container, url) {
   state.viewer.numPages = pdf.numPages;
 
   const wrap = document.createElement("div");
-  wrap.className = "w-full flex flex-col items-center gap-4 py-6";
+  wrap.className = "w-full flex flex-col items-center gap-1";
+  wrap.dataset.viewerWrap = "1";
+  wrap.style.paddingBottom = "0";
   container.innerHTML = ""; container.appendChild(wrap);
 
   let pageH = 1400;
@@ -623,9 +685,21 @@ function updateStatus(extra) {
 
 // ===== Fullscreen & Wake Lock =====
 async function toggleFullscreen() {
-  const el = document.fullscreenElement;
-  if (el) { await document.exitFullscreen(); return; }
-  try { await document.documentElement.requestFullscreen(); } catch {}
+  const el = document.fullscreenElement || document.webkitFullscreenElement;
+  if (el) { 
+    if (document.exitFullscreen) await document.exitFullscreen();
+    else if (document.webkitExitFullscreen) await document.webkitExitFullscreen();
+  } else {
+    try { 
+      const docEl = document.documentElement;
+      if (docEl.requestFullscreen) await docEl.requestFullscreen();
+      else if (docEl.webkitRequestFullscreen) await docEl.webkitRequestFullscreen();
+    } catch {}
+  }
+  // Kurze Verzögerung, dann Control-Bar Position aktualisieren
+  setTimeout(() => {
+    window.dispatchEvent(new Event("resize"));
+  }, 100);
 }
 async function toggleWakeLock() {
   const btn = $("#btnWakeLock");
