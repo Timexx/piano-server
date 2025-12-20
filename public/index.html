@@ -2515,6 +2515,10 @@
         annotations.leaveViewer();
         closeMobileActionSheet();
         document.body.classList.remove('in-viewer');
+        
+        // Restore app element classes for library mode
+        appEl.classList.add('mx-auto', 'max-w-7xl', 'px-4', 'sm:px-6', 'pt-3', 'pb-6');
+        
         // Ensure fullscreen is exited when returning to library
         if (document.fullscreenElement) {
           try { document.exitFullscreen(); } catch {}
@@ -5377,6 +5381,10 @@
 
   function renderPlaylistLibrary() {
     document.body.classList.remove('in-viewer');
+    
+    // Restore app element classes for library mode
+    appEl.classList.add('mx-auto', 'max-w-7xl', 'px-4', 'sm:px-6', 'pt-3', 'pb-6');
+    
     setUploadButtonVisible(true);
     headerActionsEl.innerHTML = '';
     controlsEl.classList.add('hidden');
@@ -5592,6 +5600,10 @@
       // Neue Funktion: Playlist-Detail-Seite
   async function renderPlaylistDetail(playlistId) {
     document.body.classList.remove('in-viewer');
+    
+    // Restore app element classes for library mode
+    appEl.classList.add('mx-auto', 'max-w-7xl', 'px-4', 'sm:px-6', 'pt-3', 'pb-6');
+    
     setUploadButtonVisible(true);
     headerActionsEl.innerHTML = '';
     controlsEl.classList.add('hidden');
@@ -6685,6 +6697,11 @@
         try { closePlaylistManager(); } catch {}
         disposeLibraryViewportSizing();
         document.body.classList.add('in-viewer');
+        
+        // Reset app element styles for viewer mode - remove library padding/margins
+        appEl.classList.remove('mx-auto', 'max-w-7xl', 'px-4', 'sm:px-6', 'pt-3', 'pb-6');
+        appEl.style.cssText = ''; // Clear any inline styles from library
+        
         setUploadButtonVisible(false);
         state.viewer.wakeDesired = true;
         
@@ -7199,6 +7216,15 @@
         updateStatus();
         refreshPlayPauseUI();
         
+        // Restore dual mode preference if landscape and has multiple pages
+        try {
+          const savedDualMode = localStorage.getItem('viewer.dualMode');
+          if (savedDualMode === '1' && isLandscapeMode() && (state.viewer.numPages || 0) > 1) {
+            // Small delay to ensure PDF is fully rendered before switching
+            setTimeout(() => toggleDualMode(true), 100);
+          }
+        } catch {}
+        
         // Start periodic memory monitoring in viewer
         const memoryCheckInterval = setInterval(() => {
           checkMemoryPressure();
@@ -7692,8 +7718,12 @@
           flash = document.createElement('div');
           flash.className = 'dual-tap-overlay';
           flash.innerHTML = `
-            <div class="dual-tap-hint dual-tap-hint--left"></div>
-            <div class="dual-tap-hint dual-tap-hint--right"></div>
+            <div class="dual-tap-hint dual-tap-hint--left">
+              <div class="dual-tap-button">‹</div>
+            </div>
+            <div class="dual-tap-hint dual-tap-hint--right">
+              <div class="dual-tap-button">›</div>
+            </div>
           `;
           dual.appendChild(flash);
         }
@@ -7859,13 +7889,17 @@
             state.viewer.numPages || state.viewer._pdf?.numPages || 1
           );
           if (nextPage === state.viewer.currentPage) return;
-          // Visual feedback
+          // Visual feedback - same style as single page mode
           const flash = dual.querySelector(isRight ? '.dual-tap-hint--right' : '.dual-tap-hint--left');
           if (flash) {
             flash.classList.remove('is-active');
+            flash.classList.add('is-visible');
             void flash.offsetWidth;
             flash.classList.add('is-active');
-            setTimeout(() => flash.classList.remove('is-active'), 260);
+            setTimeout(() => {
+              flash.classList.remove('is-active');
+              flash.classList.remove('is-visible');
+            }, 420);
           }
           renderDualSpread(nextPage).catch(() => {});
         };
@@ -7873,6 +7907,25 @@
         dual.addEventListener('pointerup', handler);
         dual.addEventListener('click', handler);
         dual.dataset.tapHandlerAttached = '1';
+        
+        // Show intro animation like single page mode
+        showDualTapZoneIntro(dual);
+      }
+      
+      function showDualTapZoneIntro(dual) {
+        if (!dual) return;
+        const left = dual.querySelector('.dual-tap-hint--left');
+        const right = dual.querySelector('.dual-tap-hint--right');
+        if (!left || !right) return;
+        
+        // Show hints briefly on entry
+        left.classList.add('is-visible');
+        right.classList.add('is-visible');
+        
+        setTimeout(() => {
+          left.classList.remove('is-visible');
+          right.classList.remove('is-visible');
+        }, 2500);
       }
 
       async function toggleDualMode(forceEnable = null) {
@@ -7937,6 +7990,12 @@
         if (btn) {
           btn.setAttribute('aria-pressed', state.viewer.dualMode ? 'true' : 'false');
         }
+        
+        // Persist dual mode preference
+        try {
+          localStorage.setItem('viewer.dualMode', state.viewer.dualMode ? '1' : '0');
+        } catch {}
+        
         const playBtn = document.querySelector('#btnPlayPause');
         if (playBtn) {
           playBtn.disabled = state.viewer.dualMode;
