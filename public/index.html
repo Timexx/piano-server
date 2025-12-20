@@ -511,7 +511,8 @@
   let uploadBtn = null;
   let mobileActionSheetCleanup = null;
 
-      const ZOOM_STORAGE_KEY = "viewer.zoom";
+      const ZOOM_STORAGE_KEY_SINGLE = "viewer.zoom.single";
+      const ZOOM_STORAGE_KEY_DUAL = "viewer.zoom.dual";
       const MIN_ZOOM = 0.6;
       const MAX_ZOOM = 2.0;
       const ZOOM_STEP = 0.05;
@@ -532,14 +533,16 @@
         return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.round(snapped * 100) / 100));
       }
 
-      function loadStoredZoom() {
-        const saved = Number(localStorage.getItem(ZOOM_STORAGE_KEY));
+      function loadStoredZoom(isDualMode = false) {
+        const key = isDualMode ? ZOOM_STORAGE_KEY_DUAL : ZOOM_STORAGE_KEY_SINGLE;
+        const saved = Number(localStorage.getItem(key));
         if (!Number.isFinite(saved)) return 1;
         return clampZoom(saved);
       }
 
-      function persistZoom(value) {
-        try { localStorage.setItem(ZOOM_STORAGE_KEY, value.toFixed(2)); } catch {}
+      function persistZoom(value, isDualMode = false) {
+        const key = isDualMode ? ZOOM_STORAGE_KEY_DUAL : ZOOM_STORAGE_KEY_SINGLE;
+        try { localStorage.setItem(key, value.toFixed(2)); } catch {}
       }
 
       function zoomToPercent(value) {
@@ -1460,7 +1463,7 @@
     annotations.initControls();
     window.annotations = annotations;
 
-    state.viewer.zoom = loadStoredZoom();
+    state.viewer.zoom = loadStoredZoom(false); // Startet immer im Single Mode
     state.viewer.committedZoom = state.viewer.zoom;
     state.viewer.zoomPreview = null;
     updateZoomUI();
@@ -1733,7 +1736,7 @@
           state.viewer.zoom = clamped;
           state.viewer.zoomPreview = null;
           state.viewer.zoomVersion += 1;
-          persistZoom(clamped);
+          persistZoom(clamped, state.viewer.dualMode);
         } else if (!force) {
           state.viewer.zoomPreview = null;
           updateZoomUI();
@@ -8018,6 +8021,12 @@
           clearAnnotationLayers(viewer);
           state.viewer.currentPage = getCurrentPageFromScroll();
           state.viewer.dualMode = true;
+          
+          // Lade Dual Mode Zoom
+          const dualZoom = loadStoredZoom(true);
+          state.viewer.zoom = dualZoom;
+          updateZoomUI();
+          
           viewer.classList.add('hidden');
           viewer.setAttribute('aria-hidden', 'true');
           viewer.style.display = 'none';
@@ -8039,6 +8048,12 @@
         } else {
           clearAnnotationLayers(dual);
           state.viewer.dualMode = false;
+          
+          // Lade Single Mode Zoom
+          const singleZoom = loadStoredZoom(false);
+          state.viewer.zoom = singleZoom;
+          updateZoomUI();
+          
           dual.classList.add('hidden');
           dual.style.display = 'none';
           dual.setAttribute('aria-hidden', 'true');
@@ -8056,8 +8071,20 @@
           // Play-Button wieder anzeigen
           controlsEl.classList.remove('dual-mode-active');
           teardownDualTapZones();
-          scrollToPage(state.viewer.currentPage, 'auto');
-          setupTapZones();
+          
+          // WICHTIG: Komplettes Re-Rendering für saubere Darstellung
+          // Reset alle Seiten-Rendering State und lade PDF neu
+          if (state.viewer.url) {
+            await mountPdfVirtual(viewer, state.viewer.url);
+            // Nach dem Re-Mount zur aktuellen Seite scrollen
+            setTimeout(() => {
+              scrollToPage(state.viewer.currentPage, 'auto');
+              setupTapZones();
+            }, 100);
+          } else {
+            scrollToPage(state.viewer.currentPage, 'auto');
+            setupTapZones();
+          }
         }
 
         if (btn) {
