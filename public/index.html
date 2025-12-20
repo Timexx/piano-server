@@ -7887,7 +7887,6 @@
       function teardownDualTapZones() {
         const dual = document.querySelector('#dualViewer');
         if (!dual || !dual.dataset.tapHandlerAttached) return;
-        dual.removeEventListener('pointerup', dual._tapHandler);
         dual.removeEventListener('click', dual._tapHandler);
         delete dual._tapHandler;
         delete dual.dataset.tapHandlerAttached;
@@ -7907,21 +7906,22 @@
           const totalPages = state.viewer.numPages || state.viewer._pdf?.numPages || 1;
           const currentLeft = state.viewer.currentPage;
           
-          // Im Dual Mode: +2/-2 Seiten pro Blättern
-          // Bei rechts: Zeige nächstes Paar (aktuelle Linke + 2)
-          // Bei links: Zeige vorheriges Paar (aktuelle Linke - 2)
+          // Im Dual Mode: +1/-1 Seite pro Blättern (wie echtes Notenheft)
+          // Rechts: Rechte Seite wird links, neue Seite rechts
+          // Links: Linke Seite wird rechts, neue Seite links
           let nextPage;
           if (isRight) {
-            // Nächstes Paar - aber nur wenn es noch ungesehene Seiten gibt
-            // Aktuell zeigen wir currentLeft und currentLeft+1
-            // Wenn currentLeft + 1 >= totalPages, sind wir am Ende
+            // Nächste Seite - aber nur wenn rechte Seite nicht schon die letzte ist
             if (currentLeft + 1 >= totalPages) {
-              return; // Schon auf der letzten Ansicht, nicht weiter blättern
+              return; // Rechte Seite ist bereits die letzte
             }
-            nextPage = Math.min(currentLeft + 2, totalPages);
+            nextPage = currentLeft + 1;
           } else {
-            // Vorheriges Paar
-            nextPage = Math.max(1, currentLeft - 2);
+            // Vorherige Seite - aber nur wenn wir nicht schon bei Seite 1 sind
+            if (currentLeft <= 1) {
+              return; // Bereits auf der ersten Seite
+            }
+            nextPage = currentLeft - 1;
           }
           
           if (nextPage === state.viewer.currentPage) return;
@@ -7940,7 +7940,7 @@
           renderDualSpread(nextPage).catch(() => {});
         };
         dual._tapHandler = handler;
-        dual.addEventListener('pointerup', handler);
+        // Nur click verwenden, nicht pointerup - sonst doppeltes Auslösen
         dual.addEventListener('click', handler);
         dual.dataset.tapHandlerAttached = '1';
         
