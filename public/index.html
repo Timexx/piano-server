@@ -1546,7 +1546,7 @@
       }
 
       function adjustScrollForZoom(prevZoom, newZoom, focal) {
-        if (!focal) return;
+        if (!focal || state.viewer.dualMode) return;
         const viewerEl = document.querySelector('#viewer');
         if (!viewerEl) return;
         if (!Number.isFinite(prevZoom) || prevZoom <= 0) return;
@@ -1571,57 +1571,84 @@
 
       function applyZoomPreviewLayout(zoom) {
         if (!document.body.classList.contains('in-viewer')) return;
-        const container = document.querySelector('#viewer');
-        if (!container) return;
-        const placeholders = Array.from(container.querySelectorAll('[data-page]'));
+        
+        const containers = [];
+        const viewer = document.querySelector('#viewer');
+        if (viewer) containers.push(viewer);
+        const dualViewer = document.querySelector('#dualViewer');
+        if (dualViewer && !dualViewer.classList.contains('hidden')) containers.push(dualViewer);
+
         let lastBlockHeight = null;
         let lastScaledHeight = null;
         let lastStageWidth = null;
         let lastLabelAllowance = null;
 
-        for (const ph of placeholders) {
-          if (!(ph instanceof HTMLElement)) continue;
-          if (ph.dataset.rendered !== '1') continue;
-          const stage = ph.querySelector('[data-role="page-stage"]');
-          if (!stage) continue;
-          const canvas = stage.querySelector('canvas[data-role="pdf-canvas"]');
-          if (!canvas) continue;
-          const baseWidth = Number(canvas.dataset.baseWidth);
-          const baseHeight = Number(canvas.dataset.baseHeight);
-          if (!Number.isFinite(baseWidth) || !Number.isFinite(baseHeight)) continue;
+        for (const container of containers) {
+          const placeholders = Array.from(container.querySelectorAll('[data-page], .dual-page'));
+          for (const ph of placeholders) {
+            if (!(ph instanceof HTMLElement)) continue;
+            // In dual mode we don't have data-rendered=1 but we have the canvas
+            const isDual = ph.classList.contains('dual-page');
+            if (!isDual && ph.dataset.rendered !== '1') continue;
 
-          const scaledWidth = Math.max(1, Math.round(baseWidth * zoom));
-          const scaledHeight = Math.max(1, Math.round(baseHeight * zoom));
+            const stage = ph.querySelector('[data-role="page-stage"]');
+            if (!stage) continue;
+            const canvas = stage.querySelector('canvas[data-role="pdf-canvas"]');
+            if (!canvas) continue;
+            const baseWidth = Number(canvas.dataset.baseWidth);
+            const baseHeight = Number(canvas.dataset.baseHeight);
+            if (!Number.isFinite(baseWidth) || !Number.isFinite(baseHeight)) continue;
 
-          stage.style.width = `${scaledWidth}px`;
-          stage.style.minWidth = `${scaledWidth}px`;
-          stage.style.maxWidth = 'none';
-          stage.style.height = `${scaledHeight}px`;
-          canvas.style.width = `${scaledWidth}px`;
-          canvas.style.height = `${scaledHeight}px`;
+            const scaledWidth = Math.max(1, Math.round(baseWidth * zoom));
+            const scaledHeight = Math.max(1, Math.round(baseHeight * zoom));
 
-          const overlayLayers = stage.querySelectorAll('canvas.annotation-layer, canvas.annotation-committed');
-          overlayLayers.forEach((layer) => {
-            layer.style.width = `${scaledWidth}px`;
-            layer.style.height = `${scaledHeight}px`;
-          });
+            if (isDual) {
+              // For dual mode: only resize the canvas, leave the stage as a flexible centering container
+              // This prevents asymmetric shifts since the stage stays at 100% height with align-items: center
+              canvas.style.width = `${scaledWidth}px`;
+              canvas.style.height = `${scaledHeight}px`;
 
-          const labelAllowance = Number(stage.dataset.labelAllowance) || Number(ph.dataset.labelAllowance) || (() => {
-            const label = ph.querySelector('[data-role="page-label"]');
-            return label ? label.offsetHeight + 16 : 48;
-          })();
+              const overlayLayers = stage.querySelectorAll('canvas.annotation-layer, canvas.annotation-committed');
+              overlayLayers.forEach((layer) => {
+                layer.style.width = `${scaledWidth}px`;
+                layer.style.height = `${scaledHeight}px`;
+              });
+              continue;
+            }
 
-          const blockHeight = scaledHeight + labelAllowance;
-          ph.style.height = `${blockHeight}px`;
-          ph.style.minHeight = `${blockHeight}px`;
-          ph.dataset.blockHeight = String(blockHeight);
-          ph.dataset.renderedHeight = String(blockHeight);
-          ph.dataset.labelAllowance = String(labelAllowance);
+            // Single page mode: resize stage and canvas
+            stage.style.width = `${scaledWidth}px`;
+            stage.style.minWidth = `${scaledWidth}px`;
+            stage.style.maxWidth = 'none';
+            stage.style.height = `${scaledHeight}px`;
+            canvas.style.width = `${scaledWidth}px`;
+            canvas.style.height = `${scaledHeight}px`;
 
-          lastBlockHeight = blockHeight;
-          lastScaledHeight = scaledHeight;
-          lastStageWidth = scaledWidth;
-          lastLabelAllowance = labelAllowance;
+            const overlayLayers = stage.querySelectorAll('canvas.annotation-layer, canvas.annotation-committed');
+            overlayLayers.forEach((layer) => {
+              layer.style.width = `${scaledWidth}px`;
+              layer.style.height = `${scaledHeight}px`;
+            });
+
+            if (isDual) continue; // Dual mode doesn't use block heights/labels
+
+            const labelAllowance = Number(stage.dataset.labelAllowance) || Number(ph.dataset.labelAllowance) || (() => {
+              const label = ph.querySelector('[data-role="page-label"]');
+              return label ? label.offsetHeight + 16 : 48;
+            })();
+
+            const blockHeight = scaledHeight + labelAllowance;
+            ph.style.height = `${blockHeight}px`;
+            ph.style.minHeight = `${blockHeight}px`;
+            ph.dataset.blockHeight = String(blockHeight);
+            ph.dataset.renderedHeight = String(blockHeight);
+            ph.dataset.labelAllowance = String(labelAllowance);
+
+            lastBlockHeight = blockHeight;
+            lastScaledHeight = scaledHeight;
+            lastStageWidth = scaledWidth;
+            lastLabelAllowance = labelAllowance;
+          }
         }
 
         if (Number.isFinite(lastBlockHeight)) {
@@ -1641,14 +1668,15 @@
       }
 
       function getViewerCenterFocal() {
-        const viewerEl = document.querySelector('#viewer');
+        const isDual = state.viewer.dualMode;
+        const viewerEl = document.querySelector(isDual ? '#dualViewer' : '#viewer');
         if (!viewerEl) return null;
         const offsetX = viewerEl.clientWidth / 2;
         const offsetY = viewerEl.clientHeight / 2;
         return {
-          contentX: viewerEl.scrollLeft + offsetX,
+          contentX: (isDual ? 0 : viewerEl.scrollLeft) + offsetX,
           viewportOffsetX: offsetX,
-          contentY: viewerEl.scrollTop + offsetY,
+          contentY: (isDual ? 0 : viewerEl.scrollTop) + offsetY,
           viewportOffsetY: offsetY
         };
       }
@@ -6825,7 +6853,8 @@
         setupTapZones();
 
         // Pinch-to-Zoom Gesten-Steuerung für Tablets - flüssige Vorschau + Fokus-Erhalt
-        (function setupPinchZoom() {
+        const setupPinchZoom = (targetContainer) => {
+          if (!targetContainer) return;
           let pinchState = {
             active: false,
             initialDistance: 0,
@@ -6842,9 +6871,13 @@
           };
 
           const computeFocal = (touches) => {
-            const viewerRect = container.getBoundingClientRect();
-            const scrollTop = container.scrollTop;
-            const scrollLeft = container.scrollLeft;
+            // Dual viewer has fixed layout - no scroll adjustments needed
+            const isDual = targetContainer.id === 'dualViewer';
+            if (isDual) return null;
+
+            const viewerRect = targetContainer.getBoundingClientRect();
+            const scrollTop = targetContainer.scrollTop;
+            const scrollLeft = targetContainer.scrollLeft;
             if (touches.length < 2) return pinchState.focal;
             const centerX = (touches[0].clientX + touches[1].clientX) / 2;
             const centerY = (touches[0].clientY + touches[1].clientY) / 2;
@@ -6914,6 +6947,8 @@
             pinchState.lastZoom = null;
             pinchState.focal = null;
             state.viewer.autoScroll.userAdjusting = false;
+            // Set cooldown to prevent tap-to-page from firing after pinch
+            state.viewer.pinchCooldownUntil = Date.now() + 400;
           };
 
           const handleTouchEnd = (e) => {
@@ -6933,13 +6968,19 @@
             pinchState.lastZoom = null;
             pinchState.focal = null;
             state.viewer.autoScroll.userAdjusting = false;
+            // Set cooldown to prevent tap-to-page from firing after pinch
+            state.viewer.pinchCooldownUntil = Date.now() + 400;
           };
 
-          container.addEventListener('touchstart', handleTouchStart, { passive: false, capture: true });
-          container.addEventListener('touchmove', handleTouchMove, { passive: false, capture: true });
-          container.addEventListener('touchend', handleTouchEnd, { passive: false, capture: true });
-          container.addEventListener('touchcancel', handleTouchCancel, { passive: false, capture: true });
-        })();
+          targetContainer.addEventListener('touchstart', handleTouchStart, { passive: false, capture: true });
+          targetContainer.addEventListener('touchmove', handleTouchMove, { passive: false, capture: true });
+          targetContainer.addEventListener('touchend', handleTouchEnd, { passive: false, capture: true });
+          targetContainer.addEventListener('touchcancel', handleTouchCancel, { passive: false, capture: true });
+        };
+
+        setupPinchZoom(container);
+        const dualViewerEl = document.querySelector('#dualViewer');
+        if (dualViewerEl) setupPinchZoom(dualViewerEl);
 
         const prefs = await getFilePrefsFromBackend(fileName);
         state.viewer.secsPerPage = prefs?.secsPerPage || 45;
@@ -7732,6 +7773,9 @@
         canvas.style.width = `${finalDisplayWidth}px`;
         canvas.style.height = `${finalDisplayHeight}px`;
         canvas.className = 'dual-page-canvas';
+        canvas.dataset.role = 'pdf-canvas';
+        canvas.dataset.baseWidth = String(unscaled.width * baseScale);
+        canvas.dataset.baseHeight = String(unscaled.height * baseScale);
 
         const ctx = canvas.getContext('2d', { alpha: false, desynchronized: true });
         await page.render({
@@ -7743,9 +7787,10 @@
         stage.innerHTML = '';
         stage.style.display = 'flex';
         stage.style.justifyContent = 'center';
-        stage.style.alignItems = 'flex-start';
-        stage.style.minWidth = `${finalDisplayWidth}px`;
-        stage.style.minHeight = `${finalDisplayHeight}px`;
+        stage.style.alignItems = 'center';
+        // Don't set minWidth/minHeight - let the stage be a flexible container
+        // that centers the canvas. This prevents asymmetric shifts during zoom.
+        stage.dataset.role = 'page-stage';
         stage.appendChild(canvas);
 
         // Remove any residual annotation layers before reattaching to avoid duplicates
@@ -7803,6 +7848,8 @@
         const handler = (event) => {
           if (!state.viewer.dualMode) return;
           if (event.type === 'pointerup' && event.pointerType === 'mouse' && event.button !== 0) return;
+          // Ignore taps during/after pinch-zoom to prevent accidental page turns
+          if (state.viewer.pinchCooldownUntil && Date.now() < state.viewer.pinchCooldownUntil) return;
           const rect = dual.getBoundingClientRect();
           const x = event.clientX;
           const isRight = x > rect.left + rect.width / 2;
