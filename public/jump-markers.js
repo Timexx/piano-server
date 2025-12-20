@@ -19,6 +19,7 @@
     editButton: null,
     toggleEditHandler: null,
     viewerEl: null,
+    dualViewerEl: null,
     panelDrag: null,
     resizeHandlerBound: false,
     connectTimer: null,
@@ -455,21 +456,77 @@
     return document.querySelector("#viewer");
   }
 
+  function getDualViewer() {
+    return document.querySelector("#dualViewer");
+  }
+
+  function isDualModeActive() {
+    return Boolean(state.viewer?.dualMode);
+  }
+
   function getPageElement(pageNumber) {
-    return document.querySelector(`[data-page="${pageNumber}"]`);
+    // Single Mode: Finde [data-page="N"]
+    const singleEl = document.querySelector(`[data-page="${pageNumber}"]`);
+    if (singleEl) return singleEl;
+    
+    // Dual Mode: Finde .dual-page mit renderedPage = pageNumber
+    const dualViewer = getDualViewer();
+    if (dualViewer && !dualViewer.classList.contains('hidden')) {
+      const slots = dualViewer.querySelectorAll('.dual-page');
+      for (const slot of slots) {
+        if (String(slot.dataset.renderedPage) === String(pageNumber)) {
+          return slot;
+        }
+      }
+    }
+    return null;
   }
 
   function getPageStage(pageNumber) {
-    const root = getPageElement(pageNumber);
-    if (!root) return null;
-    return root.querySelector('[data-role="page-stage"]') || root;
+    // Check Dual Mode FIRST - if dual viewer is visible, use it
+    const dualViewer = getDualViewer();
+    if (dualViewer && !dualViewer.classList.contains('hidden') && dualViewer.style.display !== 'none') {
+      const slots = dualViewer.querySelectorAll('.dual-page');
+      for (const slot of slots) {
+        if (String(slot.dataset.renderedPage) === String(pageNumber)) {
+          // Return the canvas wrapper if it exists (for proper marker positioning relative to canvas)
+          // Otherwise return the stage itself
+          const stage = slot.querySelector('.dual-page-stage');
+          if (stage) {
+            const wrapper = stage.querySelector('.dual-canvas-wrapper');
+            return wrapper || stage;
+          }
+        }
+      }
+      // In dual mode but page not currently rendered - return null
+      return null;
+    }
+    
+    // Single Mode - only if dual viewer is hidden
+    const root = document.querySelector(`[data-page="${pageNumber}"]`);
+    if (root) {
+      return root.querySelector('[data-role="page-stage"]') || root;
+    }
+    
+    return null;
   }
 
   function getPageNumberFromElement(el) {
+    // Single Mode: [data-page]
     const pageEl = el?.closest("[data-page]");
-    if (!pageEl) return null;
-    const num = Number(pageEl.dataset.page);
-    return Number.isFinite(num) ? num : null;
+    if (pageEl) {
+      const num = Number(pageEl.dataset.page);
+      return Number.isFinite(num) ? num : null;
+    }
+    
+    // Dual Mode: .dual-page[data-rendered-page] oder slot mit renderedPage
+    const dualPage = el?.closest(".dual-page");
+    if (dualPage && dualPage.dataset.renderedPage) {
+      const num = Number(dualPage.dataset.renderedPage);
+      return Number.isFinite(num) ? num : null;
+    }
+    
+    return null;
   }
 
   function clampPercent(value) {
@@ -720,6 +777,9 @@
 
   function bindViewerElement() {
     const viewer = getViewer();
+    const dualViewer = getDualViewer();
+    
+    // Bind Single Mode Viewer
     if (uiState.viewerEl && uiState.viewerEl !== viewer) {
       uiState.viewerEl.removeEventListener("click", handleViewerClick, true);
       uiState.viewerEl = null;
@@ -727,6 +787,16 @@
     if (viewer && uiState.viewerEl !== viewer) {
       viewer.addEventListener("click", handleViewerClick, true);
       uiState.viewerEl = viewer;
+    }
+    
+    // Bind Dual Mode Viewer
+    if (uiState.dualViewerEl && uiState.dualViewerEl !== dualViewer) {
+      uiState.dualViewerEl.removeEventListener("click", handleViewerClick, true);
+      uiState.dualViewerEl = null;
+    }
+    if (dualViewer && uiState.dualViewerEl !== dualViewer) {
+      dualViewer.addEventListener("click", handleViewerClick, true);
+      uiState.dualViewerEl = dualViewer;
     }
   }
 
@@ -741,7 +811,9 @@
   function tryConnectViewer() {
     if (!state.viewer?.fileName) return false;
     const viewer = getViewer();
-    if (!viewer) return false;
+    const dualViewer = getDualViewer();
+    // Verbinde wenn entweder Single oder Dual Viewer vorhanden ist
+    if (!viewer && !dualViewer) return false;
     connectToViewer();
     return true;
   }
@@ -870,10 +942,14 @@
     const placement = uiState.placement;
     if (!placement) return;
     if (event.target.closest(".jump-marker-overlay")) return;
+    
+    // Finde Canvas in Single oder Dual Mode
     const canvas = event.target.closest("canvas");
     if (!canvas) return;
+    
     event.preventDefault();
     event.stopPropagation();
+    
     const pageNumber = getPageNumberFromElement(canvas);
     if (!pageNumber) return;
     const coords = getRelativeCoordinates(event, canvas);
@@ -911,9 +987,16 @@
   }
 
   function createOverlay(pair, role, point) {
-    if (!isPoint(point)) return null;
+    if (!isPoint(point)) {
+      console.log('[JumpMarkers] createOverlay: point invalid for', pair.label, role);
+      return null;
+    }
     const stageEl = getPageStage(point.pageNumber);
-    if (!stageEl) return null;
+    console.log('[JumpMarkers] createOverlay: page', point.pageNumber, 'stageEl:', stageEl?.className || null);
+    if (!stageEl) {
+      console.log('[JumpMarkers] createOverlay: no stageEl for page', point.pageNumber);
+      return null;
+    }
     if (window.getComputedStyle(stageEl).position === "static") {
       stageEl.style.position = "relative";
     }
@@ -954,9 +1037,11 @@
     ensureStyles();
     document.querySelectorAll(".jump-marker-overlay").forEach((el) => el.remove());
     const markers = getMarkers();
+    console.log('[JumpMarkers] renderAllMarkers called, markers:', markers.length, 'dualMode:', isDualModeActive());
     markers.forEach((pair) => {
-      createOverlay(pair, "source", pair.source);
-      createOverlay(pair, "target", pair.target);
+      const srcOverlay = createOverlay(pair, "source", pair.source);
+      const tgtOverlay = createOverlay(pair, "target", pair.target);
+      console.log('[JumpMarkers] Created overlays for pair:', pair.label, 'source:', !!srcOverlay, 'target:', !!tgtOverlay);
     });
   }
 
@@ -1158,6 +1243,22 @@
   }
 
   function scrollToPoint(point) {
+    // Dual Mode: Navigiere zur Seite statt zu scrollen
+    if (isDualModeActive()) {
+      const targetPage = point.pageNumber;
+      if (typeof window.renderDualSpread === "function") {
+        window.renderDualSpread(targetPage);
+      } else if (state.viewer && typeof state.viewer.currentPage !== "undefined") {
+        // Fallback: Setze currentPage und triggere renderDualSpread über globale Funktion
+        state.viewer.currentPage = targetPage;
+        // Versuche die Funktion zu finden
+        const event = new CustomEvent("jumpmarker-navigate", { detail: { pageNumber: targetPage } });
+        window.dispatchEvent(event);
+      }
+      return;
+    }
+    
+    // Single Mode: Scroll zum Punkt
     const viewer = getViewer();
     const pageEl = getPageElement(point.pageNumber);
     if (!viewer || !pageEl) return;

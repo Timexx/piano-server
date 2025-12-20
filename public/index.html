@@ -133,6 +133,13 @@
 
       let lastExpandedControlsHeight = 160;
 
+      function updateExpandedHeightIfVisible() {
+        const controls = document.getElementById('controls');
+        if (controls && !controls.classList.contains('controls-minimized')) {
+          measureExpandedHeight();
+        }
+      }
+
       function syncControlBarLayout() {
         const controls = document.getElementById('controls');
         const controlsInner = document.getElementById('controlsInner');
@@ -7765,11 +7772,11 @@
           // Volle Höhe, zentriert, ohne Lücke
           inner.style.cssText = 'display: flex; flex-direction: row; width: 100%; height: 100%; gap: 0; padding: 0; align-items: center; justify-content: center; overflow: hidden;';
           inner.innerHTML = `
-            <div class="dual-page" data-side="left" style="flex: 0 1 auto; height: 100%; display: flex; align-items: center; justify-content: flex-end; padding: 0; margin: 0; overflow: hidden;">
-              <div class="dual-page-stage" style="height: 100%; display: flex; justify-content: center; align-items: center; overflow: hidden; margin: 0;"></div>
+            <div class="dual-page" data-side="left" style="flex: 0 1 auto; height: 100%; display: flex; align-items: center; justify-content: flex-end; padding: 0; margin: 0; overflow: visible;">
+              <div class="dual-page-stage" style="height: 100%; display: flex; justify-content: center; align-items: center; overflow: visible; margin: 0;"></div>
             </div>
-            <div class="dual-page" data-side="right" style="flex: 0 1 auto; height: 100%; display: flex; align-items: center; justify-content: flex-start; padding: 0; margin: 0; overflow: hidden;">
-              <div class="dual-page-stage" style="height: 100%; display: flex; justify-content: center; align-items: center; overflow: hidden; margin: 0;"></div>
+            <div class="dual-page" data-side="right" style="flex: 0 1 auto; height: 100%; display: flex; align-items: center; justify-content: flex-start; padding: 0; margin: 0; overflow: visible;">
+              <div class="dual-page-stage" style="height: 100%; display: flex; justify-content: center; align-items: center; overflow: visible; margin: 0;"></div>
             </div>
           `;
           dual.appendChild(inner);
@@ -7880,10 +7887,20 @@
         stage.style.display = 'flex';
         stage.style.justifyContent = 'center';
         stage.style.alignItems = 'center';
+        stage.style.overflow = 'visible'; // Allow jump markers to overflow
         // Don't set minWidth/minHeight - let the stage be a flexible container
         // that centers the canvas. This prevents asymmetric shifts during zoom.
         stage.dataset.role = 'page-stage';
-        stage.appendChild(canvas);
+        
+        // Create a wrapper for canvas + markers to keep markers positioned relative to canvas
+        const canvasWrapper = document.createElement('div');
+        canvasWrapper.className = 'dual-canvas-wrapper';
+        canvasWrapper.style.position = 'relative';
+        canvasWrapper.style.width = `${finalDisplayWidth}px`;
+        canvasWrapper.style.height = `${finalDisplayHeight}px`;
+        canvasWrapper.style.overflow = 'visible'; // Allow jump markers to overflow
+        canvasWrapper.appendChild(canvas);
+        stage.appendChild(canvasWrapper);
 
         // Remove any residual annotation layers before reattaching to avoid duplicates
         stage.querySelectorAll('.annotation-layer, .annotation-committed').forEach((el) => el.remove());
@@ -7924,6 +7941,17 @@
           window.JumpMarkers.renderAllMarkers();
         }
       }
+      
+      // Expose renderDualSpread globally for JumpMarkers integration
+      window.renderDualSpread = renderDualSpread;
+      
+      // Listen for jump marker navigation events
+      window.addEventListener('jumpmarker-navigate', async (event) => {
+        const pageNumber = event.detail?.pageNumber;
+        if (state.viewer.dualMode && pageNumber) {
+          await renderDualSpread(pageNumber);
+        }
+      });
 
       function teardownDualTapZones() {
         const dual = document.querySelector('#dualViewer');
@@ -8081,10 +8109,18 @@
             setTimeout(() => {
               scrollToPage(state.viewer.currentPage, 'auto');
               setupTapZones();
+              // Sprungmarken nach Seitenwechsel rendern
+              if (window.JumpMarkers?.renderAllMarkers) {
+                window.JumpMarkers.renderAllMarkers();
+              }
             }, 100);
           } else {
             scrollToPage(state.viewer.currentPage, 'auto');
             setupTapZones();
+            // Sprungmarken nach Seitenwechsel rendern
+            if (window.JumpMarkers?.renderAllMarkers) {
+              window.JumpMarkers.renderAllMarkers();
+            }
           }
         }
 
@@ -8404,6 +8440,11 @@
             computeSpeed();
             state.viewer.autoScroll.lastTs = performance.now();
             state.viewer.autoScroll.needsRecalc = state.viewer.autoScroll.speedPxPerSec <= 0.01;
+          }
+          
+          // Sprungmarken für diese Seite rendern
+          if (window.JumpMarkers?.renderAllMarkers) {
+            window.JumpMarkers.renderAllMarkers();
           }
 
           if (i === 1) {

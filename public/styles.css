@@ -3384,7 +3384,7 @@ html.is-fs .control-panel:focus-visible {
   align-items: center;
   max-width: 100%;
   position: relative;
-  overflow: hidden;
+  overflow: visible; /* Changed from hidden to allow jump markers to be visible */
 }
 
 .dual-page-canvas {
@@ -3392,6 +3392,14 @@ html.is-fs .control-panel:focus-visible {
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
+}
+
+.dual-canvas-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: visible; /* Ensure jump markers are visible */
 }
 
 .dual-tap-overlay {
