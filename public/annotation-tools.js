@@ -65,6 +65,10 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
     
     controls.toolbar = document.getElementById("annotationToolbar");
     // console.log('[Annotation] controls.toolbar:', controls.toolbar);
+    if (controls.toolbar && !controls.toolbar.dataset.detachedToBody) {
+      document.body.appendChild(controls.toolbar);
+      controls.toolbar.dataset.detachedToBody = "1";
+    }
 
     controls.sizeInput = document.getElementById("annotationSize");
     controls.sizeValue = document.getElementById("annotationSizeValue");
@@ -73,6 +77,18 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
 
     if (controls.toolbar) {
       controls.toolbar.setAttribute("aria-hidden", controls.toolbar.classList.contains("hidden") ? "true" : "false");
+    }
+
+    // Close annotations automatically when the control bar is minimized
+    const controlsRoot = document.getElementById("controls");
+    if (controlsRoot && typeof MutationObserver === "function") {
+      const mo = new MutationObserver(() => {
+        const minimized = controlsRoot.classList.contains("controls-minimized");
+        if (minimized && active) {
+          setActiveState(false, { silent: true, force: true });
+        }
+      });
+      mo.observe(controlsRoot, { attributes: true, attributeFilter: ["class"] });
     }
 
     const toolButtons = controls.panel ? Array.from(controls.panel.querySelectorAll(".annotation-tool-btn")) : [];
@@ -882,6 +898,13 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
       if (active) showStatus("Notizen aktiv", 1400);
       else updateStatus();
     }
+
+    // Auto-close when controls are minimized (class toggled elsewhere)
+    const controlsRoot = document.getElementById("controls");
+    if (controlsRoot && controlsRoot.classList.contains("controls-minimized") && active) {
+      setActiveState(false, { silent: true, force: true });
+      return;
+    }
   }
 
   function selectTool(tool) {
@@ -920,9 +943,11 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
       // console.log('[Annotation] Toolbar element:', controls.toolbar);
       if (active) {
         controls.toolbar.classList.add("is-open");
+        controls.toolbar.style.display = "flex";
         // console.log('[Annotation] Added is-open class. Toolbar classes:', controls.toolbar.className);
       } else {
         controls.toolbar.classList.remove("is-open");
+        controls.toolbar.style.display = "none";
       }
       controls.toolbar.setAttribute("aria-hidden", active ? "false" : "true");
     }
@@ -974,7 +999,8 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
     leaveViewer,
     attachPageLayer,
     refreshOverlayActivation,
-    onPageLayerRemoved
+    onPageLayerRemoved,
+    isActive: () => active
   };
 
   Object.defineProperty(api, "primeCommittedImage", {

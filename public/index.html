@@ -28,7 +28,7 @@
     <script src="/auth-status.js" defer></script>
 
     <!-- Styles - Cache busting with timestamp -->
-    <link rel="stylesheet" href="/styles.css?v=20251218-1820">
+    <link rel="stylesheet" href="/styles.css?v=20251219-grid">
   </head>
   <body class="min-h-screen bg-neutral-950 text-neutral-100 antialiased tap-highlight-none">
     <!-- Toast Container for notifications -->
@@ -63,32 +63,286 @@
     <main id="app" class="mx-auto max-w-7xl px-4 sm:px-6 pt-3 pb-6"></main>
 
     <script>
-      // Control-Bar Position mit JavaScript erzwingen (iPad Safari Fix)
-      function fixControlBarPosition() {
+      const scheduleControlBarLayout = (() => {
+        let raf = null;
+        return () => {
+          if (raf) return;
+          raf = requestAnimationFrame(() => {
+            raf = null;
+            try {
+              syncControlBarLayout();
+            } catch (err) {
+              console.warn('Control layout sync failed', err);
+            }
+          });
+        };
+      })();
+
+      function getSafeAreaBottom() {
+        const raw = getComputedStyle(document.documentElement).getPropertyValue('--sab');
+        const parsed = parseInt(raw, 10);
+        return Number.isFinite(parsed) ? parsed : 0;
+      }
+
+      function getViewportBottomGap() {
+        try {
+          const vv = window.visualViewport;
+          if (!vv) return 0;
+          const gap = window.innerHeight - (vv.height + vv.offsetTop);
+          return Math.max(0, Math.round(gap));
+        } catch {
+          return 0;
+        }
+      }
+
+      function measureExpandedHeight() {
         const controls = document.getElementById('controls');
-        if (!controls) return;
+        const controlsInner = document.getElementById('controlsInner');
+        if (!controls || !controlsInner) return lastExpandedControlsHeight || 200;
+
+        // If already expanded and visible, read directly
+        if (!controls.classList.contains('controls-minimized') && !controls.classList.contains('hidden')) {
+          const rect = controlsInner.getBoundingClientRect();
+          const h = Math.round(rect.height || controlsInner.scrollHeight || 0);
+          if (h > 0) lastExpandedControlsHeight = h;
+          return lastExpandedControlsHeight || 200;
+        }
+
+        // Otherwise measure with a hidden flip to expanded
+        const wasHidden = controls.classList.contains('hidden');
+        const prevVisibility = controls.style.visibility;
+        const prevPointer = controls.style.pointerEvents;
+
+        controls.style.visibility = 'hidden';
+        controls.style.pointerEvents = 'none';
+        if (wasHidden) controls.classList.remove('hidden');
+        controls.classList.remove('controls-minimized');
+
+        const rect = controlsInner.getBoundingClientRect();
+        const h = Math.round(rect.height || controlsInner.scrollHeight || 0);
+
+        // Restore
+        controls.classList.add('controls-minimized');
+        if (wasHidden) controls.classList.add('hidden');
+        controls.style.visibility = prevVisibility;
+        controls.style.pointerEvents = prevPointer;
+
+        if (h > 0) lastExpandedControlsHeight = h;
+        return lastExpandedControlsHeight || 200;
+      }
+
+      let lastExpandedControlsHeight = 160;
+
+      function syncControlBarLayout() {
+        const controls = document.getElementById('controls');
+        const controlsInner = document.getElementById('controlsInner');
+        if (!controls || !controlsInner) return;
+
+        const safeAreaBottom = getSafeAreaBottom();
+        const viewportGap = getViewportBottomGap();
+        const minimizedHeight = Math.round(controlsInner.getBoundingClientRect().height || 0) || 56;
+        const expandedHeight = measureExpandedHeight();
+
+        const visibleHeight = Math.max(320, (window.visualViewport && window.visualViewport.height) || window.innerHeight || 0);
+
+        const baseLift = 64; // fixed lift above the visible bottom edge
+        const baseOffset = Math.max(baseLift, safeAreaBottom + viewportGap + baseLift);
+
+        const expandedOffset = baseOffset;
+        let minimizedOffset = Math.max(baseOffset, safeAreaBottom + 56, minimizedHeight + safeAreaBottom + 16);
+
+        const padding = Math.max(
+          expandedHeight + expandedOffset + 48,
+          minimizedHeight + minimizedOffset + 48,
+          280
+        );
+
+        document.documentElement.style.setProperty('--controls-height', `${expandedHeight}px`);
+        document.documentElement.style.setProperty('--controls-offset', `${padding}px`);
+        document.documentElement.style.setProperty('--controls-bottom-expanded', `${expandedOffset}px`);
+        document.documentElement.style.setProperty('--controls-bottom-min', `${minimizedOffset}px`);
+        document.documentElement.style.setProperty('--viewport-bottom-gap', `${viewportGap}px`);
+
+        const viewer = document.getElementById('viewer');
+        if (viewer) {
+          viewer.style.paddingBottom = `var(--controls-offset)`;
+        }
+      }
+
+      window.syncControlBarLayout = syncControlBarLayout;
+      window.addEventListener('resize', scheduleControlBarLayout);
+      window.addEventListener('orientationchange', () => {
+        updateExpandedHeightIfVisible();
+        setTimeout(scheduleControlBarLayout, 120);
+      });
+      if (window.visualViewport) {
+        window.visualViewport.addEventListener('resize', scheduleControlBarLayout, { passive: true });
+        window.visualViewport.addEventListener('scroll', scheduleControlBarLayout, { passive: true });
+      }
+
+      // Control-Bar Toggle - einfach die Klasse umschalten
+      function initControlsToggle() {
+        const controls = document.getElementById('controls');
+        const controlsInner = document.getElementById('controlsInner');
         
-        const isViewer = document.body.classList.contains('in-viewer');
-        if (!isViewer) {
-          controls.style.bottom = '';
-          controls.style.top = '';
+        console.log('🎛️ initControlsToggle called');
+        console.log('controls:', controls, 'classes:', controls?.className);
+        console.log('controlsInner:', controlsInner);
+        
+        if (!controls || !controlsInner) {
+          console.error('⚠️ controls or controlsInner not found');
           return;
         }
+
+        const resyncLayout = () => scheduleControlBarLayout();
+        // Seed accurate measurements immediately
+        resyncLayout();
+
+        if (controls.dataset.toggleReady === '1') {
+          resyncLayout();
+          return;
+        }
+        controls.dataset.toggleReady = '1';
         
-        const vh = window.innerHeight;
-        const ctrlHeight = controls.offsetHeight || 100;
-        controls.style.bottom = 'auto';
-        controls.style.top = (vh - ctrlHeight) + 'px';
+        // Direktes Debuggen: klickbar machen
+        console.log('⚙️ Setting up click handlers...');
+        
+        // Öffnen/Schließen: Klick auf das Element
+        const clickHandler = (e) => {
+          const hasMinimized = controls.classList.contains('controls-minimized');
+          console.log('🖱️ controlsInner clicked, minimized:', hasMinimized, 'target:', e.target);
+          
+          if (hasMinimized) {
+            // Im minimierten Zustand: ÖFFNEN
+            e.preventDefault();
+            e.stopPropagation();
+            console.log('📘 Removing controls-minimized class (OPENING)');
+            controls.classList.remove('controls-minimized');
+            console.log('✅ Opened - new classes:', controls.className);
+            updateExpandedHeightIfVisible();
+            resyncLayout();
+          }
+        };
+        
+        controlsInner.addEventListener('click', clickHandler);
+        console.log('✅ Click handler registered on controlsInner');
+        
+        // Close via icon-layer - NUR wenn expandiert!
+        const iconLayer = controlsInner.querySelector('.controls-icon-layer');
+        if (iconLayer) {
+          iconLayer.addEventListener('click', (e) => {
+            const hasMinimized = controls.classList.contains('controls-minimized');
+            console.log('🖱️ iconLayer clicked, minimized:', hasMinimized);
+            
+            // NUR im expandierten Zustand schließen
+            if (!hasMinimized) {
+              e.preventDefault();
+              e.stopPropagation();
+              console.log('📘 Adding controls-minimized class (CLOSING)');
+              controls.classList.add('controls-minimized');
+              console.log('✅ Closed - new classes:', controls.className);
+              updateExpandedHeightIfVisible();
+              resyncLayout();
+            }
+          });
+          console.log('✅ Click handler registered on iconLayer');
+        } else {
+          console.warn('⚠️ iconLayer not found');
+        }
+        
+        // Close via Close-Button
+        const closeBtn = document.getElementById('btnControlsClose');
+        if (closeBtn) {
+          closeBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            controls.classList.add('controls-minimized');
+            updateExpandedHeightIfVisible();
+            resyncLayout();
+          });
+        }
+        
+        // Schließen beim Klick außerhalb
+        document.addEventListener('click', (e) => {
+          if (controls.classList.contains('controls-minimized')) return;
+          
+          // UX: Don't auto-close if annotation mode is active
+          if (window.annotations && typeof window.annotations.isActive === 'function' && window.annotations.isActive()) {
+            return;
+          }
+
+          if (!controlsInner.contains(e.target)) {
+            controls.classList.add('controls-minimized');
+            resyncLayout();
+          }
+        });
+        
+        // Schließen beim Scrollen
+        const viewer = document.getElementById('viewer');
+        if (viewer) {
+          viewer.addEventListener('scroll', () => {
+            if (!controls.classList.contains('controls-minimized')) {
+              // UX: Don't auto-close if annotation mode is active
+              if (window.annotations && typeof window.annotations.isActive === 'function' && window.annotations.isActive()) {
+                return;
+              }
+              controls.classList.add('controls-minimized');
+              resyncLayout();
+            }
+          }, { passive: true });
+        }
+        
+        if (typeof MutationObserver === 'function') {
+          const mo = new MutationObserver(() => {
+            updateExpandedHeightIfVisible();
+            resyncLayout();
+          });
+          mo.observe(controls, { attributes: true, attributeFilter: ['class'] });
+        }
+
+        if (typeof ResizeObserver === 'function') {
+          const ro = new ResizeObserver(() => {
+            updateExpandedHeightIfVisible();
+            resyncLayout();
+          });
+          ro.observe(controlsInner);
+        }
+
+        console.log('🎛️ initControlsToggle setup complete');
+        resyncLayout();
       }
       
-      setInterval(fixControlBarPosition, 200);
-      window.addEventListener('resize', fixControlBarPosition);
-      window.addEventListener('orientationchange', () => setTimeout(fixControlBarPosition, 100));
+      // Initialisiere nach DOM-Load
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initControlsToggle);
+      } else {
+        initControlsToggle();
+      }
+      
+      // Auch nach Navigation/Viewer-Load erneut initialisieren
+      window.initControlsToggle = initControlsToggle;
     </script>
 
-    <!-- Viewer Controls -->
-    <div id="controls">
+    <!-- Viewer Controls - startet versteckt im Library-Modus -->
+    <div id="controls" class="controls-minimized hidden">
+      <!-- Die expandierende Controlbar - Icon wechselt zu X beim Expandieren -->
       <div id="controlsInner">
+        <!-- Icon Layer - zeigt : oder X basierend auf Zustand -->
+        <div class="controls-icon-layer">
+          <!-- Minimiertes Icon (3 Punkte) -->
+          <svg class="icon-minimized" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="22" height="22">
+            <circle cx="12" cy="12" r="1.5"/>
+            <circle cx="12" cy="5" r="1.5"/>
+            <circle cx="12" cy="19" r="1.5"/>
+          </svg>
+          <!-- Expandiertes Icon (X zum Schließen) -->
+          <svg class="icon-expanded" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="20" height="20">
+            <line x1="18" y1="6" x2="6" y2="18"/>
+            <line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </div>
+        
+        <!-- Controls Content - wird sichtbar wenn expandiert -->
+        <div class="controls-content">
         <div id="annotationControls">
           <div id="annotationToolbar" class="annotation-toolbar" aria-hidden="true">
             <div id="annotationPanel" class="annotation-panel" aria-label="PDF-Notizen">
@@ -125,6 +379,7 @@
         </div>
         <div class="control-panel">
           <div class="control-panel-left">
+            
             <section class="control-module">
               <div class="control-module-body">
                 <button id="btnBack" class="btn btn-secondary btn-icon" title="Zurück zur Bibliothek" aria-label="Zurück zur Bibliothek">
@@ -142,7 +397,7 @@
 
             <div class="control-divider" aria-hidden="true"></div>
 
-            <section class="control-module">
+            <section class="control-module dual-hide">
               <div class="control-module-body">
                 <button id="btnPlayPause" class="btn btn-primary" aria-label="Auto-Scroll starten/pausieren">
                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="18" height="18">
@@ -181,9 +436,15 @@
             <div class="control-divider" aria-hidden="true"></div>
           </div>
 
-          <div class="control-panel-right">
+            <div class="control-panel-right">
             <section class="control-module">
               <div class="control-module-body">
+                <button id="btnDualPage" class="btn btn-secondary hidden sm:inline-flex" type="button" aria-pressed="false" title="Dual Page Mode (nur im Querformat)">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true" focusable="false">
+                    <path d="M4 4h7v16H4zM13 4h7v16h-7z"/>
+                  </svg>
+                  <span class="hidden sm:inline">Dual Page</span>
+                </button>
                 <button id="btnEditMarkers" class="btn btn-secondary btn-icon hidden sm:inline-flex" title="Sprungmarkierungen bearbeiten" aria-label="Sprungmarkierungen bearbeiten">
                   <svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="currentColor" aria-hidden="true">
                     <path d="M320-160q-117 0-198.5-81.5T40-440q0-107 70.5-186.5T287-718l-63-66 56-56 160 160-160 160-56-57 59-59q-71 14-117 69t-46 127q0 83 58.5 141.5T320-240h120v80H320Zm200-360v-280h360v280H520Zm0 360v-280h360v280H520Zm80-80h200v-120H600v120Z"/>
@@ -197,6 +458,7 @@
               </div>
             </section>
           </div>
+        </div>
         </div>
       </div>
     </div>
@@ -940,6 +1202,8 @@
           zoomTimer: null,
           zoomControlsReady: false,
           zoomVersion: 0,
+          dualMode: false,
+          currentPage: 1,
           cacheToken: null,
           tapZones: {
             overlay: null,
@@ -1434,6 +1698,9 @@
 
         const viewerActive = document.body.classList.contains('in-viewer') && state.viewer._pdf;
         if (!viewerActive) return;
+        if (state.viewer.dualMode) {
+          renderDualSpread(state.viewer.currentPage).catch(() => {});
+        }
 
         if (immediate || force) {
           applyZoomToPages().catch((err) => console.warn('Zoom update failed', err));
@@ -6439,11 +6706,8 @@
           }
         }, 1000);
 
-        // FORCE show controls - beide Methoden für maximale Kompatibilität
+        // FORCE show controls - entferne hidden Klasse
         controlsEl.classList.remove("hidden");
-        controlsEl.style.display = "block";
-        controlsEl.style.visibility = "visible";
-        controlsEl.style.opacity = "1";
         console.log("🎛️ Controls forced visible");
   updateZoomUI();
         
@@ -6486,15 +6750,32 @@
                     <div class="viewer-loading-text">PDF wird geladen...</div>
                   </div>
                 </div>
+                <div id="dualViewer" class="dual-viewer hidden" aria-hidden="true"></div>
               </div>
             </div>
           </div>
         `;
 
+        // Stelle sicher, dass die Controlbar nach neuem Layout korrekt positioniert wird
+        if (typeof window.syncControlBarLayout === 'function') {
+          window.syncControlBarLayout();
+          requestAnimationFrame(() => window.syncControlBarLayout?.());
+        }
+
         const container = document.querySelector('#viewer');
         state.viewer.fileName = fileName;
         state.viewer.url = null;
   state.viewer.cacheToken = null;
+        state.viewer.dualMode = false;
+        state.viewer.currentPage = 1;
+        const dualBtn = document.querySelector('#btnDualPage');
+        if (dualBtn) {
+          dualBtn.onclick = () => {
+            toggleDualMode().catch((err) => console.warn('Dual mode toggle failed', err));
+          };
+          dualBtn.setAttribute('aria-pressed', 'false');
+        }
+        updateDualModeAvailability();
         resetPdfRefreshState();
         annotations.enterViewer({ fileName });
 
@@ -6809,8 +7090,28 @@
         
     await mountPdfVirtual(container, state.viewer.url);
     
-    // Control-Bar ist jetzt Teil des Flex-Layouts - kein dynamisches Padding nötig
+    // Control-Bar wird jetzt nach jedem Render zyklisch vermessen (syncControlBarLayout)
     // Das Layout ist: body > main#app > #viewerShell > #viewer + #controls (am Ende)
+    
+    // Controls-Toggle für den neuen Viewer initialisieren
+    if (typeof window.initControlsToggle === 'function') {
+      window.initControlsToggle();
+    }
+    
+    // Scroll-Listener für Controls-Minimierung
+    const viewerEl = document.querySelector('#viewer');
+    if (viewerEl) {
+      viewerEl.addEventListener('scroll', () => {
+        const controls = document.getElementById('controls');
+        if (controls && !controls.classList.contains('controls-minimized')) {
+          // UX: Don't auto-close if annotation mode is active
+          if (window.annotations && typeof window.annotations.isActive === 'function' && window.annotations.isActive()) {
+            return;
+          }
+          controls.classList.add('controls-minimized');
+        }
+      }, { passive: true });
+    }
     
     annotations.refreshOverlayActivation();
         await new Promise((resolve) => requestAnimationFrame(resolve));
@@ -7260,6 +7561,346 @@
         }, 2500);
       }
 
+      function isLandscapeMode() {
+        if (window.matchMedia) {
+          const mq = window.matchMedia('(orientation: landscape)');
+          if (mq.matches) return true;
+        }
+        return (window.innerWidth || 0) >= (window.innerHeight || 0);
+      }
+
+      function updateDualModeAvailability() {
+        const btn = document.querySelector('#btnDualPage');
+        const pdfReady = Boolean(state.viewer?._pdf);
+        const hasPages = (state.viewer?.numPages || state.viewer?._pdf?.numPages || 0) > 1;
+        const allowed = isLandscapeMode() && hasPages;
+        const enabled = pdfReady && allowed;
+        if (btn) {
+          btn.classList.toggle('hidden', !allowed);
+          btn.disabled = !enabled;
+          btn.setAttribute('aria-disabled', enabled ? 'false' : 'true');
+          const label = btn.querySelector('span');
+          const active = state.viewer.dualMode;
+          if (label) label.textContent = active ? 'Single Page' : 'Dual Page';
+          btn.title = allowed ? (active ? 'Single Page Mode' : 'Dual Page Mode') : 'Nur im Querformat verfügbar';
+          btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+        }
+        if (!enabled && state.viewer.dualMode) {
+          toggleDualMode(false).catch(() => {});
+        }
+        if (enabled && state.viewer.dualMode) {
+          renderDualSpread(state.viewer.currentPage).catch(() => {});
+        }
+      }
+      window.addEventListener('resize', () => updateDualModeAvailability(), { passive: true });
+      window.addEventListener('orientationchange', () => setTimeout(updateDualModeAvailability, 120), { passive: true });
+
+      function getCurrentPageFromScroll() {
+        const viewer = document.querySelector('#viewer');
+        if (!viewer) return 1;
+        const nodes = Array.from(viewer.querySelectorAll('[data-page]'));
+        if (!nodes.length) return 1;
+        const containerTop = viewer.getBoundingClientRect().top;
+        let closest = { page: 1, distance: Number.POSITIVE_INFINITY };
+        for (const node of nodes) {
+          const pageNum = Number(node.dataset.page);
+          if (!Number.isFinite(pageNum)) continue;
+          const rect = node.getBoundingClientRect();
+          const distance = Math.abs(rect.top - containerTop);
+          if (distance < closest.distance) {
+            closest = { page: pageNum, distance };
+          }
+        }
+        const maxPage = state.viewer.numPages || nodes.length || 1;
+        const page = Math.min(Math.max(1, closest.page || 1), maxPage);
+        return page % 1 === 0 ? page : Math.round(page);
+      }
+
+      function scrollToPage(pageNum, behavior = 'smooth') {
+        const viewer = document.querySelector('#viewer');
+        if (!viewer) return;
+        const target = viewer.querySelector(`[data-page="${pageNum}"]`);
+        if (!target) return;
+        const top = target.offsetTop || 0;
+        viewer.scrollTo({ top: Math.max(0, top - 4), behavior });
+      }
+
+      function ensureDualLayout() {
+        const dual = document.querySelector('#dualViewer');
+        if (!dual) return null;
+        dual.classList.add('dual-viewer-ready');
+        let inner = dual.querySelector('.dual-viewer-inner');
+        if (!inner) {
+          inner = document.createElement('div');
+          inner.className = 'dual-viewer-inner';
+          // Volle Höhe, zentriert, ohne Lücke
+          inner.style.cssText = 'display: flex; flex-direction: row; width: 100%; height: 100%; gap: 0; padding: 0; align-items: center; justify-content: center; overflow: hidden;';
+          inner.innerHTML = `
+            <div class="dual-page" data-side="left" style="flex: 0 1 auto; height: 100%; display: flex; align-items: center; justify-content: flex-end; padding: 0; margin: 0; overflow: hidden;">
+              <div class="dual-page-stage" style="height: 100%; display: flex; justify-content: center; align-items: center; overflow: hidden; margin: 0;"></div>
+            </div>
+            <div class="dual-page" data-side="right" style="flex: 0 1 auto; height: 100%; display: flex; align-items: center; justify-content: flex-start; padding: 0; margin: 0; overflow: hidden;">
+              <div class="dual-page-stage" style="height: 100%; display: flex; justify-content: center; align-items: center; overflow: hidden; margin: 0;"></div>
+            </div>
+          `;
+          dual.appendChild(inner);
+        }
+        // Tap flash overlays
+        let flash = dual.querySelector('.dual-tap-overlay');
+        if (!flash) {
+          flash = document.createElement('div');
+          flash.className = 'dual-tap-overlay';
+          flash.innerHTML = `
+            <div class="dual-tap-hint dual-tap-hint--left"></div>
+            <div class="dual-tap-hint dual-tap-hint--right"></div>
+          `;
+          dual.appendChild(flash);
+        }
+        const left = inner.querySelector('[data-side="left"]');
+        const right = inner.querySelector('[data-side="right"]');
+        const flashLeft = flash.querySelector('.dual-tap-hint--left');
+        const flashRight = flash.querySelector('.dual-tap-hint--right');
+        return { dual, inner, left, right, flashLeft, flashRight };
+      }
+
+      function clearAnnotationLayers(container) {
+        if (!container) return;
+        const pages = container.querySelectorAll('[data-page]');
+        pages.forEach((node) => {
+          const pageNum = Number(node.dataset.page);
+          node.querySelectorAll('.annotation-layer, .annotation-committed').forEach((el) => el.remove());
+          if (Number.isInteger(pageNum) && annotations?.onPageLayerRemoved) {
+            annotations.onPageLayerRemoved(pageNum);
+          }
+        });
+      }
+
+      function getDualTargetSize() {
+        const availableHeight = window.innerHeight;
+        const gutter = 36;
+        const availableWidth = Math.max(200, (window.innerWidth - gutter) / 2);
+        return { 
+          width: Math.max(100, availableWidth), 
+          height: Math.max(100, availableHeight) 
+        };
+      }
+
+      async function renderDualSlot(slot, pageNumber, pdf) {
+        if (!slot) return;
+        const prevPage = Number(slot.dataset.renderedPage);
+        const stage = slot.querySelector('.dual-page-stage');
+        if (Number.isInteger(prevPage)) {
+          annotations.onPageLayerRemoved(prevPage);
+        }
+        if (Number.isInteger(prevPage) && prevPage !== pageNumber) {
+          annotations.onPageLayerRemoved(prevPage);
+        }
+
+        if (!pageNumber || pageNumber > pdf.numPages) {
+          if (stage) {
+            stage.innerHTML = '<div class="dual-viewer-empty">Keine weitere Seite</div>';
+          }
+          if (Number.isInteger(prevPage)) {
+            annotations.onPageLayerRemoved(prevPage);
+          }
+          slot.dataset.renderedPage = '';
+          return;
+        }
+
+        if (!stage) return;
+        
+        const page = await pdf.getPage(pageNumber);
+        const unscaled = page.getViewport({ scale: 1 });
+        const { width: targetWidth, height: targetHeight } = getDualTargetSize();
+        
+        // Skaliere basierend auf der Höhe (volle Höhe nutzen)
+        const scaleByHeight = targetHeight / unscaled.height;
+        const scaleByWidth = targetWidth / unscaled.width;
+        // Wähle den kleineren Scale damit die Seite in beide Dimensionen passt
+        const baseScale = Math.min(scaleByHeight, scaleByWidth);
+        
+        const zoom = state.viewer.zoom || 1;
+        const outputScale = Math.min(window.devicePixelRatio || 1, 2);
+        const renderViewport = page.getViewport({ scale: baseScale * zoom });
+        
+        const finalDisplayWidth = Math.round(renderViewport.width);
+        const finalDisplayHeight = Math.round(renderViewport.height);
+
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.floor(renderViewport.width * outputScale));
+        canvas.height = Math.max(1, Math.floor(renderViewport.height * outputScale));
+        canvas.style.width = `${finalDisplayWidth}px`;
+        canvas.style.height = `${finalDisplayHeight}px`;
+        canvas.className = 'dual-page-canvas';
+
+        const ctx = canvas.getContext('2d', { alpha: false, desynchronized: true });
+        await page.render({
+          canvasContext: ctx,
+          viewport: renderViewport,
+          transform: outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : null
+        }).promise;
+
+        stage.innerHTML = '';
+        stage.style.display = 'flex';
+        stage.style.justifyContent = 'center';
+        stage.style.alignItems = 'flex-start';
+        stage.style.minWidth = `${finalDisplayWidth}px`;
+        stage.style.minHeight = `${finalDisplayHeight}px`;
+        stage.appendChild(canvas);
+
+        // Remove any residual annotation layers before reattaching to avoid duplicates
+        stage.querySelectorAll('.annotation-layer, .annotation-committed').forEach((el) => el.remove());
+
+        annotations.onPageLayerRemoved(pageNumber);
+        annotations.attachPageLayer({
+          pageNumber,
+          frame: stage,
+          canvas,
+          pageWidth: unscaled.width,
+          pageHeight: unscaled.height,
+          renderWidth: canvas.width,
+          renderHeight: canvas.height,
+          displayWidth: finalDisplayWidth,
+          displayHeight: finalDisplayHeight
+        });
+
+        slot.dataset.renderedPage = String(pageNumber);
+      }
+
+      async function renderDualSpread(startPage) {
+        const pdf = state.viewer?._pdf;
+        if (!pdf || !state.viewer.dualMode) return;
+        const slots = ensureDualLayout();
+        if (!slots) return;
+
+        const total = pdf.numPages || state.viewer.numPages || 1;
+        const leftPage = Math.max(1, Math.min(startPage || 1, total));
+        const rightPage = leftPage + 1 <= total ? leftPage + 1 : null;
+        state.viewer.currentPage = leftPage;
+
+        await Promise.all([
+          renderDualSlot(slots.left, leftPage, pdf),
+          renderDualSlot(slots.right, rightPage, pdf)
+        ]);
+
+        if (window.JumpMarkers?.renderAllMarkers) {
+          window.JumpMarkers.renderAllMarkers();
+        }
+      }
+
+      function teardownDualTapZones() {
+        const dual = document.querySelector('#dualViewer');
+        if (!dual || !dual.dataset.tapHandlerAttached) return;
+        dual.removeEventListener('pointerup', dual._tapHandler);
+        dual.removeEventListener('click', dual._tapHandler);
+        delete dual._tapHandler;
+        delete dual.dataset.tapHandlerAttached;
+      }
+
+      function setupDualTapZones() {
+        const dual = document.querySelector('#dualViewer');
+        if (!dual || dual.dataset.tapHandlerAttached) return;
+        const handler = (event) => {
+          if (!state.viewer.dualMode) return;
+          if (event.type === 'pointerup' && event.pointerType === 'mouse' && event.button !== 0) return;
+          const rect = dual.getBoundingClientRect();
+          const x = event.clientX;
+          const isRight = x > rect.left + rect.width / 2;
+          const delta = isRight ? 1 : -1;
+          const nextPage = Math.min(
+            Math.max(1, state.viewer.currentPage + delta),
+            state.viewer.numPages || state.viewer._pdf?.numPages || 1
+          );
+          if (nextPage === state.viewer.currentPage) return;
+          // Visual feedback
+          const flash = dual.querySelector(isRight ? '.dual-tap-hint--right' : '.dual-tap-hint--left');
+          if (flash) {
+            flash.classList.remove('is-active');
+            void flash.offsetWidth;
+            flash.classList.add('is-active');
+            setTimeout(() => flash.classList.remove('is-active'), 260);
+          }
+          renderDualSpread(nextPage).catch(() => {});
+        };
+        dual._tapHandler = handler;
+        dual.addEventListener('pointerup', handler);
+        dual.addEventListener('click', handler);
+        dual.dataset.tapHandlerAttached = '1';
+      }
+
+      async function toggleDualMode(forceEnable = null) {
+        const desired = forceEnable === null ? !state.viewer.dualMode : Boolean(forceEnable);
+        const viewer = document.querySelector('#viewer');
+        const dual = document.querySelector('#dualViewer');
+        const btn = document.querySelector('#btnDualPage');
+        if (!viewer || !dual || !state.viewer._pdf) return;
+        if (desired && !isLandscapeMode()) {
+          updateDualModeAvailability();
+          return;
+        }
+
+        if (desired) {
+          stopAutoScroll();
+          teardownTapZones();
+          clearAnnotationLayers(viewer);
+          state.viewer.currentPage = getCurrentPageFromScroll();
+          state.viewer.dualMode = true;
+          viewer.classList.add('hidden');
+          viewer.setAttribute('aria-hidden', 'true');
+          viewer.style.display = 'none';
+          dual.classList.remove('hidden');
+          dual.style.display = 'flex';
+          dual.setAttribute('aria-hidden', 'false');
+          // Verhindere Scrolling im Dual-Mode
+          document.body.style.overflow = 'hidden';
+          document.documentElement.style.overflow = 'hidden';
+          // Header verstecken für volle Höhe (Controls bleiben für Interaktion)
+          const header = document.querySelector('#mainHeader');
+          const spacer = document.querySelector('#headerSpacer');
+          if (header) header.style.display = 'none';
+          if (spacer) spacer.style.display = 'none';
+          // Play-Button im Dual-Mode verstecken
+          controlsEl.classList.add('dual-mode-active');
+          await renderDualSpread(state.viewer.currentPage);
+          setupDualTapZones();
+        } else {
+          clearAnnotationLayers(dual);
+          state.viewer.dualMode = false;
+          dual.classList.add('hidden');
+          dual.style.display = 'none';
+          dual.setAttribute('aria-hidden', 'true');
+          viewer.classList.remove('hidden');
+          viewer.style.display = '';
+          viewer.setAttribute('aria-hidden', 'false');
+          // Scrolling wieder erlauben
+          document.body.style.overflow = '';
+          document.documentElement.style.overflow = '';
+          // Header wieder anzeigen
+          const header = document.querySelector('#mainHeader');
+          const spacer = document.querySelector('#headerSpacer');
+          if (header) header.style.display = '';
+          if (spacer) spacer.style.display = '';
+          // Play-Button wieder anzeigen
+          controlsEl.classList.remove('dual-mode-active');
+          teardownDualTapZones();
+          scrollToPage(state.viewer.currentPage, 'auto');
+          setupTapZones();
+        }
+
+        if (btn) {
+          btn.setAttribute('aria-pressed', state.viewer.dualMode ? 'true' : 'false');
+        }
+        const playBtn = document.querySelector('#btnPlayPause');
+        if (playBtn) {
+          playBtn.disabled = state.viewer.dualMode;
+          playBtn.title = state.viewer.dualMode
+            ? 'Auto-Scroll im Dual-Modus deaktiviert'
+            : 'Auto-Scroll starten/pausieren';
+        }
+        updateDualModeAvailability();
+        refreshPlayPauseUI();
+      }
+
       async function mountPdfVirtual(container, url) {
         if (!window.pdfjsLib) {
           container.innerHTML = `
@@ -7276,6 +7917,7 @@
           }, 0);
           state.viewer.numPages = 1;
           state.viewer._pdf = null;
+          updateDualModeAvailability();
           return;
         }
 
@@ -7304,12 +7946,14 @@
           }, 0);
           state.viewer.numPages = 1;
           state.viewer._pdf = null;
+          updateDualModeAvailability();
           return;
         }
 
         state.viewer.numPages = pdf.numPages;
         // Halte Referenz für spätere, explizite Render-Anstöße (iOS Workaround)
         state.viewer._pdf = pdf;
+        updateDualModeAvailability();
 
         const wrap = document.createElement("div");
         wrap.className = "w-full flex flex-col items-center gap-4 py-6";
@@ -7715,6 +8359,11 @@
       async function startAutoScroll() {
         const viewerEl = document.querySelector('#viewer');
         if (!viewerEl) return;
+        if (state.viewer.dualMode) {
+          updateStatus("Auto-Scroll im Dual-Modus deaktiviert");
+          refreshPlayPauseUI();
+          return;
+        }
         if (state.viewer.autoScroll.running || state.viewer.autoScroll.pending) return;
 
         const S = state.viewer.autoScroll;
@@ -7892,6 +8541,17 @@
       function refreshPlayPauseUI() {
         const btn = document.querySelector('#btnPlayPause');
         if (!btn) return;
+        if (state.viewer.dualMode) {
+          btn.innerHTML = `
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="18" height="18">
+              <path d="M8 5v14l11-7z"/>
+            </svg>
+            <span>Dual Mode</span>
+          `;
+          btn.disabled = true;
+          btn.setAttribute('aria-label', 'Im Dual-Page-Modus deaktiviert');
+          return;
+        }
         
         const isRunning = state.viewer.autoScroll.running;
         const isPending = state.viewer.autoScroll.pending;

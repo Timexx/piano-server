@@ -30,10 +30,16 @@ const state = {
     fileName: null, url: null, numPages: 0,
     secsPerPage: 45,
     autoScroll: { running: false, lastTs: 0, speedPxPerSec: 0 },
-    wakeLock: null
+    wakeLock: null,
+    dualMode: false,
+    currentPage: 1,
+    pdfDoc: null
   },
   thumbs: { cache: new Map(), queue: [], running: 0, maxConcurrent: 2 }
 };
+
+window.addEventListener("resize", () => syncDualToggle());
+window.addEventListener("orientationchange", () => setTimeout(syncDualToggle, 80));
 
 // ===== Router =====
 (async function init() {
@@ -409,12 +415,26 @@ async function renderViewer(fileName) {
   // Viewer nimmt den gesamten verfügbaren Platz ein (flex: 1)
   // Kein festes vh - flexbox regelt die Höhe automatisch
   appEl.innerHTML = `
-    <div id="viewer" class="flex-1 min-h-0 no-scrollbar overflow-y-auto"></div>
+    <div id="viewerPdfContainer">
+      <div id="viewer" class="flex-1 min-h-0 no-scrollbar overflow-y-auto"></div>
+      <div id="dualViewer" class="dual-viewer hidden flex-1 min-h-0 no-scrollbar overflow-auto" aria-hidden="true"></div>
+    </div>
   `;
 
   const container = $("#viewer");
   state.viewer.fileName = fileName;
   state.viewer.url = `/sheets/${encodeURIComponent(fileName)}`;
+  state.viewer.dualMode = false;
+  state.viewer.currentPage = 1;
+  state.viewer.pdfDoc = null;
+  const dualBtn = $("#btnDualPage");
+  if (dualBtn) {
+    dualBtn.onclick = () => {
+      toggleDualMode().catch((err) => console.warn("Dual mode toggle failed", err));
+    };
+    dualBtn.setAttribute("aria-pressed", "false");
+  }
+  syncDualToggle();
 
   $("#btnBack").onclick = () => {
     document.body.classList.remove("in-viewer");
@@ -518,6 +538,8 @@ async function mountPdfVirtual(container, url) {
 
   const pdf = await pdfjsLib.getDocument(url).promise;
   state.viewer.numPages = pdf.numPages;
+  state.viewer.pdfDoc = pdf;
+  syncDualToggle();
 
   const wrap = document.createElement("div");
   wrap.className = "w-full flex flex-col items-center gap-1";
@@ -635,6 +657,176 @@ async function renderOnePageInto(ph, pdf, i) {
   if (sk) sk.replaceWith(canvas);
 }
 
+function isLandscapeMode() {
+  if (window.matchMedia) {
+    const mq = window.matchMedia("(orientation: landscape)");
+    if (mq.matches) return true;
+  }
+  return (window.innerWidth || 0) >= (window.innerHeight || 0);
+}
+
+function syncDualToggle() {
+  const btn = $("#btnDualPage");
+  const allowed = isLandscapeMode();
+  const ready = Boolean(state.viewer.pdfDoc);
+  const enabled = allowed && ready;
+  if (btn) {
+    btn.classList.toggle("hidden", !allowed);
+    btn.disabled = !enabled;
+    btn.setAttribute("aria-pressed", state.viewer.dualMode ? "true" : "false");
+    btn.title = allowed ? "Dual Page Mode" : "Nur im Querformat verfügbar";
+  }
+  if ((!allowed || !ready) && state.viewer.dualMode) {
+    state.viewer.dualMode = false;
+    const dual = $("#dualViewer");
+    const viewer = $("#viewer");
+    if (dual) {
+      dual.classList.add("hidden");
+      dual.setAttribute("aria-hidden", "true");
+    }
+    if (viewer) viewer.classList.remove("hidden");
+  }
+  if (state.viewer.dualMode && enabled) {
+    renderDualPage(state.viewer.currentPage).catch(() => {});
+  }
+  refreshPlayPauseUI();
+}
+
+function getCurrentScrollPage() {
+  const viewer = $("#viewer");
+  if (!viewer) return 1;
+  const nodes = Array.from(viewer.querySelectorAll("[data-page]"));
+  if (!nodes.length) return 1;
+  const top = viewer.getBoundingClientRect().top;
+  let best = { page: 1, distance: Number.POSITIVE_INFINITY };
+  for (const n of nodes) {
+    const p = Number(n.dataset.page);
+    if (!Number.isFinite(p)) continue;
+    const rect = n.getBoundingClientRect();
+    const dist = Math.abs(rect.top - top);
+    if (dist < best.distance) {
+      best = { page: p, distance: dist };
+    }
+  }
+  return Math.max(1, Math.min(state.viewer.numPages || 1, best.page || 1));
+}
+
+function scrollToPage(pageNum) {
+  const viewer = $("#viewer");
+  if (!viewer) return;
+  const target = viewer.querySelector(`[data-page="${pageNum}"]`);
+  if (!target) return;
+  viewer.scrollTo({ top: Math.max(0, target.offsetTop - 4), behavior: "auto" });
+}
+
+async function renderDualSlot(pageNumber, wrap, pdf) {
+  const slot = document.createElement("div");
+  slot.className = "dual-page";
+  wrap.appendChild(slot);
+
+  const label = document.createElement("div");
+  label.className = "dual-page-label";
+  label.textContent = pageNumber ? `Seite ${pageNumber} / ${pdf.numPages}` : "";
+  slot.appendChild(label);
+
+  const stage = document.createElement("div");
+  stage.className = "dual-page-stage";
+  slot.appendChild(stage);
+
+  if (!pageNumber) {
+    stage.innerHTML = '<div class="dual-viewer-empty">Keine weitere Seite</div>';
+    return;
+  }
+
+  const page = await pdf.getPage(pageNumber);
+  const viewport = page.getViewport({ scale: 1 });
+  const available = Math.max(320, Math.min((wrap.clientWidth || window.innerWidth || 0) / 2 - 16, 1400));
+  const scale = Math.max(0.6, Math.min(available / viewport.width, 3.0));
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const renderViewport = page.getViewport({ scale: scale * dpr });
+
+  const canvas = document.createElement("canvas");
+  canvas.width = renderViewport.width;
+  canvas.height = renderViewport.height;
+  canvas.style.width = `${renderViewport.width / dpr}px`;
+  canvas.style.height = `${renderViewport.height / dpr}px`;
+  canvas.className = "rounded bg-black mx-auto block";
+
+  const ctx = canvas.getContext("2d", { alpha: false });
+  await page.render({ canvasContext: ctx, viewport: renderViewport }).promise;
+  stage.appendChild(canvas);
+}
+
+async function renderDualPage(startPage) {
+  const pdf = state.viewer.pdfDoc;
+  const dual = $("#dualViewer");
+  if (!pdf || !dual) return;
+  const total = pdf.numPages || state.viewer.numPages || 1;
+  const left = Math.max(1, Math.min(startPage || 1, total));
+  const right = left + 1 <= total ? left + 1 : null;
+  state.viewer.currentPage = left;
+
+  dual.innerHTML = "";
+  const wrap = document.createElement("div");
+  wrap.className = "dual-viewer-inner";
+  dual.appendChild(wrap);
+
+  await Promise.all([
+    renderDualSlot(left, wrap, pdf),
+    renderDualSlot(right, wrap, pdf)
+  ]);
+}
+
+function setupDualTapHandlers() {
+  const dual = $("#dualViewer");
+  if (!dual || dual.dataset.tapsAttached) return;
+  const handler = (event) => {
+    if (!state.viewer.dualMode) return;
+    const rect = dual.getBoundingClientRect();
+    const isRight = event.clientX > rect.left + rect.width / 2;
+    const delta = isRight ? 1 : -1;
+    const next = Math.max(1, Math.min((state.viewer.currentPage || 1) + delta, state.viewer.numPages || 1));
+    if (next === state.viewer.currentPage) return;
+    renderDualPage(next).catch(() => {});
+  };
+  dual.addEventListener("click", handler);
+  dual.dataset.tapsAttached = "1";
+}
+
+async function toggleDualMode(forceEnable = null) {
+  const enable = forceEnable === null ? !state.viewer.dualMode : !!forceEnable;
+  const viewer = $("#viewer");
+  const dual = $("#dualViewer");
+  if (!viewer || !dual || !state.viewer.pdfDoc) {
+    syncDualToggle();
+    return;
+  }
+  if (enable && !isLandscapeMode()) {
+    syncDualToggle();
+    return;
+  }
+
+  if (enable) {
+    stopAutoScroll();
+    state.viewer.dualMode = true;
+    state.viewer.currentPage = getCurrentScrollPage();
+    viewer.classList.add("hidden");
+    dual.classList.remove("hidden");
+    dual.setAttribute("aria-hidden", "false");
+    await renderDualPage(state.viewer.currentPage);
+    setupDualTapHandlers();
+  } else {
+    state.viewer.dualMode = false;
+    dual.classList.add("hidden");
+    dual.setAttribute("aria-hidden", "true");
+    viewer.classList.remove("hidden");
+    scrollToPage(state.viewer.currentPage);
+  }
+
+  syncDualToggle();
+  refreshPlayPauseUI();
+}
+
 // ===== Auto Scroll + UI Toggle =====
 function computeSpeed() {
   const el = $("#viewer");
@@ -643,6 +835,11 @@ function computeSpeed() {
   state.viewer.autoScroll.speedPxPerSec = totalSecs > 0 ? totalScrollable / totalSecs : 0;
 }
 function startAutoScroll() {
+  if (state.viewer.dualMode) {
+    updateStatus("Dual Page Mode: Auto-Scroll deaktiviert");
+    refreshPlayPauseUI();
+    return;
+  }
   if (state.viewer.autoScroll.running) return;
   computeSpeed();
   state.viewer.autoScroll.running = true;
@@ -674,6 +871,12 @@ function tickAutoScroll(ts) {
 function refreshPlayPauseUI() {
   const btn = $("#btnPlayPause");
   if (!btn) return;
+  if (state.viewer.dualMode) {
+    btn.textContent = "Dual Mode";
+    btn.disabled = true;
+    return;
+  }
+  btn.disabled = false;
   btn.textContent = state.viewer.autoScroll.running ? "❚❚ Pause" : "▶︎ Start";
 }
 function updateStatus(extra) {
