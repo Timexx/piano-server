@@ -5878,7 +5878,8 @@
 
             // Event Listener für Play-Buttons
             listEl.querySelectorAll('.detail-item-play').forEach(btn => {
-              btn.addEventListener('click', async () => {
+              btn.addEventListener('click', async (e) => {
+                e.stopPropagation(); // Verhindert Card-Click
                 const index = parseInt(btn.getAttribute('data-item-index'), 10);
                 
                 // Playlist aktivieren falls nötig
@@ -5905,7 +5906,8 @@
 
             // Event Listener für Remove-Buttons
             listEl.querySelectorAll('.detail-item-remove').forEach(btn => {
-              btn.addEventListener('click', async () => {
+              btn.addEventListener('click', async (e) => {
+                e.stopPropagation(); // Verhindert Card-Click
                 const index = parseInt(btn.getAttribute('data-item-index'), 10);
                 const item = items[index];
                 
@@ -5919,6 +5921,41 @@
                   showToast('Fehler beim Entfernen', 2500);
                 }
               });
+            });
+
+            // Event Listener für Card-Clicks (öffne PDF)
+            listEl.querySelectorAll('.playlist-row').forEach(card => {
+              card.addEventListener('click', async (e) => {
+                // Ignoriere Clicks auf interaktive Elemente
+                if (e.target.closest('button, .drag-handle')) {
+                  return;
+                }
+                
+                const index = parseInt(card.getAttribute('data-item-index'), 10);
+                
+                // Playlist aktivieren falls nötig
+                if (playlistId !== playlist.activeId) {
+                  await activatePlaylistOnBackend(playlistId);
+                  await new Promise(resolve => setTimeout(resolve, 150));
+                }
+                
+                // Current Index setzen
+                try {
+                  await setPlaylistCurrentIndex(index);
+                } catch (err) {
+                  console.error('Failed to set current index:', err);
+                }
+                
+                const item = items[index];
+                if (item) {
+                  acquireWakeLockSync();
+                  history.replaceState(null, '', '/');
+                  renderViewer(item);
+                }
+              });
+              
+              // Cursor-Style für bessere UX
+              card.style.cursor = 'pointer';
             });
 
             // Touch-friendly drag & drop with precise drop targets
