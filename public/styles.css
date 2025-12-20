@@ -1442,24 +1442,23 @@ body.in-viewer #controls:not(.hidden) {
 }
 
 /* ============================================
-   MINIMIERTER ZUSTAND - Kleines Quadrat links
+   MINIMIERTER ZUSTAND - Box mit zwei Buttons links
    ============================================ */
 #controls.controls-minimized #controlsInner {
-  width: 56px;
-  height: 56px;
+  width: fit-content;
+  height: 52px;
   left: 16px;
   transform: translate(0, 0);
   bottom: var(--controls-bottom-min, calc(env(safe-area-inset-bottom, 0px) + 56px));
-  border-radius: 16px;
-  padding: 0;
+  border-radius: 14px;
+  padding: 6px;
   display: flex;
   align-items: center;
-  justify-content: center;
-  cursor: pointer;
+  justify-content: flex-start;
+  cursor: default;
 }
 
 #controls.controls-minimized #controlsInner:hover {
-  transform: scale(1.05);
   box-shadow: 
     0 24px 60px -20px rgba(0, 0, 0, 0.8),
     0 12px 35px -12px rgba(0, 0, 0, 0.6),
@@ -1467,10 +1466,10 @@ body.in-viewer #controls:not(.hidden) {
 }
 
 #controls.controls-minimized #controlsInner:active {
-  transform: scale(0.95);
+  transform: scale(0.98);
 }
 
-/* Icon Layer - nur sichtbar wenn minimiert */
+/* Icon Layer - Container für die Buttons */
 .controls-icon-layer {
   display: flex;
   align-items: center;
@@ -1480,22 +1479,104 @@ body.in-viewer #controls:not(.hidden) {
   position: relative;
 }
 
-/* Im minimierten Zustand: Position ist durch #controlsInner definiert */
-#controls.controls-minimized .controls-icon-layer {
-  width: 100%;
+/* Minimierte Buttons Container - horizontal nebeneinander */
+.minimized-buttons {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 4px;
+  width: auto;
   height: 100%;
 }
 
-#controls.controls-minimized .icon-minimized {
+/* Einzelne Buttons im minimierten Zustand */
+.minimized-btn {
   display: flex;
-  width: 22px;
-  height: 22px;
-  opacity: 1;
-  transition: opacity 0.2s ease;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: none;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  color: rgba(255, 255, 255, 0.85);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
 }
 
-#controls.controls-minimized .icon-expanded {
+.minimized-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  transform: scale(1.05);
+}
+
+.minimized-btn:active {
+  transform: scale(0.95);
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.minimized-btn svg {
+  width: 20px;
+  height: 20px;
+}
+
+/* Im minimierten Zustand: Zeige nur die minimized-buttons */
+#controls.controls-minimized .minimized-buttons {
+  display: flex;
+}
+
+#controls.controls-minimized .expanded-buttons {
   display: none;
+}
+
+/* Im expandierten Zustand: Zeige nur expanded-buttons, verstecke minimized-buttons */
+#controls:not(.controls-minimized) .minimized-buttons {
+  display: none;
+}
+
+#controls:not(.controls-minimized) .expanded-buttons {
+  display: flex;
+}
+
+/* Expandierte Buttons Container */
+.expanded-buttons {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Einzelne Buttons im expandierten Zustand */
+.expanded-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border: none;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  color: rgba(255, 255, 255, 0.85);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+
+.expanded-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  transform: scale(1.05);
+}
+
+.expanded-btn:active {
+  transform: scale(0.95);
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.expanded-btn svg {
+  width: 20px;
+  height: 20px;
 }
 
 /* Content verstecken wenn minimiert */
@@ -1537,43 +1618,30 @@ body.in-viewer #controls:not(.hidden) {
   }
 }
 
-/* Icon Layer im expandierten Zustand - links im Grid */
+/* Icon Layer im expandierten Zustand - enthält Zurück + X Buttons */
 #controls:not(.controls-minimized) .controls-icon-layer {
   align-self: center;
   position: relative;
   flex-shrink: 0;
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.1);
+  width: auto;
+  height: auto;
+  border-radius: 0;
+  background: transparent;
   padding: 0;
   margin: 0;
-  cursor: pointer;
-  transition: background 0.2s ease;
+  cursor: default;
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
 }
 
 #controls:not(.controls-minimized) .controls-icon-layer:hover {
-  background: rgba(255, 255, 255, 0.15);
-  transform: scale(1.05);
+  background: transparent;
+  transform: none;
 }
 
 #controls:not(.controls-minimized) .controls-icon-layer:active {
-  transform: scale(0.95);
-}
-
-#controls:not(.controls-minimized) .icon-minimized {
-  display: none;
-}
-
-#controls:not(.controls-minimized) .icon-expanded {
-  display: flex;
-  width: 20px;
-  height: 20px;
-  opacity: 1;
-  transition: opacity 0.2s ease;
+  transform: none;
 }
 
 /* Content anzeigen wenn expandiert */

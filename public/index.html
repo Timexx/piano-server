@@ -207,50 +207,54 @@
         // Direktes Debuggen: klickbar machen
         console.log('⚙️ Setting up click handlers...');
         
-        // Öffnen/Schließen: Klick auf das Element
-        const clickHandler = (e) => {
-          const hasMinimized = controls.classList.contains('controls-minimized');
-          console.log('🖱️ controlsInner clicked, minimized:', hasMinimized, 'target:', e.target);
-          
-          if (hasMinimized) {
-            // Im minimierten Zustand: ÖFFNEN
-            e.preventDefault();
-            e.stopPropagation();
-            console.log('📘 Removing controls-minimized class (OPENING)');
-            controls.classList.remove('controls-minimized');
-            console.log('✅ Opened - new classes:', controls.className);
-            updateExpandedHeightIfVisible();
-            resyncLayout();
-          }
-        };
-        
-        controlsInner.addEventListener('click', clickHandler);
-        console.log('✅ Click handler registered on controlsInner');
-        
-        // Close via icon-layer - NUR wenn expandiert!
-        const iconLayer = controlsInner.querySelector('.controls-icon-layer');
-        if (iconLayer) {
-          iconLayer.addEventListener('click', (e) => {
+        // Expand Button im minimierten Zustand
+        const btnExpandMinimized = document.getElementById('btnExpandMinimized');
+        if (btnExpandMinimized) {
+          btnExpandMinimized.addEventListener('click', (e) => {
             const hasMinimized = controls.classList.contains('controls-minimized');
-            console.log('🖱️ iconLayer clicked, minimized:', hasMinimized);
-            
-            // NUR im expandierten Zustand schließen
-            if (!hasMinimized) {
+            if (hasMinimized) {
               e.preventDefault();
               e.stopPropagation();
-              console.log('📘 Adding controls-minimized class (CLOSING)');
-              controls.classList.add('controls-minimized');
-              console.log('✅ Closed - new classes:', controls.className);
+              console.log('📘 Expand button clicked - OPENING');
+              controls.classList.remove('controls-minimized');
               updateExpandedHeightIfVisible();
               resyncLayout();
             }
           });
-          console.log('✅ Click handler registered on iconLayer');
-        } else {
-          console.warn('⚠️ iconLayer not found');
+          console.log('✅ Click handler registered on btnExpandMinimized');
         }
         
-        // Close via Close-Button
+        // Zurück Button im minimierten Zustand
+        const btnBackMinimized = document.getElementById('btnBackMinimized');
+        if (btnBackMinimized) {
+          btnBackMinimized.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            console.log('📘 Back button clicked - navigating back');
+            // Trigger the same action as the main back button
+            const mainBackBtn = document.querySelector('#btnBack');
+            if (mainBackBtn && mainBackBtn.onclick) {
+              mainBackBtn.onclick();
+            }
+          });
+          console.log('✅ Click handler registered on btnBackMinimized');
+        }
+        
+        // Close Button im expandierten Zustand
+        const btnCloseExpanded = document.getElementById('btnCloseExpanded');
+        if (btnCloseExpanded) {
+          btnCloseExpanded.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            console.log('📘 Close button clicked - CLOSING');
+            controls.classList.add('controls-minimized');
+            updateExpandedHeightIfVisible();
+            resyncLayout();
+          });
+          console.log('✅ Click handler registered on btnCloseExpanded');
+        }
+        
+        // Close via Close-Button (legacy)
         const closeBtn = document.getElementById('btnControlsClose');
         if (closeBtn) {
           closeBtn.addEventListener('click', (e) => {
@@ -326,19 +330,41 @@
     <div id="controls" class="controls-minimized hidden">
       <!-- Die expandierende Controlbar - Icon wechselt zu X beim Expandieren -->
       <div id="controlsInner">
-        <!-- Icon Layer - zeigt : oder X basierend auf Zustand -->
+        <!-- Icon Layer - zeigt Zurück + Expand/Close Buttons -->
         <div class="controls-icon-layer">
-          <!-- Minimiertes Icon (3 Punkte) -->
-          <svg class="icon-minimized" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="22" height="22">
-            <circle cx="12" cy="12" r="1.5"/>
-            <circle cx="12" cy="5" r="1.5"/>
-            <circle cx="12" cy="19" r="1.5"/>
-          </svg>
-          <!-- Expandiertes Icon (X zum Schließen) -->
-          <svg class="icon-expanded" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="20" height="20">
-            <line x1="18" y1="6" x2="6" y2="18"/>
-            <line x1="6" y1="6" x2="18" y2="18"/>
-          </svg>
+          <!-- Minimierte Buttons (nebeneinander) -->
+          <div class="minimized-buttons">
+            <!-- Zurück Button -->
+            <button id="btnBackMinimized" class="minimized-btn" type="button" title="Zurück" aria-label="Zurück">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="20" height="20">
+                <path d="M19 12H5M12 19l-7-7 7-7"/>
+              </svg>
+            </button>
+            <!-- Expand Button (3 Punkte) -->
+            <button id="btnExpandMinimized" class="minimized-btn" type="button" title="Controls öffnen" aria-label="Controls öffnen">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="20" height="20">
+                <circle cx="12" cy="12" r="1.5"/>
+                <circle cx="12" cy="5" r="1.5"/>
+                <circle cx="12" cy="19" r="1.5"/>
+              </svg>
+            </button>
+          </div>
+          <!-- Expandierte Buttons (Zurück + X nebeneinander) -->
+          <div class="expanded-buttons">
+            <!-- Zurück Button -->
+            <button id="btnBack" class="expanded-btn" type="button" title="Zurück zur Bibliothek" aria-label="Zurück zur Bibliothek">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="20" height="20">
+                <path d="M19 12H5M12 19l-7-7 7-7"/>
+              </svg>
+            </button>
+            <!-- Close Button (X) -->
+            <button id="btnCloseExpanded" class="expanded-btn" type="button" title="Schließen" aria-label="Schließen">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="20" height="20">
+                <line x1="18" y1="6" x2="6" y2="18"/>
+                <line x1="6" y1="6" x2="18" y2="18"/>
+              </svg>
+            </button>
+          </div>
         </div>
         
         <!-- Controls Content - wird sichtbar wenn expandiert -->
@@ -382,11 +408,6 @@
             
             <section class="control-module">
               <div class="control-module-body">
-                <button id="btnBack" class="btn btn-secondary btn-icon" title="Zurück zur Bibliothek" aria-label="Zurück zur Bibliothek">
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M19 12H5M12 19l-7-7 7-7"/>
-                  </svg>
-                </button>
                 <button id="btnFullscreen" class="btn btn-secondary btn-icon" title="Vollbild" aria-label="Vollbild">
                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
