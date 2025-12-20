@@ -7904,11 +7904,26 @@
           const rect = dual.getBoundingClientRect();
           const x = event.clientX;
           const isRight = x > rect.left + rect.width / 2;
-          const delta = isRight ? 1 : -1;
-          const nextPage = Math.min(
-            Math.max(1, state.viewer.currentPage + delta),
-            state.viewer.numPages || state.viewer._pdf?.numPages || 1
-          );
+          const totalPages = state.viewer.numPages || state.viewer._pdf?.numPages || 1;
+          const currentLeft = state.viewer.currentPage;
+          
+          // Im Dual Mode: +2/-2 Seiten pro Blättern
+          // Bei rechts: Zeige nächstes Paar (aktuelle Linke + 2)
+          // Bei links: Zeige vorheriges Paar (aktuelle Linke - 2)
+          let nextPage;
+          if (isRight) {
+            // Nächstes Paar - aber nur wenn es noch ungesehene Seiten gibt
+            // Aktuell zeigen wir currentLeft und currentLeft+1
+            // Wenn currentLeft + 1 >= totalPages, sind wir am Ende
+            if (currentLeft + 1 >= totalPages) {
+              return; // Schon auf der letzten Ansicht, nicht weiter blättern
+            }
+            nextPage = Math.min(currentLeft + 2, totalPages);
+          } else {
+            // Vorheriges Paar
+            nextPage = Math.max(1, currentLeft - 2);
+          }
+          
           if (nextPage === state.viewer.currentPage) return;
           // Visual feedback - same style as single page mode
           const flash = dual.querySelector(isRight ? '.dual-tap-hint--right' : '.dual-tap-hint--left');
