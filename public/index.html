@@ -6195,10 +6195,11 @@
                 if (!row) return;
                 if (ev.button !== 0 && ev.pointerType === 'mouse') return;
                 if (ev.target.closest(interactiveSelector)) return;
-                if (ev.pointerType === 'touch' || ev.pointerType === 'pen') {
-                  const handle = ev.target.closest && ev.target.closest('[data-drag-handle]');
-                  if (!handle) return;
-                }
+                
+                // Für alle Geräte: Nur Drag starten, wenn auf den Drag-Handle geklickt wird
+                const handle = ev.target.closest && ev.target.closest('[data-drag-handle]');
+                if (!handle) return;
+                
                 ev.preventDefault();
                 container.setPointerCapture?.(ev.pointerId);
                 beginDrag(ev, row);
