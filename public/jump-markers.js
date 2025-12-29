@@ -17,9 +17,12 @@
     placement: null,
     focusedPairId: null,
     editButton: null,
+    editButtonUnbind: null,
     toggleEditHandler: null,
     viewerEl: null,
     dualViewerEl: null,
+    viewerTapUnbind: null,
+    dualViewerTapUnbind: null,
     panelDrag: null,
     resizeHandlerBound: false,
     connectTimer: null,
@@ -37,6 +40,35 @@
     } else if (message) {
       console.log("[JumpMarkers]", message);
     }
+  }
+
+  // Touch -> click fallback: use pointerup(touch) + click(mouse/keyboard)
+  function bindTap(el, handler, { capture = false } = {}) {
+    if (!el || typeof handler !== "function") return () => {};
+    let lastTouchTs = 0;
+
+    const onPointerUp = (event) => {
+      if (event.pointerType !== "touch") return;
+      lastTouchTs = Date.now();
+      handler(event);
+    };
+
+    const onClick = (event) => {
+      if (lastTouchTs && Date.now() - lastTouchTs < 700) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      handler(event);
+    };
+
+    el.addEventListener("pointerup", onPointerUp, { capture, passive: false });
+    el.addEventListener("click", onClick, { capture });
+
+    return () => {
+      el.removeEventListener("pointerup", onPointerUp, { capture });
+      el.removeEventListener("click", onClick, { capture });
+    };
   }
 
   function ensureStyles() {
@@ -603,10 +635,10 @@
     uiState.btnCancelPlacement = panel.querySelector('[data-role="cancel"]');
     uiState.btnClose = panel.querySelector('[data-role="close"]');
 
-    uiState.btnNew.addEventListener("click", () => openCreateModal());
-    uiState.btnCancelPlacement.addEventListener("click", () => cancelPlacement({ userTriggered: true }));
+    bindTap(uiState.btnNew, () => openCreateModal());
+    bindTap(uiState.btnCancelPlacement, () => cancelPlacement({ userTriggered: true }));
     if (uiState.btnClose) {
-      uiState.btnClose.addEventListener("click", () => {
+      bindTap(uiState.btnClose, () => {
         if (state.viewer?.editMode) {
           toggleEditMode();
         } else {
@@ -744,19 +776,17 @@
 
   function bindEditButton(enable = true) {
     const btn = document.querySelector("#btnEditMarkers");
-    if (uiState.editButton && uiState.editButton !== btn && uiState.toggleEditHandler) {
-      uiState.editButton.removeEventListener("click", uiState.toggleEditHandler);
+    if (uiState.editButton && uiState.editButton !== btn && uiState.editButtonUnbind) {
+      uiState.editButtonUnbind();
+      uiState.editButtonUnbind = null;
     }
     if (!btn) {
       uiState.editButton = null;
       return;
     }
-    if (!uiState.toggleEditHandler) {
-      uiState.toggleEditHandler = () => toggleEditMode();
-    }
     if (uiState.editButton !== btn) {
       uiState.editButton = btn;
-      btn.addEventListener("click", uiState.toggleEditHandler);
+      uiState.editButtonUnbind = bindTap(btn, () => toggleEditMode());
     }
     applyEditButtonAppearance(btn);
     btn.disabled = !enable;
@@ -781,22 +811,24 @@
     
     // Bind Single Mode Viewer
     if (uiState.viewerEl && uiState.viewerEl !== viewer) {
-      uiState.viewerEl.removeEventListener("click", handleViewerClick, true);
+      if (uiState.viewerTapUnbind) uiState.viewerTapUnbind();
+      uiState.viewerTapUnbind = null;
       uiState.viewerEl = null;
     }
     if (viewer && uiState.viewerEl !== viewer) {
-      viewer.addEventListener("click", handleViewerClick, true);
       uiState.viewerEl = viewer;
+      uiState.viewerTapUnbind = bindTap(viewer, handleViewerClick, { capture: true });
     }
     
     // Bind Dual Mode Viewer
     if (uiState.dualViewerEl && uiState.dualViewerEl !== dualViewer) {
-      uiState.dualViewerEl.removeEventListener("click", handleViewerClick, true);
+      if (uiState.dualViewerTapUnbind) uiState.dualViewerTapUnbind();
+      uiState.dualViewerTapUnbind = null;
       uiState.dualViewerEl = null;
     }
     if (dualViewer && uiState.dualViewerEl !== dualViewer) {
-      dualViewer.addEventListener("click", handleViewerClick, true);
       uiState.dualViewerEl = dualViewer;
+      uiState.dualViewerTapUnbind = bindTap(dualViewer, handleViewerClick, { capture: true });
     }
   }
 
@@ -867,20 +899,20 @@
       </div>
     `;
 
-    item.querySelector('[data-action="rename"]').addEventListener("click", () => openRenameModal(pair));
-    item.querySelector('[data-action="test"]').addEventListener("click", () => {
+    bindTap(item.querySelector('[data-action="rename"]'), () => openRenameModal(pair));
+    bindTap(item.querySelector('[data-action="test"]'), () => {
       if (isComplete(pair)) {
         jumpFromPair(pair);
       }
     });
-    item.querySelector('[data-action="set-source"]').addEventListener("click", () => {
+    bindTap(item.querySelector('[data-action="set-source"]'), () => {
       const autoAdvance = !isPoint(pair.target);
       startPlacement(pair.id, "source", { autoAdvance });
     });
-    item.querySelector('[data-action="set-target"]').addEventListener("click", () => {
+    bindTap(item.querySelector('[data-action="set-target"]'), () => {
       startPlacement(pair.id, "target", { autoAdvance: false });
     });
-    item.querySelector('[data-action="delete"]').addEventListener("click", async () => {
+    bindTap(item.querySelector('[data-action="delete"]'), async () => {
       const confirmed = window.confirm(`${pair.label} löschen?`);
       if (!confirmed) return;
       deletePair(pair.id);
@@ -1018,7 +1050,9 @@
     if (uiState.placement && uiState.placement.pairId === pair.id && uiState.placement.role === role) {
       overlay.classList.add("is-placing");
     }
-    overlay.addEventListener("click", (event) => {
+    bindTap(overlay, (event) => {
+      // In edit-mode dragging, the drag session handles tap-to-edit (see finalizeMarkerDrag).
+      if (uiState.markerDrag) return;
       event.stopPropagation();
       handleOverlayClick(pair, role);
     });
@@ -1300,16 +1334,14 @@
     input.focus();
     input.select();
     const close = () => backdrop.remove();
-    form.querySelector('[data-role="cancel"]').addEventListener("click", () => {
-      close();
-    });
+    bindTap(form.querySelector('[data-role="cancel"]'), () => close());
     form.addEventListener("submit", (event) => {
       event.preventDefault();
       const label = input.value.trim() || `Sprung ${getMarkers().length + 1}`;
       close();
       createDraftPair(label);
     });
-    backdrop.addEventListener("click", (event) => {
+    bindTap(backdrop, (event) => {
       if (event.target === backdrop) close();
     });
   }
@@ -1349,7 +1381,7 @@
     input.focus();
     input.select();
     const close = () => backdrop.remove();
-    form.querySelector('[data-role="cancel"]').addEventListener("click", () => close());
+    bindTap(form.querySelector('[data-role="cancel"]'), () => close());
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
       const value = input.value.trim() || pair.label;
@@ -1359,7 +1391,7 @@
       renderAllMarkers();
       await saveJumpMarkers(isComplete(pair) ? "Titel gespeichert" : null);
     });
-    backdrop.addEventListener("click", (event) => {
+    bindTap(backdrop, (event) => {
       if (event.target === backdrop) close();
     });
   }

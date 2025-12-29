@@ -2609,7 +2609,7 @@ html.is-fs .control-panel:focus-visible {
 }
 
 /* Vermeidet teures Redraw bei Scroll für überlagerte Filter */
-#app, main, body {
+#app, main, body:not(.in-viewer) {
   transform: translateZ(0);
 }
 

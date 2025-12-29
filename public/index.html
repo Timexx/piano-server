@@ -84,21 +84,44 @@
         return Number.isFinite(parsed) ? parsed : 0;
       }
 
-      function getViewportBottomGap() {
-        try {
-          const vv = window.visualViewport;
-          if (!vv) return 0;
-          const gap = window.innerHeight - (vv.height + vv.offsetTop);
-          return Math.max(0, Math.round(gap));
-        } catch {
-          return 0;
-        }
-      }
+	      function getViewportBottomGap() {
+	        try {
+	          const vv = window.visualViewport;
+	          if (!vv) return 0;
+	          const gap = window.innerHeight - (vv.height + vv.offsetTop);
+	          return Math.max(0, Math.round(gap));
+	        } catch {
+	          return 0;
+	        }
+	      }
 
-      function measureExpandedHeight() {
-        const controls = document.getElementById('controls');
-        const controlsInner = document.getElementById('controlsInner');
-        if (!controls || !controlsInner) return lastExpandedControlsHeight || 200;
+	      // Touch -> click fallback for iPad/iOS: use pointerup(touch) + click(mouse/keyboard)
+	      function bindTouchAwareClick(el, handler) {
+	        if (!el || typeof handler !== 'function') return;
+	        const boundKey = 'touchAwareClickBound';
+	        if (el.dataset && el.dataset[boundKey] === '1') return;
+	        if (el.dataset) el.dataset[boundKey] = '1';
+
+	        let lastTouchTs = 0;
+	        el.addEventListener('pointerup', (event) => {
+	          if (event.pointerType !== 'touch') return;
+	          lastTouchTs = Date.now();
+	          handler(event);
+	        }, { passive: false });
+	        el.addEventListener('click', (event) => {
+	          if (lastTouchTs && Date.now() - lastTouchTs < 700) {
+	            event.preventDefault();
+	            event.stopPropagation();
+	            return;
+	          }
+	          handler(event);
+	        });
+	      }
+
+	      function measureExpandedHeight() {
+	        const controls = document.getElementById('controls');
+	        const controlsInner = document.getElementById('controlsInner');
+	        if (!controls || !controlsInner) return lastExpandedControlsHeight || 200;
 
         // If already expanded and visible, read directly
         if (!controls.classList.contains('controls-minimized') && !controls.classList.contains('hidden')) {
@@ -214,62 +237,70 @@
         // Direktes Debuggen: klickbar machen
         console.log('⚙️ Setting up click handlers...');
         
-        // Expand Button im minimierten Zustand
-        const btnExpandMinimized = document.getElementById('btnExpandMinimized');
-        if (btnExpandMinimized) {
-          btnExpandMinimized.addEventListener('click', (e) => {
-            const hasMinimized = controls.classList.contains('controls-minimized');
-            if (hasMinimized) {
-              e.preventDefault();
-              e.stopPropagation();
-              console.log('📘 Expand button clicked - OPENING');
-              controls.classList.remove('controls-minimized');
-              updateExpandedHeightIfVisible();
-              resyncLayout();
+	        // Expand Button im minimierten Zustand
+	        const btnExpandMinimized = document.getElementById('btnExpandMinimized');
+	        if (btnExpandMinimized) {
+	          bindTouchAwareClick(btnExpandMinimized, (e) => {
+	            const hasMinimized = controls.classList.contains('controls-minimized');
+	            if (hasMinimized) {
+	              e.preventDefault();
+	              e.stopPropagation();
+	              console.log('📘 Expand button clicked - OPENING');
+	              controls.classList.remove('controls-minimized');
+	              updateExpandedHeightIfVisible();
+	              resyncLayout();
+	            }
+	          });
+	          console.log('✅ Click handler registered on btnExpandMinimized');
+	        }
+
+	        // Zurück Button im minimierten Zustand
+	        const btnBackMinimized = document.getElementById('btnBackMinimized');
+	        if (btnBackMinimized) {
+	          bindTouchAwareClick(btnBackMinimized, (e) => {
+	            e.preventDefault();
+	            e.stopPropagation();
+	            console.log('📘 Back button clicked - navigating back');
+	            // Prefer shared viewer-back logic (works across devices / base paths)
+	            if (typeof window.navigateBackFromViewer === 'function') {
+	              Promise.resolve(window.navigateBackFromViewer()).catch((err) => {
+                console.warn('Back navigation failed', err);
+              });
+              return;
             }
-          });
-          console.log('✅ Click handler registered on btnExpandMinimized');
-        }
-        
-        // Zurück Button im minimierten Zustand
-        const btnBackMinimized = document.getElementById('btnBackMinimized');
-        if (btnBackMinimized) {
-          btnBackMinimized.addEventListener('click', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            console.log('📘 Back button clicked - navigating back');
-            // Trigger the same action as the main back button
+            // Fallback: trigger the same action as the main back button
             const mainBackBtn = document.querySelector('#btnBack');
-            if (mainBackBtn && mainBackBtn.onclick) {
-              mainBackBtn.onclick();
-            }
-          });
-          console.log('✅ Click handler registered on btnBackMinimized');
-        }
-        
-        // Close Button im expandierten Zustand
-        const btnCloseExpanded = document.getElementById('btnCloseExpanded');
-        if (btnCloseExpanded) {
-          btnCloseExpanded.addEventListener('click', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            console.log('📘 Close button clicked - CLOSING');
-            controls.classList.add('controls-minimized');
-            updateExpandedHeightIfVisible();
+            if (mainBackBtn) {
+              if (typeof mainBackBtn.click === 'function') mainBackBtn.click();
+              else if (typeof mainBackBtn.onclick === 'function') mainBackBtn.onclick();
+	            }
+	          });
+	          console.log('✅ Click handler registered on btnBackMinimized');
+	        }
+
+	        // Close Button im expandierten Zustand
+	        const btnCloseExpanded = document.getElementById('btnCloseExpanded');
+	        if (btnCloseExpanded) {
+	          bindTouchAwareClick(btnCloseExpanded, (e) => {
+	            e.preventDefault();
+	            e.stopPropagation();
+	            console.log('📘 Close button clicked - CLOSING');
+	            controls.classList.add('controls-minimized');
+	            updateExpandedHeightIfVisible();
             resyncLayout();
           });
           console.log('✅ Click handler registered on btnCloseExpanded');
         }
         
-        // Close via Close-Button (legacy)
-        const closeBtn = document.getElementById('btnControlsClose');
-        if (closeBtn) {
-          closeBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            controls.classList.add('controls-minimized');
-            updateExpandedHeightIfVisible();
-            resyncLayout();
-          });
+	        // Close via Close-Button (legacy)
+	        const closeBtn = document.getElementById('btnControlsClose');
+	        if (closeBtn) {
+	          bindTouchAwareClick(closeBtn, (e) => {
+	            e.stopPropagation();
+	            controls.classList.add('controls-minimized');
+	            updateExpandedHeightIfVisible();
+	            resyncLayout();
+	          });
         }
         
         // Schließen beim Klick außerhalb
@@ -1188,6 +1219,7 @@
       const state = {
         library: {
           total: 0,
+          loadedOnce: false,
           sort: localStorage.getItem("libSort") || "name",
           order: localStorage.getItem("libOrder") || "asc",
           q: "",
@@ -2527,6 +2559,7 @@
             localStorage.removeItem("libCategory");
           }
         }
+        L.loadedOnce = true;
       }
 
       async function applyCategoryFilter(catId) {
@@ -2542,13 +2575,15 @@
       }
 
       // ===== Library UI =====
-      function renderLibrary() {
-        annotations.leaveViewer();
+      function cleanupViewerState() {
+        try { annotations.leaveViewer(); } catch {}
         closeMobileActionSheet();
         document.body.classList.remove('in-viewer');
         
         // Restore app element classes for library mode
         appEl.classList.add('mx-auto', 'max-w-7xl', 'px-4', 'sm:px-6', 'pt-3', 'pb-6');
+        // Clear any inline styles from viewer mode
+        appEl.style.cssText = '';
         
         // Ensure fullscreen is exited when returning to library
         if (document.fullscreenElement) {
@@ -2557,6 +2592,7 @@
         releaseWakeLock();
         stopWakeWatch();
         stopAutoScroll();
+        try { teardownTapZones(); } catch {}
         if (state.viewer.layoutObserver) {
           state.viewer.layoutObserver.disconnect();
           state.viewer.layoutObserver = null;
@@ -2571,6 +2607,35 @@
         
         controlsEl.classList.add("hidden");
         headerActionsEl.innerHTML = "";
+      }
+
+      async function navigateBackFromViewer() {
+        const baseRoot = (typeof window.withBasePath === 'function') ? window.withBasePath('/') : '/';
+        try { history.replaceState(null, '', baseRoot); } catch {}
+	
+        // Wenn wir von einer Playlist-Detailansicht kommen: dahin zurück
+        if (playlist.mode && playlist.currentDetailId) {
+          cleanupViewerState();
+          await renderPlaylistDetail(playlist.currentDetailId);
+          return;
+        }
+	
+        // Wenn wir direkt in den Viewer deep-linked wurden, ist die Library ggf. noch nicht geladen
+        if (!playlist.mode && !state.library.loadedOnce) {
+          showToast('Lade Bibliothek…', 1200);
+          try { await loadPrefsFromBackend(); } catch {}
+          try { await hydrateCategories(); } catch {}
+          try { await loadPage(); } catch (err) {
+            console.warn('Library load failed', err);
+          }
+        }
+	
+        renderLibrary();
+      }
+      window.navigateBackFromViewer = navigateBackFromViewer;
+
+      function renderLibrary() {
+        cleanupViewerState();
 
         // If playlist mode is active, render the playlist overview instead of the normal library
         if (playlist.mode) {
@@ -6825,34 +6890,19 @@
         console.log("🎛️ Controls forced visible");
   updateZoomUI();
         
-        headerActionsEl.innerHTML = `
-          <button class="btn btn-secondary" onclick="location.href='/'">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16">
-              <path d="M19 12H5M12 19l-7-7 7-7"/>
-            </svg>
-            <span class="hidden sm:inline">Bibliothek</span>
-          </button>
-        `;
-        // Intercept header back to cleanly exit fullscreen first
-        const headerBack = headerActionsEl.querySelector('button');
-        if (headerBack) headerBack.addEventListener('click', (ev) => {
-          ev.preventDefault();
-          const leave = () => { 
-            // Wenn wir von einer Playlist kommen, zurück zur Detail-Seite
-            if (playlist.mode && playlist.currentDetailId) {
-              history.replaceState(null, '', '/');
-              renderPlaylistDetail(playlist.currentDetailId);
-            } else {
-              location.href = "/"; 
-            }
-          };
-          aggressiveCleanup();
-          if (document.fullscreenElement) {
-            document.exitFullscreen().then(leave).catch(leave);
-          } else {
-            leave();
-          }
-        });
+	        headerActionsEl.innerHTML = `
+	          <button id="btnHeaderBack" class="btn btn-secondary" type="button">
+	            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16">
+	              <path d="M19 12H5M12 19l-7-7 7-7"/>
+	            </svg>
+	            <span class="hidden sm:inline">Bibliothek</span>
+	          </button>
+	        `;
+	        const headerBack = headerActionsEl.querySelector('#btnHeaderBack');
+	        bindTouchAwareClick(headerBack, (ev) => {
+	          ev.preventDefault();
+	          navigateBackFromViewer();
+	        });
 
         appEl.innerHTML = `
           <div id="viewerShell">
@@ -6878,45 +6928,37 @@
 
         const container = document.querySelector('#viewer');
         state.viewer.fileName = fileName;
-        state.viewer.url = null;
-  state.viewer.cacheToken = null;
-        state.viewer.dualMode = false;
-        state.viewer.currentPage = 1;
-        const dualBtn = document.querySelector('#btnDualPage');
-        if (dualBtn) {
-          dualBtn.onclick = () => {
-            toggleDualMode().catch((err) => console.warn('Dual mode toggle failed', err));
-          };
-          dualBtn.setAttribute('aria-pressed', 'false');
-        }
-        updateDualModeAvailability();
-        resetPdfRefreshState();
-        annotations.enterViewer({ fileName });
+	        state.viewer.url = null;
+	  state.viewer.cacheToken = null;
+	        state.viewer.dualMode = false;
+	        state.viewer.currentPage = 1;
+	        const dualBtn = document.querySelector('#btnDualPage');
+	        if (dualBtn) {
+	          bindTouchAwareClick(dualBtn, (ev) => {
+	            ev.preventDefault();
+	            toggleDualMode().catch((err) => console.warn('Dual mode toggle failed', err));
+	          });
+	          dualBtn.setAttribute('aria-pressed', 'false');
+	        }
+	        updateDualModeAvailability();
+	        resetPdfRefreshState();
+	        annotations.enterViewer({ fileName });
+	        
+	        const backBtn = document.querySelector('#btnBack');
+	        bindTouchAwareClick(backBtn, (ev) => {
+	          ev.preventDefault();
+	          navigateBackFromViewer();
+	        });
+	        const fullscreenBtn = document.querySelector('#btnFullscreen');
+	        bindTouchAwareClick(fullscreenBtn, (ev) => {
+	          ev.preventDefault();
+	          toggleFullscreen();
+	        });
 
-        document.querySelector('#btnBack').onclick = () => {
-          // Cleanup before leaving viewer; exit fullscreen if active
-          const leave = () => { 
-            // Wenn wir von einer Playlist kommen, zurück zur Detail-Seite
-            if (playlist.mode && playlist.currentDetailId) {
-              history.replaceState(null, '', '/');
-              renderPlaylistDetail(playlist.currentDetailId);
-            } else {
-              location.href = "/"; 
-            }
-          };
-          aggressiveCleanup();
-          if (document.fullscreenElement) {
-            document.exitFullscreen().then(leave).catch(leave);
-          } else {
-            leave();
-          }
-        };
-  document.querySelector('#btnFullscreen').onclick = toggleFullscreen;
-
-        // Ensure NoSleep library is loaded before user clicks Play (so we can enable within the same gesture)
-        if (!window.NoSleep) {
-          try {
-            await new Promise((resolve, reject) => {
+	        // Ensure NoSleep library is loaded before user clicks Play (so we can enable within the same gesture)
+	        if (!window.NoSleep) {
+	          try {
+	            await new Promise((resolve, reject) => {
               const s = document.createElement('script');
               s.src = '/vendor/nosleep.min.js';
               s.onload = resolve; s.onerror = reject; document.head.appendChild(s);
@@ -6924,10 +6966,13 @@
           } catch (e) {
             console.warn('Preload NoSleep failed', e);
           }
-        }
+	        }
 
-        const btnPlayPause = document.querySelector('#btnPlayPause');
-        btnPlayPause.onclick = togglePlayAndWake;
+	        const btnPlayPause = document.querySelector('#btnPlayPause');
+	        bindTouchAwareClick(btnPlayPause, (ev) => {
+	          ev.preventDefault();
+	          togglePlayAndWake();
+	        });
 
         // Arm gesture activator for wake lock on the viewer container
         armWakeLockFromGestures(container);
@@ -7523,27 +7568,37 @@
         return { overlay, left, right };
       }
 
-      function computeTapZoneLayout() {
-        const pdfContainer = document.querySelector('#viewerPdfContainer');
-        const viewer = document.querySelector('#viewer');
-        if (!pdfContainer || !viewer) return { width: 0, enabled: false, bounds: null };
-        const bounds = pdfContainer.getBoundingClientRect();
-        const containerWidth = pdfContainer.clientWidth || bounds.width || 0;
-        let stageWidth = Number(state.viewer.pageStageWidth) || 0;
-        if (!stageWidth) {
-          const stage = viewer.querySelector('.viewer-page-stage');
-          if (stage instanceof HTMLElement) {
-            stageWidth = stage.getBoundingClientRect().width;
-          }
-        }
-        if (!stageWidth && containerWidth > 0) {
-          stageWidth = containerWidth * 0.78;
-        }
-        const whitespace = Math.max(0, containerWidth - stageWidth);
-        const width = Math.min(240, Math.max(0, whitespace / 2 - 12));
-        const enabled = width >= 36 && bounds.height > 0;
-        return { width, enabled, bounds };
-      }
+	      function computeTapZoneLayout() {
+	        const pdfContainer = document.querySelector('#viewerPdfContainer');
+	        const viewer = document.querySelector('#viewer');
+	        if (!pdfContainer || !viewer) return { width: 0, enabled: false, bounds: null };
+	        const bounds = pdfContainer.getBoundingClientRect();
+	        const containerWidth = pdfContainer.clientWidth || bounds.width || 0;
+	        let stageWidth = Number(state.viewer.pageStageWidth) || 0;
+	        if (!stageWidth) {
+	          const stage = viewer.querySelector('.viewer-page-stage');
+	          if (stage instanceof HTMLElement) {
+	            stageWidth = stage.getBoundingClientRect().width;
+	          }
+	        }
+	        if (!stageWidth && containerWidth > 0) {
+	          stageWidth = containerWidth * 0.78;
+	        }
+	        const whitespace = Math.max(0, containerWidth - stageWidth);
+	        const whitespaceWidth = Math.max(0, whitespace / 2 - 12);
+
+	        // UX: Even when zoomed (stage fills the container, whitespace ~0),
+	        // keep a reliable edge zone so page turning remains fast.
+	        const MIN_EDGE_PX = 96;
+	        const MAX_EDGE_PX = 240;
+	        const percentWidth = Math.round(containerWidth * 0.15);
+	        const desired = Math.max(whitespaceWidth, percentWidth);
+	        const hardMax = Math.max(0, Math.min(MAX_EDGE_PX, Math.floor(containerWidth / 2 - 16)));
+	        const hardMin = Math.min(MIN_EDGE_PX, hardMax);
+	        const width = hardMax > 0 ? Math.max(hardMin, Math.min(desired, hardMax)) : 0;
+	        const enabled = width >= 56 && bounds.height > 0;
+	        return { width, enabled, bounds };
+	      }
 
       function hideTapZoneHints() {
         const tz = state.viewer.tapZones;
@@ -7953,29 +8008,68 @@
         }
       });
 
-      function teardownDualTapZones() {
-        const dual = document.querySelector('#dualViewer');
-        if (!dual || !dual.dataset.tapHandlerAttached) return;
-        dual.removeEventListener('click', dual._tapHandler);
-        delete dual._tapHandler;
-        delete dual.dataset.tapHandlerAttached;
-      }
+	      function teardownDualTapZones() {
+	        const dual = document.querySelector('#dualViewer');
+	        if (!dual || !dual.dataset.tapHandlerAttached) return;
+	        if (dual._tapHandler && typeof dual._tapHandler === 'object') {
+	          if (dual._tapHandler.onPointerUp) dual.removeEventListener('pointerup', dual._tapHandler.onPointerUp);
+	          if (dual._tapHandler.onClick) dual.removeEventListener('click', dual._tapHandler.onClick);
+	          if (dual._tapHandler.onResize) {
+	            window.removeEventListener('resize', dual._tapHandler.onResize);
+	            window.removeEventListener('orientationchange', dual._tapHandler.onResize);
+	          }
+	        } else if (typeof dual._tapHandler === 'function') {
+	          dual.removeEventListener('click', dual._tapHandler);
+	        }
+	        delete dual._tapHandler;
+	        delete dual.dataset.tapHandlerAttached;
+	      }
 
-      function setupDualTapZones() {
-        const dual = document.querySelector('#dualViewer');
-        if (!dual || dual.dataset.tapHandlerAttached) return;
-        const handler = (event) => {
-          if (!state.viewer.dualMode) return;
-          if (event.type === 'pointerup' && event.pointerType === 'mouse' && event.button !== 0) return;
-          // Ignore taps during/after pinch-zoom to prevent accidental page turns
-          if (state.viewer.pinchCooldownUntil && Date.now() < state.viewer.pinchCooldownUntil) return;
-          const rect = dual.getBoundingClientRect();
-          const x = event.clientX;
-          const isRight = x > rect.left + rect.width / 2;
-          const totalPages = state.viewer.numPages || state.viewer._pdf?.numPages || 1;
-          const currentLeft = state.viewer.currentPage;
-          
-          // Im Dual Mode: +1/-1 Seite pro Blättern (wie echtes Notenheft)
+	      function setupDualTapZones() {
+	        const dual = document.querySelector('#dualViewer');
+	        if (!dual || dual.dataset.tapHandlerAttached) return;
+	        const computeEdgeWidth = (containerWidth) => {
+	          const w = Number(containerWidth) || 0;
+	          const MIN_EDGE_PX = 96;
+	          const MAX_EDGE_PX = 240;
+	          const percentWidth = Math.round(w * 0.15);
+	          const hardMax = Math.max(0, Math.min(MAX_EDGE_PX, Math.floor(w / 2 - 16)));
+	          const hardMin = Math.min(MIN_EDGE_PX, hardMax);
+	          const desired = Math.max(percentWidth, hardMin);
+	          return hardMax > 0 ? Math.max(hardMin, Math.min(desired, hardMax)) : 0;
+	        };
+	        const applyHintWidth = (edgeWidth) => {
+	          const leftHint = dual.querySelector('.dual-tap-hint--left');
+	          const rightHint = dual.querySelector('.dual-tap-hint--right');
+	          if (!leftHint || !rightHint) return;
+	          const px = `${Math.round(edgeWidth)}px`;
+	          leftHint.style.flex = `0 0 ${px}`;
+	          rightHint.style.flex = `0 0 ${px}`;
+	          leftHint.style.maxWidth = px;
+	          rightHint.style.maxWidth = px;
+	          leftHint.style.minWidth = px;
+	          rightHint.style.minWidth = px;
+	        };
+
+	        let edgeWidth = computeEdgeWidth(dual.clientWidth || dual.getBoundingClientRect().width);
+	        applyHintWidth(edgeWidth);
+
+	        const handleTap = (event) => {
+	          if (!state.viewer.dualMode) return;
+	          if (event.defaultPrevented) return;
+	          // Ignore taps during/after pinch-zoom to prevent accidental page turns
+	          if (state.viewer.pinchCooldownUntil && Date.now() < state.viewer.pinchCooldownUntil) return;
+	          if (!edgeWidth) return;
+	          const rect = dual.getBoundingClientRect();
+	          const x = event.clientX;
+	          const isLeftEdge = x < rect.left + edgeWidth;
+	          const isRightEdge = x > rect.right - edgeWidth;
+	          if (!isLeftEdge && !isRightEdge) return;
+	          const isRight = isRightEdge;
+	          const totalPages = state.viewer.numPages || state.viewer._pdf?.numPages || 1;
+	          const currentLeft = state.viewer.currentPage;
+	          
+	          // Im Dual Mode: +1/-1 Seite pro Blättern (wie echtes Notenheft)
           // Rechts: Rechte Seite wird links, neue Seite rechts
           // Links: Linke Seite wird rechts, neue Seite links
           let nextPage;
@@ -8008,12 +8102,40 @@
           }
           renderDualSpread(nextPage).catch(() => {});
         };
-        dual._tapHandler = handler;
-        // Nur click verwenden, nicht pointerup - sonst doppeltes Auslösen
-        dual.addEventListener('click', handler);
-        dual.dataset.tapHandlerAttached = '1';
-        
-        // Show intro animation like single page mode
+
+        // Touch on iPad does not reliably generate click events inside the viewer.
+        // Use pointerup for touch/pen and click fallback for mouse, with ghost-click suppression.
+        let recentTouchUntil = 0;
+        const onPointerUp = (event) => {
+          if (!state.viewer.dualMode) return;
+          if (event.pointerType === 'mouse') return;
+          recentTouchUntil = Date.now() + 700;
+          handleTap(event);
+        };
+	        const onClick = (event) => {
+	          if (recentTouchUntil && Date.now() < recentTouchUntil) {
+	            event.preventDefault();
+	            event.stopPropagation();
+	            return;
+	          }
+	          handleTap(event);
+	        };
+
+	        const onResize = () => {
+	          if (!state.viewer.dualMode) return;
+	          edgeWidth = computeEdgeWidth(dual.clientWidth || dual.getBoundingClientRect().width);
+	          applyHintWidth(edgeWidth);
+	        };
+
+	        window.addEventListener('resize', onResize, { passive: true });
+	        window.addEventListener('orientationchange', onResize, { passive: true });
+
+	        dual._tapHandler = { onPointerUp, onClick, onResize };
+	        dual.addEventListener('pointerup', onPointerUp);
+	        dual.addEventListener('click', onClick);
+	        dual.dataset.tapHandlerAttached = '1';
+	        
+	        // Show intro animation like single page mode
         showDualTapZoneIntro(dual);
       }
       
