@@ -1,4 +1,4 @@
-# Piano Sheets
+# Piano Sheets [BETA]
 
 Lightweight sheet-music library and viewer, optimized for iPad and mobile Safari/Chrome. It serves PDFs from a local folder, generates/caches thumbnails on the server, and provides a smooth, single-button auto-scroll experience in the browser.
 
