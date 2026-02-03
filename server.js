@@ -4140,6 +4140,61 @@ app.get("/api/prefs", async (req, res) => {
   res.json(config);
 });
 
+app.get("/api/prefs/annotations", async (req, res) => {
+  if (!ensureAuthenticated(req, res)) return;
+  const { CONFIG } = userContext;
+  const annotations = CONFIG.annotations || {};
+  const preset = annotations.preset ?? null;
+  const inputMode = annotations.inputMode || "pen-only";
+  res.setHeader("Cache-Control", "no-store");
+  res.json({ preset, inputMode });
+});
+
+app.post("/api/prefs/annotations", async (req, res) => {
+  if (!ensureAuthenticated(req, res)) return;
+  const { CONFIG } = userContext;
+  const { preset, inputMode } = req.body || {};
+
+  const current = { ...(CONFIG.annotations || {}) };
+
+  if (preset !== undefined) {
+    if (preset === null) {
+      current.preset = null;
+    } else if (preset && typeof preset === "object") {
+      const color = typeof preset.color === "string" ? preset.color.trim() : "";
+      const size = Number(preset.size);
+      const tool = typeof preset.tool === "string" ? preset.tool.trim() : "";
+      const isHex = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(color);
+      const isSize = Number.isInteger(size) && size >= 1 && size <= 8;
+      const isTool = tool === "pen" || tool === "highlighter";
+      if (!isHex || !isSize || !isTool) {
+        return res.status(400).json({ error: "Invalid preset payload" });
+      }
+      current.preset = { color, size, tool };
+    } else {
+      return res.status(400).json({ error: "Invalid preset payload" });
+    }
+  }
+
+  if (inputMode !== undefined) {
+    const mode = typeof inputMode === "string" ? inputMode.trim() : "";
+    if (mode !== "pen-only" && mode !== "both") {
+      return res.status(400).json({ error: "Invalid inputMode" });
+    }
+    current.inputMode = mode;
+  }
+
+  CONFIG.annotations = current;
+  try {
+    await userContext.persistConfigNow();
+  } catch (err) {
+    console.error("Failed to persist annotation prefs:", err);
+    return res.status(500).json({ error: "Failed to persist annotation prefs" });
+  }
+
+  res.json({ ok: true, preset: current.preset ?? null, inputMode: current.inputMode || "pen-only" });
+});
+
 app.post("/api/prefs/favorites", async (req, res) => {
   if (!ensureAuthenticated(req, res)) return;
   const { CONFIG } = userContext;

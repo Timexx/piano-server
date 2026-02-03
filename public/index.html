@@ -429,6 +429,20 @@
                 </div>
               </div>
               <div class="annotation-section">
+                <span class="section-label">Preset</span>
+                <div class="annotation-preset-row">
+                  <button id="btnAnnotationPresetApply" type="button" class="btn btn-secondary" title="Preset anwenden">Preset anwenden</button>
+                  <button id="btnAnnotationPresetSave" type="button" class="btn btn-ghost" title="Preset speichern">Preset speichern</button>
+                </div>
+              </div>
+              <div class="annotation-section">
+                <span class="section-label">Eingabe</span>
+                <div class="annotation-input-row" role="group" aria-label="Eingabemodus">
+                  <button id="btnAnnotationInputPenOnly" type="button" class="annotation-input-btn" aria-pressed="true" title="Nur Stift">Stift</button>
+                  <button id="btnAnnotationInputBoth" type="button" class="annotation-input-btn" aria-pressed="false" title="Finger + Stift">Finger+Stift</button>
+                </div>
+              </div>
+              <div class="annotation-section">
                 <div class="annotation-actions-row">
                   <button id="btnAnnotationUndo" type="button" class="btn btn-secondary btn-icon" title="Rückgängig">
                     <span>↺</span>
@@ -436,6 +450,12 @@
                   <button id="btnAnnotationClear" type="button" class="btn btn-secondary btn-icon" title="Seite leeren">
                     <span>🗑️</span>
                   </button>
+                </div>
+              </div>
+              <div class="annotation-section annotation-status">
+                <div class="annotation-status-row">
+                  <span id="annotationStatusLine" class="annotation-status-line"></span>
+                  <span id="annotationPencilBadge" class="annotation-pencil-badge hidden">Pencil aktiv</span>
                 </div>
               </div>
             </div>
@@ -1134,7 +1154,10 @@
         state.viewer._pdf = pdf;
 
         // Reload annotation data from server for affected pages
-        const annotationSnapshots = await getAnnotationsFromBackend(fileName);
+        const { pages: annotationSnapshots, historyAvailable } = await getAnnotationsFromBackend(fileName);
+        if (annotations?.setServerUndoAvailable) {
+          annotations.setServerUndoAvailable(historyAvailable);
+        }
         const snapshotMap = new Map();
         if (Array.isArray(annotationSnapshots)) {
           annotationSnapshots.forEach((snapshot) => {
@@ -1504,6 +1527,7 @@
     });
     annotations.initControls();
     window.annotations = annotations;
+    setupAnnotationPrefsUI();
 
     state.viewer.zoom = loadStoredZoom(false); // Startet immer im Single Mode
     state.viewer.committedZoom = state.viewer.zoom;
@@ -2025,16 +2049,99 @@
         } catch { return null; }
       }
 
+      async function getAnnotationPrefs() {
+        try {
+          const res = await fetch("/api/prefs/annotations", { cache: "no-store" });
+          if (!res.ok) return null;
+          const data = await res.json();
+          if (!data || typeof data !== "object") return null;
+          return {
+            preset: data.preset ?? null,
+            inputMode: data.inputMode || "pen-only"
+          };
+        } catch {
+          return null;
+        }
+      }
+
+      async function setAnnotationPrefs(payload) {
+        try {
+          const headers = { "Content-Type": "application/json" };
+          const csrfToken = sessionStorage.getItem('csrfToken');
+          if (csrfToken) {
+            headers["X-CSRF-Token"] = csrfToken;
+          }
+          const res = await fetch("/api/prefs/annotations", {
+            method: "POST",
+            headers,
+            body: JSON.stringify(payload || {})
+          });
+          if (!res.ok) return null;
+          return await res.json();
+        } catch {
+          return null;
+        }
+      }
+
+      function setupAnnotationPrefsUI() {
+        const applyBtn = document.getElementById("btnAnnotationPresetApply");
+        const saveBtn = document.getElementById("btnAnnotationPresetSave");
+        const penOnlyBtn = document.getElementById("btnAnnotationInputPenOnly");
+        const bothBtn = document.getElementById("btnAnnotationInputBoth");
+
+        if (applyBtn) {
+          applyBtn.addEventListener("click", () => {
+            const ok = annotations?.applyPreset?.();
+            if (!ok && annotations?.showStatus) {
+              annotations.showStatus("Kein Preset gespeichert", 1400);
+            }
+            if (ok && annotations?.showStatus) {
+              annotations.showStatus("Preset angewendet", 1200);
+            }
+          });
+        }
+
+        if (saveBtn) {
+          saveBtn.addEventListener("click", async () => {
+            const preset = annotations?.getToolState?.();
+            if (!preset) return;
+            const res = await setAnnotationPrefs({ preset });
+            if (!res) {
+              showToast("Preset konnte nicht gespeichert werden", 2500);
+              return;
+            }
+            annotations?.setPreset?.(res.preset || preset);
+            annotations?.showStatus?.("Preset gespeichert", 1400);
+          });
+        }
+
+        const updateInputMode = async (mode) => {
+          annotations?.setInputMode?.(mode);
+          const res = await setAnnotationPrefs({ inputMode: mode });
+          if (!res) {
+            showToast("Eingabemodus konnte nicht gespeichert werden", 2500);
+          }
+        };
+
+        if (penOnlyBtn) {
+          penOnlyBtn.addEventListener("click", () => updateInputMode("pen-only"));
+        }
+        if (bothBtn) {
+          bothBtn.addEventListener("click", () => updateInputMode("both"));
+        }
+      }
+
       async function getAnnotationsFromBackend(name) {
         try {
           const res = await fetch(`/api/annotations?name=${encodeURIComponent(name)}`, { cache: "no-store" });
-          if (!res.ok) return [];
+          if (!res.ok) return { pages: [], historyAvailable: false };
           const data = await res.json();
-          if (!data || typeof data !== "object") return [];
-          if (Array.isArray(data.pages)) return data.pages;
-          return [];
+          if (!data || typeof data !== "object") return { pages: [], historyAvailable: false };
+          const pages = Array.isArray(data.pages) ? data.pages : [];
+          const historyAvailable = Boolean(data.history && data.history.available);
+          return { pages, historyAvailable };
         } catch {
-          return [];
+          return { pages: [], historyAvailable: false };
         }
       }
       async function setFileSecsOnBackend(name, secs) {
@@ -7117,6 +7224,11 @@
         if (dualViewerEl) setupPinchZoom(dualViewerEl);
 
         const prefs = await getFilePrefsFromBackend(fileName);
+        const annotationPrefs = await getAnnotationPrefs();
+        if (annotationPrefs && annotations) {
+          if (annotations.setPreset) annotations.setPreset(annotationPrefs.preset);
+          if (annotations.setInputMode) annotations.setInputMode(annotationPrefs.inputMode);
+        }
         state.viewer.secsPerPage = prefs?.secsPerPage || 45;
         state.viewer.categories = Array.isArray(prefs?.categories) ? prefs.categories : [];
         state.viewer.jumpMarkers = Array.isArray(prefs?.jumpMarkers) ? prefs.jumpMarkers : [];
@@ -7214,7 +7326,10 @@
         updateViewerPlaylistControls();
 
         updateStatus("Lade…");
-        const annotationSnapshots = await getAnnotationsFromBackend(fileName);
+        const { pages: annotationSnapshots, historyAvailable } = await getAnnotationsFromBackend(fileName);
+        if (annotations?.setServerUndoAvailable) {
+          annotations.setServerUndoAvailable(historyAvailable);
+        }
         if (Array.isArray(annotationSnapshots)) {
           const loadCommitted = typeof annotations?.primeCommittedImage === "function"
             ? annotations.primeCommittedImage
