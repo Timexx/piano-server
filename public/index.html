@@ -28,7 +28,7 @@
     <script src="/auth-status.js" defer></script>
 
     <!-- Styles - Cache busting with timestamp -->
-    <link rel="stylesheet" href="/styles.css?v=20251219-grid">
+    <link rel="stylesheet" href="/styles.css?v=20260203-drawer">
   </head>
   <body class="min-h-screen bg-neutral-950 text-neutral-100 antialiased tap-highlight-none">
     <!-- Toast Container for notifications -->
@@ -41,13 +41,22 @@
         <div class="absolute inset-0 bg-gradient-to-r from-transparent via-[--accent-color]/5 to-transparent pointer-events-none"></div>
         
         <div class="relative mx-auto max-w-7xl px-4 sm:px-6 h-16 flex items-center justify-between gap-3">
-          <!-- Logo with elegant styling -->
-          <a href="/" aria-label="Music Sheets" class="group flex items-center gap-2.5 shrink-0 transition-all duration-200 hover:scale-[1.02]">
-            <span class="text-2xl transition-transform duration-300 group-hover:rotate-12">🎼</span>
-            <span class="text-lg font-bold tracking-tight bg-gradient-to-br from-white to-neutral-300 bg-clip-text text-transparent hidden sm:inline">
-              Music Sheets
-            </span>
-          </a>
+          <div class="header-left">
+            <button id="headerMenuBtn" class="header-menu-btn" type="button" data-action="open-library-drawer" aria-label="Menü öffnen" aria-controls="libraryDrawer" aria-expanded="false">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <line x1="4" y1="6" x2="20" y2="6"></line>
+                <line x1="4" y1="12" x2="20" y2="12"></line>
+                <line x1="4" y1="18" x2="20" y2="18"></line>
+              </svg>
+            </button>
+            <!-- Logo with elegant styling -->
+            <a href="/" aria-label="Music Sheets" class="group flex items-center gap-2.5 shrink-0 transition-all duration-200 hover:scale-[1.02]">
+              <span class="text-2xl transition-transform duration-300 group-hover:rotate-12">🎼</span>
+              <span class="text-lg font-bold tracking-tight bg-gradient-to-br from-white to-neutral-300 bg-clip-text text-transparent hidden sm:inline">
+                Music Sheets
+              </span>
+            </a>
+          </div>
           
           <!-- Actions container -->
           <div id="header-actions" class="flex items-center gap-2 shrink-0"></div>
@@ -164,12 +173,14 @@
       }
 
       function syncControlBarLayout() {
+        const viewportGap = getViewportBottomGap();
+        document.documentElement.style.setProperty('--viewport-bottom-gap', `${viewportGap}px`);
+
         const controls = document.getElementById('controls');
         const controlsInner = document.getElementById('controlsInner');
         if (!controls || !controlsInner) return;
 
         const safeAreaBottom = getSafeAreaBottom();
-        const viewportGap = getViewportBottomGap();
         const minimizedHeight = Math.round(controlsInner.getBoundingClientRect().height || 0) || 56;
         const expandedHeight = measureExpandedHeight();
 
@@ -191,8 +202,6 @@
         document.documentElement.style.setProperty('--controls-offset', `${padding}px`);
         document.documentElement.style.setProperty('--controls-bottom-expanded', `${expandedOffset}px`);
         document.documentElement.style.setProperty('--controls-bottom-min', `${minimizedOffset}px`);
-        document.documentElement.style.setProperty('--viewport-bottom-gap', `${viewportGap}px`);
-
         const viewer = document.getElementById('viewer');
         if (viewer) {
           viewer.style.paddingBottom = `var(--controls-offset)`;
@@ -209,6 +218,7 @@
         window.visualViewport.addEventListener('resize', scheduleControlBarLayout, { passive: true });
         window.visualViewport.addEventListener('scroll', scheduleControlBarLayout, { passive: true });
       }
+      scheduleControlBarLayout();
 
       // Control-Bar Toggle - einfach die Klasse umschalten
       function initControlsToggle() {
@@ -809,6 +819,11 @@
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>`;
       const SVG_LIST = `
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><circle cx="4" cy="6" r="1"></circle><circle cx="4" cy="12" r="1"></circle><circle cx="4" cy="18" r="1"></circle></svg>`;
+      const SVG_BOOK = `
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+          <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+          <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+        </svg>`;
       const SVG_SORT_ASC = `
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M11 5h10"/><path d="M11 9h7"/><path d="M11 13h4"/><path d="M3 17l3 3 3-3"/></svg>`;
       const SVG_SORT_DESC = `
@@ -850,9 +865,16 @@
           <circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="18" r="1.5"/>
         </svg>`;
 
+      const storedNavMode = localStorage.getItem('libNavMode');
+      const storedPlaylistMode = localStorage.getItem('playlistMode') === '1';
+      const initialPlaylistMode = storedNavMode ? storedNavMode === 'playlist' : storedPlaylistMode;
+      if (!storedNavMode) {
+        localStorage.setItem('libNavMode', initialPlaylistMode ? 'playlist' : 'library');
+      }
+
       // Playlist client state
       const playlist = {
-        mode: localStorage.getItem('playlistMode') === '1',
+        mode: initialPlaylistMode,
         activeId: null,
         name: null,
         icon: "🎵",
@@ -927,6 +949,10 @@
           #plDetailList, #playlistList {
             touch-action: pan-y;
             -webkit-overflow-scrolling: touch;
+          }
+          #plDetailList.is-dragging, #playlistList.is-dragging {
+            touch-action: none;
+            overscroll-behavior: contain;
           }
           
           @media (hover: hover) {
@@ -1245,10 +1271,13 @@
           loadedOnce: false,
           sort: localStorage.getItem("libSort") || "name",
           order: localStorage.getItem("libOrder") || "asc",
-          q: "",
+          q: localStorage.getItem("libQuery") || "",
           view: localStorage.getItem("libView") || "grid",
           favorites: new Set(),
           onlyFavorites: localStorage.getItem("onlyFav") === "true",
+          quickAccess: {
+            recentCollapsed: false
+          },
           pageSize: "80",
           page: 1,
           items: [],
@@ -1304,7 +1333,8 @@
             bounds: null,
             handlerTarget: null,
             pointerHandler: null
-          }
+          },
+          abortRender: false
         },
         categories: [],
         ui: {
@@ -1313,7 +1343,8 @@
           uploadOpen: false,
           uploadLimitMb: 200,
           uploadSupported: true,
-          filterCollapsed: localStorage.getItem('filterCollapsed') === 'true'
+          filterCollapsed: localStorage.getItem('filterCollapsed') === 'true',
+          restorePlaylistDetail: true
         },
         thumbs: {
           cache: new Map(),
@@ -1544,7 +1575,7 @@
       }
       function ensureLibraryViewportSizing() {
         disposeLibraryViewportSizing();
-        const wrap = document.querySelector('#virtualWrap');
+        const wrap = document.querySelector('#libraryScroll') || document.querySelector('#virtualWrap');
         const pager = document.querySelector('#libraryPager');
         if (!wrap) return;
         const updateHeight = () => {
@@ -1552,13 +1583,6 @@
           const rect = wrap.getBoundingClientRect();
           const footerVisible = controlsEl && !controlsEl.classList.contains('hidden');
           const footerHeight = footerVisible ? controlsEl.getBoundingClientRect().height : 0;
-          
-          // Measure pager height more reliably
-          let pagerHeight = 0;
-          if (pager) {
-            const pagerRect = pager.getBoundingClientRect();
-            pagerHeight = pagerRect.height || 70; // Fallback to min height
-          }
           
           const appStyles = window.getComputedStyle(appEl);
           const paddingBottom = parseFloat(appStyles.paddingBottom || '0') || 0;
@@ -1569,12 +1593,7 @@
           const safetyMargin = 120; // Very large margin for iPad - ensure full visibility
           
           // Calculate available height more conservatively
-          let available = window.innerHeight - rect.top - footerHeight - paddingBottom - pagerHeight - safetyMargin - safeAreaBottom;
-          
-          // Additional check: ensure we leave enough space for the pager (even more space)
-          const minPagerSpace = 120; // Much larger minimum space to reserve for pager visibility
-          const maxWrapHeight = window.innerHeight - rect.top - footerHeight - paddingBottom - minPagerSpace;
-          available = Math.min(available, maxWrapHeight);
+          let available = window.innerHeight - rect.top - footerHeight - paddingBottom - safetyMargin - safeAreaBottom;
           
           if (!Number.isFinite(available)) available = 480;
           if (available <= 0) available = 160;
@@ -1984,6 +2003,13 @@
           if (Array.isArray(prefs.favorites)) {
             state.library.favorites = new Set(prefs.favorites);
           }
+          if (prefs && typeof prefs === "object") {
+            const recentCollapsed = prefs.library?.quickAccess?.recentCollapsed;
+            if (typeof recentCollapsed === "boolean") {
+              if (!state.library.quickAccess) state.library.quickAccess = { recentCollapsed: false };
+              state.library.quickAccess.recentCollapsed = recentCollapsed;
+            }
+          }
         } catch (err) {
         }
       }
@@ -2006,31 +2032,52 @@
       // Update favorites chip counter live
       function updateFavoritesChipCounter() {
         const favChip = document.getElementById('filterFavChip');
-        if (!favChip) return;
-        
+
         const favCount = state.library.favorites?.size || 0;
         const favActive = state.library.onlyFavorites;
-        
-        // Find or create badge span
-        let badge = favChip.querySelector('span:last-child');
-        const isBadge = badge && badge.textContent.match(/^\d+$/);
-        
-        if (favCount > 0) {
-          const badgeClasses = `inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full text-xs font-bold ${favActive ? 'bg-amber-400/90 text-neutral-900' : 'bg-amber-500/20 text-amber-300'}`;
-          if (isBadge) {
-            // Update existing badge
-            badge.textContent = favCount;
-            badge.className = badgeClasses;
-          } else {
-            // Create new badge
-            const newBadge = document.createElement('span');
-            newBadge.className = badgeClasses;
-            newBadge.textContent = favCount;
-            favChip.appendChild(newBadge);
+
+        if (favChip) {
+          // Find or create badge span
+          let badge = favChip.querySelector('span:last-child');
+          const isBadge = badge && badge.textContent.match(/^\d+$/);
+
+          if (favCount > 0) {
+            const badgeClasses = `inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full text-xs font-bold ${favActive ? 'bg-amber-400/90 text-neutral-900' : 'bg-amber-500/20 text-amber-300'}`;
+            if (isBadge) {
+              // Update existing badge
+              badge.textContent = favCount;
+              badge.className = badgeClasses;
+            } else {
+              // Create new badge
+              const newBadge = document.createElement('span');
+              newBadge.className = badgeClasses;
+              newBadge.textContent = favCount;
+              favChip.appendChild(newBadge);
+            }
+          } else if (isBadge) {
+            // Remove badge if count is 0
+            badge.remove();
           }
-        } else if (isBadge) {
-          // Remove badge if count is 0
-          badge.remove();
+        }
+
+        const sidebarFav = document.querySelector('.sidebar-quick-btn[data-quick="favorites"]');
+        if (sidebarFav) {
+          sidebarFav.classList.toggle('is-active', state.library.onlyFavorites);
+          let sidebarPill = sidebarFav.querySelector('.sidebar-pill');
+          if (favCount > 0) {
+            if (!sidebarPill) {
+              sidebarPill = document.createElement('span');
+              sidebarPill.className = 'sidebar-pill';
+              sidebarFav.appendChild(sidebarPill);
+            }
+            sidebarPill.textContent = String(favCount);
+          } else if (sidebarPill) {
+            sidebarPill.remove();
+          }
+        }
+
+        if (document.querySelector('#libraryQuickAccess')) {
+          renderLibraryQuickAccess();
         }
       }
       async function getFilePrefsFromBackend(name) {
@@ -2072,6 +2119,25 @@
             headers["X-CSRF-Token"] = csrfToken;
           }
           const res = await fetch("/api/prefs/annotations", {
+            method: "POST",
+            headers,
+            body: JSON.stringify(payload || {})
+          });
+          if (!res.ok) return null;
+          return await res.json();
+        } catch {
+          return null;
+        }
+      }
+
+      async function setLibraryPrefs(payload) {
+        try {
+          const headers = { "Content-Type": "application/json" };
+          const csrfToken = sessionStorage.getItem('csrfToken');
+          if (csrfToken) {
+            headers["X-CSRF-Token"] = csrfToken;
+          }
+          const res = await fetch("/api/prefs/library", {
             method: "POST",
             headers,
             body: JSON.stringify(payload || {})
@@ -2684,6 +2750,399 @@
         renderLibrary();
       }
 
+      function setNavMode(mode) {
+        const nextPlaylistMode = mode === 'playlist';
+        playlist.mode = nextPlaylistMode;
+        localStorage.setItem('playlistMode', nextPlaylistMode ? '1' : '0');
+        localStorage.setItem('libNavMode', nextPlaylistMode ? 'playlist' : 'library');
+      }
+
+      function getNavMode() {
+        return playlist.mode ? 'playlist' : 'library';
+      }
+
+      const LIB_RECENT_KEY = 'libRecent';
+      const LIB_RECENT_MAX = 12;
+
+      function formatLibraryDisplayName(name) {
+        const base = name ? name.split('/').pop() : '';
+        return base ? base.replace(/\.pdf$/i, '') : '';
+      }
+
+      function loadRecentList() {
+        try {
+          const raw = localStorage.getItem(LIB_RECENT_KEY);
+          const list = raw ? JSON.parse(raw) : [];
+          return Array.isArray(list) ? list.filter(Boolean) : [];
+        } catch {
+          return [];
+        }
+      }
+
+      function saveRecentList(list) {
+        try {
+          localStorage.setItem(LIB_RECENT_KEY, JSON.stringify(list));
+        } catch {}
+      }
+
+      function trackRecentOpen(fileName) {
+        if (!fileName) return;
+        const list = loadRecentList();
+        const next = [fileName, ...list.filter((name) => name !== fileName)].slice(0, LIB_RECENT_MAX);
+        saveRecentList(next);
+        if (document.querySelector('#libraryQuickAccess')) {
+          renderLibraryQuickAccess();
+        }
+      }
+
+      function removeRecentEntry(fileName) {
+        if (!fileName) return;
+        const list = loadRecentList();
+        const next = list.filter((name) => name !== fileName);
+        if (next.length !== list.length) {
+          saveRecentList(next);
+          if (document.querySelector('#libraryQuickAccess')) {
+            renderLibraryQuickAccess();
+          }
+        }
+      }
+
+      function purgeLocalMissingDocument(fileName) {
+        if (!fileName) return;
+        removeRecentEntry(fileName);
+        if (state.library?.favorites?.has?.(fileName)) {
+          state.library.favorites.delete(fileName);
+        }
+        if (Array.isArray(state.library.items)) {
+          const before = state.library.items.length;
+          state.library.items = state.library.items.filter((item) => item?.name !== fileName);
+          if (state.library.total > 0 && state.library.items.length !== before) {
+            state.library.total = Math.max(0, state.library.total - 1);
+          }
+        }
+      }
+
+      async function cleanupMissingDocument(fileName, statusCode) {
+        if (!fileName) return;
+        purgeLocalMissingDocument(fileName);
+        try {
+          const headers = { "Content-Type": "application/json" };
+          const csrfToken = sessionStorage.getItem('csrfToken');
+          if (csrfToken) headers["X-CSRF-Token"] = csrfToken;
+          await fetch("/api/sheets/cleanup-missing", {
+            method: "POST",
+            headers,
+            body: JSON.stringify({ name: fileName, status: statusCode })
+          });
+        } catch (err) {
+          console.warn("cleanupMissingDocument failed", err);
+        }
+        try {
+          await fetchPlaylists();
+        } catch {}
+        try {
+          await loadPage();
+        } catch {}
+      }
+
+      function extractHttpStatus(err) {
+        if (!err) return null;
+        if (Number.isFinite(err.status)) return Number(err.status);
+        if (Number.isFinite(err?.response?.status)) return Number(err.response.status);
+        const msg = String(err.message || "");
+        const match = msg.match(/\b(403|404)\b/);
+        if (match) return Number(match[1]);
+        return null;
+      }
+
+      function getQuickAccessItemMeta(fileName) {
+        const item = Array.isArray(state.library.items)
+          ? state.library.items.find((entry) => entry?.name === fileName)
+          : null;
+        const displayName = item?.displayName || formatLibraryDisplayName(fileName);
+        const thumbPath = fileName
+          ? `/thumbnails/${encodePathSegments(fileName.replace(/\.pdf$/i, '.jpg'))}`
+          : '';
+        return {
+          name: fileName,
+          displayName,
+          thumbnail: item?.thumbnail || thumbPath
+        };
+      }
+
+      function buildQuickAccessCards(list, { emptyText }) {
+        if (!list.length) {
+          return `<div class="quick-access-empty">${emptyText}</div>`;
+        }
+        return list.map((meta) => `
+          <button class="quick-access-card" type="button" data-open-file="${escapeHtml(meta.name)}">
+            <div class="quick-access-thumb">
+              <img src="${escapeHtml(meta.thumbnail)}" alt="${escapeHtml(meta.displayName)}" loading="lazy" onerror="this.classList.add('hidden'); this.nextElementSibling.classList.remove('hidden');">
+              <div class="quick-access-fallback hidden">PDF</div>
+            </div>
+            <div class="quick-access-title" title="${escapeHtml(meta.displayName)}">${escapeHtml(meta.displayName)}</div>
+          </button>
+        `).join('');
+      }
+
+      function renderLibraryQuickAccess() {
+        const host = document.querySelector('#libraryQuickAccess');
+        if (!host) return;
+        const recentList = loadRecentList().slice(0, 8).map(getQuickAccessItemMeta);
+        const recentCollapsed = state.library.quickAccess?.recentCollapsed === true;
+        host.innerHTML = `
+          <div class="quick-access-row" data-quick-section="recent" data-collapsed="${recentCollapsed ? 'true' : 'false'}">
+            <div class="quick-access-header">
+              <h3>Zuletzt gespielt</h3>
+              <div class="quick-access-actions">
+                <button type="button" class="quick-access-toggle" data-action="toggle-recent">${recentCollapsed ? 'Einblenden' : 'Ausblenden'}</button>
+                ${recentCollapsed ? '' : '<button type="button" class="quick-access-link" data-quick-target="recent">Ansehen</button>'}
+              </div>
+            </div>
+            <div class="quick-access-body">
+              <div class="quick-access-scroller">
+                ${buildQuickAccessCards(recentList, { emptyText: 'Noch keine zuletzt gespielten Titel.' })}
+              </div>
+            </div>
+          </div>
+        `;
+
+        const toggleBtn = host.querySelector('[data-action="toggle-recent"]');
+        if (toggleBtn) {
+          toggleBtn.addEventListener('click', async () => {
+            const next = !(state.library.quickAccess?.recentCollapsed === true);
+            if (!state.library.quickAccess) state.library.quickAccess = { recentCollapsed: false };
+            state.library.quickAccess.recentCollapsed = next;
+            renderLibraryQuickAccess();
+            const res = await setLibraryPrefs({ quickAccess: { recentCollapsed: next } });
+            if (!res) {
+              showToast('Einstellung konnte nicht gespeichert werden', 2200);
+            }
+          });
+        }
+
+        host.querySelectorAll('[data-open-file]').forEach((btn) => {
+          const fileName = btn.getAttribute('data-open-file');
+          let moved = false;
+          let startX = 0;
+          let startY = 0;
+          btn.addEventListener('pointerdown', (ev) => {
+            if (ev.pointerType !== 'touch') return;
+            moved = false;
+            startX = ev.clientX;
+            startY = ev.clientY;
+          });
+          btn.addEventListener('pointermove', (ev) => {
+            if (ev.pointerType !== 'touch') return;
+            const dx = Math.abs(ev.clientX - startX);
+            const dy = Math.abs(ev.clientY - startY);
+            if (dx + dy > 10) moved = true;
+          });
+          btn.addEventListener('click', (ev) => {
+            if (moved) {
+              moved = false;
+              return;
+            }
+            ev.preventDefault();
+            if (!fileName) return;
+            acquireWakeLockSync();
+            history.replaceState(null, '', `/?file=${encodeURIComponent(fileName)}`);
+            renderViewer(fileName);
+          });
+        });
+
+        host.querySelectorAll('[data-quick-target]').forEach((btn) => {
+          const target = btn.getAttribute('data-quick-target');
+          btn.addEventListener('click', () => {
+            const section = host.querySelector(`[data-quick-section="${target}"]`);
+            section?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          });
+        });
+      }
+
+      function renderLibrarySidebar({ activeMode }) {
+        const navLibraryActive = activeMode === 'library';
+        const navPlaylistActive = activeMode === 'playlist';
+        const playlistList = Array.isArray(playlist.list) ? playlist.list : [];
+        const currentDetailId = playlist.currentDetailId || null;
+        const activePlaylistId = currentDetailId || (navPlaylistActive ? playlist.activeId : null);
+        const overviewActive = navPlaylistActive && !currentDetailId;
+        const playlistButtons = playlistList.map((pl) => {
+          const isActive = pl.id === activePlaylistId;
+          const count = Number.isFinite(pl.itemCount) ? pl.itemCount : (Array.isArray(pl.items) ? pl.items.length : 0);
+          return `
+            <button class="sidebar-playlist-btn ${isActive ? 'is-active' : ''}" data-playlist-id="${pl.id}">
+              <span class="sidebar-playlist-icon">${escapeHtml(pl.icon || '🎵')}</span>
+              <span class="sidebar-playlist-name">${escapeHtml(pl.name || 'Playlist')}</span>
+              <span class="sidebar-playlist-count">${count}</span>
+            </button>
+          `;
+        }).join('') || `<div class="sidebar-empty">Keine Playlists</div>`;
+
+        return `
+          <div class="library-sidebar-card">
+            <div class="sidebar-section">
+              <div class="sidebar-title">Navigation</div>
+              <button class="sidebar-nav-btn ${navLibraryActive ? 'is-active' : ''}" data-nav="library">Bibliothek</button>
+            </div>
+            <div class="sidebar-section">
+              <div class="sidebar-title-row">
+                <button class="sidebar-title-button ${overviewActive ? 'is-active' : ''}" data-nav="playlist">Playlists</button>
+                <button class="sidebar-icon-btn" type="button" data-action="create-playlist" title="Neue Playlist">＋</button>
+              </div>
+              <div class="sidebar-playlist-list">
+                ${playlistButtons}
+              </div>
+            </div>
+          </div>
+        `;
+      }
+
+      function renderLibraryDrawer(sidebarHtml) {
+        return `
+          <div id="libraryDrawer" class="library-drawer" aria-hidden="true">
+            <div class="library-drawer-backdrop" data-action="close-library-drawer"></div>
+            <div class="library-drawer-panel">
+              <div class="drawer-header">
+                <div class="drawer-title">Navigation</div>
+                <button type="button" class="drawer-close" data-action="close-library-drawer" aria-label="Menü schließen">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                  </svg>
+                </button>
+              </div>
+              <div class="drawer-content">
+                ${sidebarHtml}
+              </div>
+            </div>
+          </div>
+        `;
+      }
+
+      function renderLibraryShell({ mainHtml, activeMode }) {
+        const sidebarHtml = renderLibrarySidebar({ activeMode });
+        document.body.classList.remove('library-drawer-open');
+        const modeSwitch = document.querySelector('#headerModeSwitch');
+        if (modeSwitch) modeSwitch.remove();
+        appEl.innerHTML = `
+          <div class="library-layout">
+            <aside id="librarySidebar">${sidebarHtml}</aside>
+            <section id="libraryMain">${mainHtml}</section>
+          </div>
+          ${renderLibraryDrawer(sidebarHtml)}
+        `;
+        setupLibraryNavigationUI();
+      }
+
+      function openLibraryDrawer() {
+        const drawer = document.querySelector('#libraryDrawer');
+        if (!drawer) return;
+        drawer.classList.add('is-open');
+        drawer.setAttribute('aria-hidden', 'false');
+        document.body.classList.add('library-drawer-open');
+        const menuBtn = document.querySelector('#headerMenuBtn');
+        menuBtn?.setAttribute('aria-expanded', 'true');
+      }
+
+      function closeLibraryDrawer() {
+        const drawer = document.querySelector('#libraryDrawer');
+        if (!drawer) return;
+        drawer.classList.remove('is-open');
+        drawer.setAttribute('aria-hidden', 'true');
+        document.body.classList.remove('library-drawer-open');
+        const menuBtn = document.querySelector('#headerMenuBtn');
+        menuBtn?.setAttribute('aria-expanded', 'false');
+      }
+
+      function setupLibraryNavigationUI() {
+        document.querySelectorAll('[data-nav]').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            const target = btn.getAttribute('data-nav');
+            if (!target) return;
+            const next = target === 'playlist' ? 'playlist' : 'library';
+            if (next !== getNavMode()) {
+              setNavMode(next);
+            }
+            closeLibraryDrawer();
+            renderLibrary();
+          });
+        });
+
+        document.querySelectorAll('[data-playlist-id]').forEach((btn) => {
+          if (!btn.closest('#librarySidebar') && !btn.closest('#libraryDrawer')) return;
+          btn.addEventListener('click', () => {
+            const id = btn.getAttribute('data-playlist-id');
+            if (!id) return;
+            setNavMode('playlist');
+            closeLibraryDrawer();
+            renderPlaylistDetail(id);
+          });
+        });
+
+        document.querySelectorAll('[data-action="create-playlist"]').forEach((btn) => {
+          if (!btn.closest('#librarySidebar') && !btn.closest('#libraryDrawer')) return;
+          btn.addEventListener('click', async (ev) => {
+            ev?.preventDefault?.();
+            closeLibraryDrawer();
+            const created = await createPlaylistOnBackend({});
+            if (created) {
+              requestAnimationFrame(() => openPlaylistManager({ focusId: created.id }));
+            }
+          });
+        });
+
+        document.querySelectorAll('[data-action="open-library-drawer"]').forEach((btn) => {
+          bindTouchAwareClick(btn, () => openLibraryDrawer());
+        });
+        document.querySelectorAll('[data-action="close-library-drawer"]').forEach((btn) => {
+          bindTouchAwareClick(btn, () => closeLibraryDrawer());
+        });
+      }
+
+      function getLibraryScrollSignature() {
+        const L = state.library;
+        return JSON.stringify({
+          q: L.q || "",
+          sort: L.sort,
+          order: L.order,
+          view: L.view,
+          category: L.categoryFilter,
+          onlyFavorites: L.onlyFavorites,
+          pageSize: L.pageSize,
+          page: L.page
+        });
+      }
+
+      function restoreLibraryScroll(scroller, signature) {
+        if (!scroller || !signature) return;
+        const raw = localStorage.getItem(`libScroll:${signature}`);
+        const value = Number(raw);
+        if (Number.isFinite(value)) {
+          scroller.scrollTop = value;
+        }
+      }
+
+      function attachLibraryScrollPersistence(scroller, signature, { restore = false } = {}) {
+        if (!scroller || !signature) return;
+        if (state.library.scrollPersist?.scroller && state.library.scrollPersist?.handler) {
+          state.library.scrollPersist.scroller.removeEventListener('scroll', state.library.scrollPersist.handler);
+        }
+        if (restore) restoreLibraryScroll(scroller, signature);
+        let timer = null;
+        const handler = () => {
+          if (timer) return;
+          timer = window.setTimeout(() => {
+            timer = null;
+            try {
+              localStorage.setItem(`libScroll:${signature}`, String(scroller.scrollTop || 0));
+            } catch {}
+          }, 180);
+        };
+        scroller.addEventListener('scroll', handler, { passive: true });
+        state.library.scrollPersist = { scroller, handler };
+      }
+
       // ===== Library UI =====
       function cleanupViewerState() {
         try { annotations.leaveViewer(); } catch {}
@@ -2749,9 +3208,18 @@
 
         // If playlist mode is active, render the playlist overview instead of the normal library
         if (playlist.mode) {
+          const lastDetail = localStorage.getItem('plLastDetail');
+          if (state.ui.restorePlaylistDetail && lastDetail && playlist.byId?.has(lastDetail)) {
+            state.ui.restorePlaylistDetail = false;
+            renderPlaylistDetail(lastDetail);
+            return;
+          }
+          state.ui.restorePlaylistDetail = false;
           renderPlaylistLibrary();
           return;
         }
+        state.ui.restorePlaylistDetail = false;
+        setNavMode('library');
 
         const L = state.library;
         applyAccentTheme(L.categoryFilter);
@@ -2763,10 +3231,12 @@
 
         const filterCollapsed = state.ui.filterCollapsed;
 
-        appEl.innerHTML = `
-          <div class="library-shell flex flex-col gap-4 flex-1 min-h-0 overflow-hidden">
+        const mainHtml = `
+          <div id="libraryScroll" class="library-scroll no-scrollbar">
+          <div class="library-main-stack flex flex-col gap-4">
+            <section id="libraryQuickAccess" class="library-quick-access"></section>
             <div id="filterBlock" class="flex flex-col gap-3 mt-4 sm:mt-5">
-              <section id="filterPanel" class="rounded-2xl border border-neutral-800/60 bg-gradient-to-br from-neutral-900/90 to-neutral-900/70 backdrop-blur-sm shadow-lg transition-all duration-300">
+              <section id="filterPanel" class="library-filter-panel rounded-2xl border border-neutral-800/60 bg-gradient-to-br from-neutral-900/90 to-neutral-900/70 backdrop-blur-sm shadow-lg transition-all duration-300">
                 <!-- Filter Header with Toggle (entire row is clickable) -->
                 <button id="filterToggle" 
                         aria-expanded="${!filterCollapsed}" 
@@ -2789,7 +3259,7 @@
                 <div id="filterContent" class="${filterCollapsed ? 'overflow-hidden opacity-0' : 'overflow-visible opacity-100'}" style="max-height: ${filterCollapsed ? '0' : '500px'}; transform: translateY(0); will-change: max-height, opacity, transform;">
                   <div class="p-4 space-y-3">
                     <!-- Search Row -->
-                    <div class="relative w-full">
+                    <div class="relative w-full library-search-row">
                       <span class="absolute inset-y-0 left-0 pl-3.5 flex items-center text-neutral-400 pointer-events-none">${SVG_SEARCH}</span>
                       <input id="search" placeholder="Suche nach Titel…" class="w-full pl-10 pr-10 py-2.5 rounded-xl bg-neutral-950/50 border border-neutral-800/60 focus:border-[--accent-color] focus:ring-2 focus:ring-[--accent-color]/20 outline-none text-neutral-100 placeholder-neutral-500 transition-all" />
                       <button id="searchClear" class="absolute inset-y-0 right-0 pr-3.5 flex items-center text-neutral-500 hover:text-neutral-300 transition-colors hidden" aria-label="Suche löschen" title="Suche löschen">
@@ -2855,7 +3325,7 @@
                 <span id="activeFilterCategoryName" class="flex items-center gap-1.5"></span>
               </div>
             </div>
-            <div class="flex flex-col flex-1 min-h-0 overflow-hidden">
+            <div class="flex flex-col">
               <section id="virtualWrap" class="relative flex-1 min-h-0 pb-4"></section>
               <section id="libraryPager" class="flex items-center justify-between px-4 py-3 shrink-0">
                 <button id="prevPage" class="px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-800 hover:bg-neutral-800 transition-colors ${prevDisabled?"invisible pointer-events-none select-none opacity-0":""}" ${prevDisabled?"aria-disabled=\"true\" tabindex=\"-1\"":""}>« Zurück</button>
@@ -2863,13 +3333,16 @@
                 <button id="nextPage" class="px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-800 hover:bg-neutral-800 transition-colors ${nextDisabled?"invisible pointer-events-none select-none opacity-0":""}" ${nextDisabled?"aria-disabled=\"true\" tabindex=\"-1\"":""}>Weiter »</button>
               </section>
             </div>
+          </div>
           </div>`;
+
+        renderLibraryShell({ mainHtml, activeMode: 'library' });
 
   renderCategoryBar();
   updatePaginationDisplay();
+  renderLibraryQuickAccess();
 
-        // Add header segmented mode switch + upload
-        ensureModeSwitcher();
+        // Header actions
         ensureUploadButton();
         setUploadButtonVisible(true);
         ensurePlaylistBadge();
@@ -2915,6 +3388,7 @@
             
             // Clear search immediately
             state.library.q = '';
+            localStorage.setItem('libQuery', '');
             state.library.page = 1;
             
             const wrap = document.querySelector('#virtualWrap');
@@ -2931,6 +3405,8 @@
                 const wrapAfter = document.querySelector('#virtualWrap');
                 if (wrapAfter) {
                   mountVirtualizer(true);
+                  const scroller = document.querySelector('#libraryScroll');
+                  attachLibraryScrollPersistence(scroller, getLibraryScrollSignature(), { restore: true });
                 }
                 
                 updatePaginationDisplay();
@@ -2952,6 +3428,7 @@
           
           searchTimer = setTimeout(async () => {
             state.library.q = searchValue;
+            localStorage.setItem('libQuery', searchValue);
             state.library.page = 1;
             
             // Store current focus state
@@ -2971,6 +3448,8 @@
               const wrapAfter = document.querySelector('#virtualWrap');
               if (wrapAfter) {
                 mountVirtualizer(true);
+                const scroller = document.querySelector('#libraryScroll');
+                attachLibraryScrollPersistence(scroller, getLibraryScrollSignature(), { restore: true });
               }
               
               updatePaginationDisplay();
@@ -3261,7 +3740,7 @@
         // Progressive auto-collapse filter on scroll (Spotify-style)
         // Remove old listener if exists
         if (state.library.scrollListener) {
-          const oldScroller = document.querySelector('#virtualWrap .relative.w-full.h-full.overflow-auto');
+          const oldScroller = document.querySelector('#libraryScroll');
           if (oldScroller) {
             oldScroller.removeEventListener('scroll', state.library.scrollListener);
           }
@@ -3278,7 +3757,7 @@
         // Wait for virtualizer to mount, then attach scroll listener
         requestAnimationFrame(() => {
           requestAnimationFrame(() => {
-            const scroller = virtualWrap?.querySelector('.relative.w-full.h-full.overflow-auto');
+            const scroller = document.querySelector('#libraryScroll');
             const filterContent = document.querySelector('#filterContent');
             const filterPanel = document.querySelector('#filterPanel');
             if (!scroller) return;
@@ -3587,7 +4066,11 @@
         requestAnimationFrame(() => {
           ensureLibraryViewportSizing();
           const wrap = document.querySelector('#virtualWrap');
-          if (wrap) mountVirtualizer(true);
+          if (wrap) {
+            mountVirtualizer(true);
+            const scroller = document.querySelector('#libraryScroll');
+            attachLibraryScrollPersistence(scroller, getLibraryScrollSignature(), { restore: true });
+          }
           updateLibraryPlaylistButtons();
         });
       }
@@ -3659,16 +4142,14 @@
         const btnPl = wrap.querySelector('[data-mode="pl"]');
         btnLib?.addEventListener('click', () => {
           if (!playlist.mode) return;
-          playlist.mode = false;
-          localStorage.setItem('playlistMode', '0');
+          setNavMode('library');
           refreshAccentTheme();
           ensureModeSwitcher();
           renderLibrary();
         });
         btnPl?.addEventListener('click', () => {
           if (playlist.mode) return;
-          playlist.mode = true;
-          localStorage.setItem('playlistMode', '1');
+          setNavMode('playlist');
           refreshAccentTheme();
           ensureModeSwitcher();
           renderLibrary();
@@ -3902,7 +4383,6 @@
         playlist.ready = true;
 
         refreshAccentTheme();
-        ensureModeSwitcher();
         ensurePlaylistBadge();
         updatePlaylistPanel();
         updateViewerPlaylistControls();
@@ -4921,13 +5401,22 @@
   const rowStride = cardH + gap;
   const totalHeight = rows * rowStride - gap; // avoid extra gap at end
 
-        const scroller = document.createElement("div");
-        scroller.className = "relative w-full h-full overflow-auto no-scrollbar";
+        const externalScroller = document.querySelector('#libraryScroll');
+        const useExternalScroller = externalScroller && externalScroller.contains(wrap);
+        const scroller = useExternalScroller ? externalScroller : document.createElement("div");
+        wrap.innerHTML = "";
+        if (!useExternalScroller) {
+          scroller.className = "relative w-full h-full overflow-auto no-scrollbar";
+        }
         const spacer = document.createElement("div");
         spacer.style.height = `${totalHeight}px`;
         spacer.style.position = "relative";
-        scroller.appendChild(spacer);
-        wrap.appendChild(scroller);
+        if (useExternalScroller) {
+          wrap.appendChild(spacer);
+        } else {
+          scroller.appendChild(spacer);
+          wrap.appendChild(scroller);
+        }
 
         const pool = new Map();
         
@@ -4937,6 +5426,10 @@
 
         function renderViewport() {
           const scrollTop = scroller.scrollTop;
+          const listOffset = useExternalScroller
+            ? Math.max(0, (wrap.getBoundingClientRect().top - scroller.getBoundingClientRect().top) + scrollTop)
+            : 0;
+          const listScrollTop = Math.max(0, scrollTop - listOffset);
           let viewH = scroller.clientHeight;
           
           // Safety: If viewport height is not yet calculated or too small, use a reasonable minimum
@@ -4953,8 +5446,8 @@
             lastIndex = total - 1;
           } else {
             // Use virtualization for large datasets
-            const firstRow = Math.max(0, Math.floor(scrollTop / rowStride) - bufferRows);
-            const lastRow  = Math.min(rows - 1, Math.floor((scrollTop + viewH) / rowStride) + bufferRows);
+            const firstRow = Math.max(0, Math.floor(listScrollTop / rowStride) - bufferRows);
+            const lastRow  = Math.min(rows - 1, Math.floor((listScrollTop + viewH) / rowStride) + bufferRows);
             firstIndex = firstRow * cols;
             lastIndex  = Math.min(total - 1, (lastRow + 1) * cols - 1);
           }
@@ -5008,7 +5501,13 @@
         
         // Only add scroll listener for large datasets that use virtualization
         if (!useFullRender) {
+          if (useExternalScroller && state.library.virtualScrollHandler) {
+            scroller.removeEventListener('scroll', state.library.virtualScrollHandler);
+          }
           scroller.addEventListener("scroll", scheduleRenderViewport, { passive: true });
+          if (useExternalScroller) {
+            state.library.virtualScrollHandler = scheduleRenderViewport;
+          }
         }
         window.addEventListener("resize", () => mountVirtualizer(false), { once: true });
 
@@ -5369,9 +5868,30 @@
         }
 
         updateOfflineIndicatorForElement(a);
+
+        let moved = false;
+        let startX = 0;
+        let startY = 0;
+        a.addEventListener('pointerdown', (ev) => {
+          if (typeof ev.button === 'number' && ev.button !== 0) return;
+          moved = false;
+          startX = ev.clientX;
+          startY = ev.clientY;
+        });
+        a.addEventListener('pointermove', (ev) => {
+          const dx = Math.abs(ev.clientX - startX);
+          const dy = Math.abs(ev.clientY - startY);
+          if (dx + dy > 12) moved = true;
+        });
         
         // Click-Handler für direktes Laden (ohne Page-Reload) + Wake Lock Aktivierung
         a.addEventListener('click', (ev) => {
+          if (moved) {
+            moved = false;
+            ev.preventDefault();
+            ev.stopPropagation();
+            return;
+          }
           // Nur wenn es ein normaler Klick ist (kein Ctrl/Cmd+Click für neuen Tab)
           if (!ev.ctrlKey && !ev.metaKey && !ev.shiftKey) {
             ev.preventDefault();
@@ -5530,8 +6050,29 @@
           });
         }
         
+        let moved = false;
+        let startX = 0;
+        let startY = 0;
+        a.addEventListener('pointerdown', (ev) => {
+          if (typeof ev.button === 'number' && ev.button !== 0) return;
+          moved = false;
+          startX = ev.clientX;
+          startY = ev.clientY;
+        });
+        a.addEventListener('pointermove', (ev) => {
+          const dx = Math.abs(ev.clientX - startX);
+          const dy = Math.abs(ev.clientY - startY);
+          if (dx + dy > 12) moved = true;
+        });
+        
         // Click-Handler für direktes Laden (ohne Page-Reload) + Wake Lock Aktivierung
         a.addEventListener('click', (ev) => {
+          if (moved) {
+            moved = false;
+            ev.preventDefault();
+            ev.stopPropagation();
+            return;
+          }
           // Nur wenn es ein normaler Klick ist (kein Ctrl/Cmd+Click für neuen Tab)
           if (!ev.ctrlKey && !ev.metaKey && !ev.shiftKey) {
             ev.preventDefault();
@@ -5587,6 +6128,8 @@
 
   function renderPlaylistLibrary() {
     document.body.classList.remove('in-viewer');
+    setNavMode('playlist');
+    localStorage.removeItem('plLastDetail');
     
     // Restore app element classes for library mode
     appEl.classList.add('mx-auto', 'max-w-7xl', 'px-4', 'sm:px-6', 'pt-3', 'pb-6');
@@ -5598,7 +6141,6 @@
     disposeLibraryViewportSizing();
     ensurePlaylistStyles();
         // Header actions
-        ensureModeSwitcher();
         ensureUploadButton();
         setUploadButtonVisible(true);
         ensurePlaylistBadge();
@@ -5621,7 +6163,9 @@
         })();
 
         // Header/Hero in Spotify-Stil
-        appEl.innerHTML = `
+        const mainHtml = `
+          <div id="libraryScroll" class="library-scroll no-scrollbar">
+          <div class="library-main-stack flex flex-col gap-4">
           <section class="space-y-4 mb-6 mt-4 sm:mt-5">
             <div class="flex flex-wrap items-center justify-between gap-3">
               <div>
@@ -5635,7 +6179,11 @@
             </div>
             <div id="playlistGrid" class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 auto-rows-fr"></div>
           </section>
+          </div>
+          </div>
         `;
+
+        renderLibraryShell({ mainHtml, activeMode: 'playlist' });
 
         const createTopBtn = document.querySelector('#btnPlCreateTop');
         const handleCreatePlaylist = async (ev) => {
@@ -5806,6 +6354,7 @@
       // Neue Funktion: Playlist-Detail-Seite
   async function renderPlaylistDetail(playlistId) {
     document.body.classList.remove('in-viewer');
+    setNavMode('playlist');
     
     // Restore app element classes for library mode
     appEl.classList.add('mx-auto', 'max-w-7xl', 'px-4', 'sm:px-6', 'pt-3', 'pb-6');
@@ -5814,7 +6363,6 @@
     headerActionsEl.innerHTML = '';
     controlsEl.classList.add('hidden');
     resetHeaderAccentToDefault();
-    ensureModeSwitcher();
     ensureUploadButton();
     ensurePlaylistBadge();
         const playlistData = playlist.byId.get(playlistId);
@@ -5822,6 +6370,7 @@
           showToast('Playlist nicht gefunden', 2000);
           return;
         }
+        localStorage.setItem('plLastDetail', playlistId);
 
         // WICHTIG: Speichere die aktuelle Detail-ID, damit SSE-Updates diese Seite aktualisieren
         playlist.currentDetailId = playlistId;
@@ -5833,9 +6382,11 @@
         const itemCount = items.length;
         const isActive = playlistData.id === playlist.activeId;
 
-        appEl.innerHTML = `
-          <div class="flex flex-col h-full overflow-hidden">
-            <section class="flex-1 overflow-y-auto space-y-4 pb-6 mt-4 sm:mt-5">
+        const mainHtml = `
+          <div id="libraryScroll" class="library-scroll no-scrollbar">
+          <div class="library-main-stack flex flex-col gap-4">
+          <div class="flex flex-col">
+            <section class="space-y-4 pb-6 mt-4 sm:mt-5">
               <!-- Zurück-Button -->
               <button id="btnBackToPlaylists" type="button" class="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-neutral-300 hover:text-neutral-100 transition-colors">
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -5907,7 +6458,11 @@
               </div>
             </section>
           </div>
+          </div>
+          </div>
         `;
+
+        renderLibraryShell({ mainHtml, activeMode: 'playlist' });
 
         // Event Listener: Zurück-Button
         document.querySelector('#btnBackToPlaylists')?.addEventListener('click', () => {
@@ -6149,7 +6704,30 @@
               if (!container) return;
 
               let drag = null;
+              const supportsPointer = typeof window !== 'undefined' && 'PointerEvent' in window;
+              let activeTouchId = null;
+              let longPressTimer = null;
+              let longPressRow = null;
+              let longPressStart = null;
+              let lastTouchPoint = null;
+              const LONG_PRESS_DELAY = 180;
+              const MOVE_CANCEL_THRESHOLD = 8;
               const interactiveSelector = 'button, a, input, textarea, select, [role="button"]';
+              const findTouchById = (touchList, id) => {
+                if (!touchList || id === null) return null;
+                for (let i = 0; i < touchList.length; i += 1) {
+                  if (touchList[i].identifier === id) return touchList[i];
+                }
+                return null;
+              };
+              const clearLongPress = () => {
+                if (longPressTimer) {
+                  clearTimeout(longPressTimer);
+                  longPressTimer = null;
+                }
+                longPressRow = null;
+                longPressStart = null;
+              };
 
               const getScrollContainer = (el) => {
                 let p = el && el.parentElement;
@@ -6377,8 +6955,6 @@
                 if (!row) return;
                 if (ev.button !== 0 && ev.pointerType === 'mouse') return;
                 if (ev.target.closest(interactiveSelector)) return;
-                
-                // Für alle Geräte: Nur Drag starten, wenn auf den Drag-Handle geklickt wird
                 const handle = ev.target.closest && ev.target.closest('[data-drag-handle]');
                 if (!handle) return;
                 
@@ -6408,10 +6984,87 @@
                 finishDrag(ev, true);
               };
 
+              const onTouchStart = (ev) => {
+                if (drag) return;
+                const row = ev.target.closest && ev.target.closest('[data-item-name]');
+                if (!row) return;
+                if (ev.target.closest(interactiveSelector)) return;
+                const touch = ev.touches?.[0];
+                if (!touch) return;
+                clearLongPress();
+                activeTouchId = touch.identifier;
+                lastTouchPoint = { x: touch.clientX, y: touch.clientY };
+                longPressStart = { x: touch.clientX, y: touch.clientY };
+                const handle = ev.target.closest && ev.target.closest('[data-drag-handle]');
+                if (handle) {
+                  ev.preventDefault();
+                  beginDrag({ pointerId: activeTouchId, clientX: touch.clientX, clientY: touch.clientY }, row);
+                  return;
+                }
+                longPressRow = row;
+                longPressTimer = setTimeout(() => {
+                  longPressTimer = null;
+                  if (drag || !longPressRow || activeTouchId === null) return;
+                  const point = lastTouchPoint || longPressStart;
+                  if (!point) return;
+                  beginDrag({ pointerId: activeTouchId, clientX: point.x, clientY: point.y }, longPressRow);
+                }, LONG_PRESS_DELAY);
+              };
+
+              const onTouchMove = (ev) => {
+                if (activeTouchId === null) return;
+                const touch = findTouchById(ev.touches, activeTouchId);
+                if (!touch) return;
+                lastTouchPoint = { x: touch.clientX, y: touch.clientY };
+
+                if (!drag) {
+                  if (longPressStart) {
+                    const dx = Math.abs(touch.clientX - longPressStart.x);
+                    const dy = Math.abs(touch.clientY - longPressStart.y);
+                    if (dx + dy > MOVE_CANCEL_THRESHOLD) {
+                      clearLongPress();
+                    }
+                  }
+                  return;
+                }
+
+                ev.preventDefault();
+                positionGhost(touch.clientX, touch.clientY);
+                autoscrollIfNeeded(touch.clientY);
+                updatePlaceholder(touch.clientY);
+              };
+
+              const onTouchEnd = (ev) => {
+                if (activeTouchId === null) return;
+                const touch = findTouchById(ev.changedTouches, activeTouchId);
+                if (!touch) return;
+                clearLongPress();
+                if (drag) {
+                  ev.preventDefault();
+                  activeTouchId = null;
+                  finishDrag(ev, false);
+                  return;
+                }
+                activeTouchId = null;
+              };
+
+              const onTouchCancel = () => {
+                if (activeTouchId === null) return;
+                clearLongPress();
+                if (drag) finishDrag(null, true);
+                activeTouchId = null;
+              };
+
               container.addEventListener('pointerdown', onPointerDown, { passive: false });
               container.addEventListener('pointermove', onPointerMove, { passive: false });
               container.addEventListener('pointerup', onPointerUp);
               container.addEventListener('pointercancel', onPointerCancel);
+              if (!supportsPointer) {
+                container.addEventListener('touchstart', onTouchStart, { passive: false });
+                container.addEventListener('touchmove', onTouchMove, { passive: false });
+                container.addEventListener('touchend', onTouchEnd);
+                container.addEventListener('touchcancel', onTouchCancel);
+              }
             })();
             // Helper function to re-attach event listeners after re-render
             function attachItemEventListeners() {
@@ -6935,6 +7588,7 @@
       async function renderViewer(fileName) {
         // Track viewer page view
         trackPageView('viewer');
+        trackRecentOpen(fileName);
         
         // Schließe offene Playlist-Docks/Manager, damit der Viewer sauber startet
         try { closePlaylistPanel(); } catch {}
@@ -7379,6 +8033,10 @@
         }
         
     await mountPdfVirtual(container, state.viewer.url);
+    if (state.viewer.abortRender) {
+      state.viewer.abortRender = false;
+      return;
+    }
     
     // Control-Bar wird jetzt nach jedem Render zyklisch vermessen (syncControlBarLayout)
     // Das Layout ist: body > main#app > #viewerShell > #viewer + #controls (am Ende)
@@ -8345,6 +9003,10 @@
           // Reset alle Seiten-Rendering State und lade PDF neu
           if (state.viewer.url) {
             await mountPdfVirtual(viewer, state.viewer.url);
+            if (state.viewer.abortRender) {
+              state.viewer.abortRender = false;
+              return;
+            }
             // Nach dem Re-Mount zur aktuellen Seite scrollen
             setTimeout(() => {
               scrollToPage(state.viewer.currentPage, 'auto');
@@ -8385,6 +9047,7 @@
       }
 
       async function mountPdfVirtual(container, url) {
+        if (state?.viewer) state.viewer.abortRender = false;
         if (!window.pdfjsLib) {
           container.innerHTML = `
             <div class="flex flex-col items-center justify-center p-8 text-center max-w-2xl mx-auto mt-12">
@@ -8409,6 +9072,14 @@
           pdf = await pdfjsLib.getDocument(url).promise;
         } catch (e) {
           console.error('PDF.js konnte das Dokument nicht laden:', e);
+          const statusCode = extractHttpStatus(e);
+          if ((statusCode === 403 || statusCode === 404) && state.viewer.fileName) {
+            await cleanupMissingDocument(state.viewer.fileName, statusCode);
+            showToast('Datei nicht verfügbar und wurde entfernt', 2600);
+            state.viewer.abortRender = true;
+            navigateBackFromViewer();
+            return false;
+          }
           container.innerHTML = `
             <div class="flex flex-col items-center justify-center p-8 text-center max-w-2xl mx-auto mt-12">
               <div class="text-6xl mb-4">📄❌</div>

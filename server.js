@@ -1423,7 +1423,20 @@ async function ensureVendors() {
 }
 
 /* ---------------- User-scoped config & playlists (database-backed) ---------------- */
-const DEFAULT_CONFIG = { favorites: [], files: {}, categories: [] };
+const DEFAULT_CONFIG = {
+  favorites: [],
+  files: {},
+  categories: [],
+  annotations: {
+    preset: null,
+    inputMode: "pen-only"
+  },
+  library: {
+    quickAccess: {
+      recentCollapsed: false
+    }
+  }
+};
 
 function normalizeConfig(rawInput) {
   const source = rawInput && typeof rawInput === "object" ? rawInput : {};
@@ -1484,10 +1497,35 @@ function normalizeConfig(rawInput) {
     a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" })
   );
 
+  const annotationsSource = source.annotations && typeof source.annotations === "object" ? source.annotations : {};
+  let preset = null;
+  if (annotationsSource.preset === null) {
+    preset = null;
+  } else if (annotationsSource.preset && typeof annotationsSource.preset === "object") {
+    const color = typeof annotationsSource.preset.color === "string" ? annotationsSource.preset.color.trim() : "";
+    const size = Number(annotationsSource.preset.size);
+    const tool = typeof annotationsSource.preset.tool === "string" ? annotationsSource.preset.tool.trim() : "";
+    const isHex = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(color);
+    const isSize = Number.isInteger(size) && size >= 1 && size <= 8;
+    const isTool = tool === "pen" || tool === "highlighter";
+    if (isHex && isSize && isTool) {
+      preset = { color, size, tool };
+    }
+  }
+  const inputMode = annotationsSource.inputMode === "both" ? "both" : "pen-only";
+
+  const librarySource = source.library && typeof source.library === "object" ? source.library : {};
+  const quickAccessSource = librarySource.quickAccess && typeof librarySource.quickAccess === "object"
+    ? librarySource.quickAccess
+    : {};
+  const recentCollapsed = quickAccessSource.recentCollapsed === true;
+
   return {
     favorites: favList,
     files,
     categories,
+    annotations: { preset, inputMode },
+    library: { quickAccess: { recentCollapsed } }
   };
 }
 
@@ -3847,6 +3885,92 @@ app.get("/api/sheets", async (req, res) => {
   }
 });
 
+app.post("/api/sheets/cleanup-missing", async (req, res) => {
+  if (!ensureAuthenticated(req, res)) return;
+  const { name, status } = req.body || {};
+  const info = resolvePdfName(name, { requireExists: false });
+  if (!info) return res.status(400).json({ error: "Invalid file name" });
+
+  const rel = info.rel;
+  const { CONFIG, PLAYLIST_STATE } = userContext;
+  const removed = {
+    favorites: false,
+    files: false,
+    playlists: 0,
+    userDocs: false,
+    index: false
+  };
+
+  if (Array.isArray(CONFIG.favorites) && CONFIG.favorites.includes(rel)) {
+    CONFIG.favorites = CONFIG.favorites.filter((fav) => fav !== rel);
+    removed.favorites = true;
+  }
+
+  if (CONFIG.files && typeof CONFIG.files === "object" && CONFIG.files[rel]) {
+    const nextFiles = { ...CONFIG.files };
+    delete nextFiles[rel];
+    CONFIG.files = nextFiles;
+    removed.files = true;
+  }
+
+  if (Array.isArray(PLAYLIST_STATE.playlists)) {
+    for (const pl of PLAYLIST_STATE.playlists) {
+      if (pl && Array.isArray(pl.items) && pl.items.includes(rel)) {
+        const removedOnce = removeItemFromPlaylist(pl, rel);
+        if (removedOnce) removed.playlists += 1;
+      }
+    }
+    if (removed.playlists > 0) {
+      userContext.markPlaylistsDirty();
+    }
+  }
+
+  try {
+    const ctx = userContext.requireUserContext();
+    if (ctx?.documents?.has(rel)) {
+      ctx.documents.delete(rel);
+      removed.userDocs = true;
+    }
+    if (dataStore?.removeDocumentsFromUser) {
+      dataStore.removeDocumentsFromUser(ctx.userId, [rel]);
+    }
+  } catch (err) {
+    console.warn("cleanup-missing: user doc removal failed", err?.message || err);
+  }
+
+  let existsOnDisk = false;
+  try {
+    existsOnDisk = !!(info.abs && fs.existsSync(info.abs));
+  } catch {}
+
+  if (!existsOnDisk && indexCache?.items?.length) {
+    const before = indexCache.items.length;
+    indexCache.items = indexCache.items.filter((item) => item && item.name !== rel);
+    if (indexCache.items.length !== before) {
+      indexCache.at = Date.now();
+      removed.index = true;
+    }
+  }
+
+  if (removed.favorites || removed.files) {
+    try {
+      await userContext.persistConfigNow();
+    } catch (err) {
+      console.error("cleanup-missing: failed to persist config", err);
+    }
+  }
+
+  console.warn("[cleanup-missing]", {
+    userId: req.auth?.user?.id || null,
+    rel,
+    status: Number(status) || null,
+    removed,
+    existsOnDisk
+  });
+
+  res.json({ ok: true, removed, existsOnDisk });
+});
+
 // Improved upload endpoint (accepts PDF by MIME or .pdf filename)
 app.post("/api/upload", uploadLimiter || ((req, res, next) => next()), async (req, res) => {
   if (!ensureAuthenticated(req, res)) return;
@@ -4193,6 +4317,48 @@ app.post("/api/prefs/annotations", async (req, res) => {
   }
 
   res.json({ ok: true, preset: current.preset ?? null, inputMode: current.inputMode || "pen-only" });
+});
+
+app.get("/api/prefs/library", async (req, res) => {
+  if (!ensureAuthenticated(req, res)) return;
+  const { CONFIG } = userContext;
+  const library = CONFIG.library || {};
+  const quickAccess = library.quickAccess || {};
+  res.setHeader("Cache-Control", "no-store");
+  res.json({
+    quickAccess: {
+      recentCollapsed: quickAccess.recentCollapsed === true
+    }
+  });
+});
+
+app.post("/api/prefs/library", async (req, res) => {
+  if (!ensureAuthenticated(req, res)) return;
+  const { CONFIG } = userContext;
+  const { quickAccess } = req.body || {};
+
+  const current = { ...(CONFIG.library || {}) };
+  const currentQuick = { ...(current.quickAccess || {}) };
+
+  if (quickAccess !== undefined) {
+    if (!quickAccess || typeof quickAccess !== "object") {
+      return res.status(400).json({ error: "Invalid quickAccess payload" });
+    }
+    if ("recentCollapsed" in quickAccess) {
+      currentQuick.recentCollapsed = quickAccess.recentCollapsed === true;
+    }
+  }
+
+  current.quickAccess = currentQuick;
+  CONFIG.library = current;
+  try {
+    await userContext.persistConfigNow();
+  } catch (err) {
+    console.error("Failed to persist library prefs:", err);
+    return res.status(500).json({ error: "Failed to persist library prefs" });
+  }
+
+  res.json({ ok: true, library: current });
 });
 
 app.post("/api/prefs/favorites", async (req, res) => {
