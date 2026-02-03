@@ -1205,11 +1205,26 @@ body.in-viewer #headerSpacer {
 }
 
 .annotation-layer.is-saving {
-  cursor: progress;
+  cursor: crosshair;
 }
 
 .annotation-layer.is-disabled {
   opacity: 0.75;
+}
+
+body.annotations-active #viewerPdfContainer,
+body.annotations-active #viewer,
+body.annotations-active #dualViewer,
+body.annotations-active .viewer-page,
+body.annotations-active [data-role="page-stage"],
+body.annotations-active canvas {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+body.annotations-active canvas {
+  -webkit-user-drag: none;
 }
 
 [data-role="skeleton"] {

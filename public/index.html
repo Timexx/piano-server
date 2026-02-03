@@ -1496,6 +1496,9 @@
         const bust = Number.isFinite(mtimeValue) ? mtimeValue : Date.now();
         state.viewer.url = `/sheets/${encodePathSegments(state.viewer.fileName)}?v=${bust}`;
         state.viewer.cacheToken = bust;
+        if (annotations?.isActive?.() || annotations?.isDrawing?.()) {
+          return;
+        }
         queuePdfPageRefresh(pages, bust);
       }
     });

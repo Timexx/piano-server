@@ -27,6 +27,11 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
   // Keep payloads well below server limit to avoid 500s on large zoom levels
   const MAX_UPLOAD_BYTES = 9 * 1024 * 1024; // server rejects at 10MB
   const MAX_COMPRESSION_ATTEMPTS = 3;
+  const STORAGE_SCALE = 2;
+  const MAX_STORAGE_DIM = 4096;
+  const IDLE_SAVE_DELAY = 1200;
+  const MAX_PENDING_AGE = 5000;
+  const SAVE_STATUS_DELAY = 500;
 
   const controls = {
     initialized: false,
@@ -45,9 +50,13 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
   let fileName = null;
   let active = false;
   let saveTimer = null;
+  let idleCallback = null;
+  let pendingSince = null;
   let saving = false;
   let lastActivePage = null;
   let statusResetTimer = null;
+  let saveStatusTimer = null;
+  let lastInputTs = 0;
 
   function initControls() {
     // console.log('[Annotation] initControls called, already initialized?', controls.initialized);
@@ -152,7 +161,8 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
   }
 
   function enterViewer({ fileName: nextFile }) {
-    flushSaves();
+    finalizeActiveStrokes();
+    void flushSaves({ force: true });
     resetPages();
     fileName = nextFile || null;
     lastActivePage = null;
@@ -164,7 +174,8 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
   }
 
   function leaveViewer() {
-    flushSaves();
+    finalizeActiveStrokes();
+    void flushSaves({ force: true });
     setActiveState(false, { silent: true, force: true });
     fileName = null;
     refreshOverlayActivation();
@@ -185,6 +196,11 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
       clearTimeout(saveTimer);
       saveTimer = null;
     }
+    if (idleCallback && typeof window.cancelIdleCallback === "function") {
+      window.cancelIdleCallback(idleCallback);
+      idleCallback = null;
+    }
+    pendingSince = null;
     saving = false;
   }
 
@@ -214,12 +230,9 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
     if (committed && overlay && committed.nextSibling !== overlay) {
       frame.insertBefore(committed, overlay);
     }
-
-    if (entry.committedImage) {
-      renderCommittedImage(entry, entry.committedImage);
-    }
-
-    redraw(entry);
+    ensureStorageCanvas(entry);
+    renderAllFromActions(entry);
+    redrawOverlay(entry);
     refreshOverlayActivationForEntry(entry);
   }
 
@@ -269,18 +282,149 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
         overlayCtx: null,
         commitCanvas: null,
         commitCtx: null,
-  committedImage: null,
-  activePointers: new Map(),
-  strokes: [],
-  dirty: false,
-  overlayDirty: false,
-  commitDirty: false,
-  needsUpload: false,
-  hasCommittedContent: false
+        storageCanvas: null,
+        storageCtx: null,
+        storageWidth: 0,
+        storageHeight: 0,
+        storageScale: 1,
+        committedImage: null,
+        committedImageEl: null,
+        committedImageToken: 0,
+        activePointers: new Map(),
+        actions: [],
+        redo: [],
+        dirty: false,
+        overlayDirty: false,
+        overlayNeedsFullRedraw: false,
+        needsUpload: false,
+        hasCommittedContent: false
       };
       pages.set(pageNumber, entry);
     }
     return entry;
+  }
+
+  function computeStorageSize(entry) {
+    const fallbackWidth = entry.commitCanvas?.width || entry.renderWidth || entry.displayWidth || 0;
+    const fallbackHeight = entry.commitCanvas?.height || entry.renderHeight || entry.displayHeight || 0;
+    const baseWidth = Number(entry.pageWidth || fallbackWidth || 0);
+    const baseHeight = Number(entry.pageHeight || fallbackHeight || 0);
+    if (!Number.isFinite(baseWidth) || !Number.isFinite(baseHeight) || baseWidth <= 0 || baseHeight <= 0) {
+      return null;
+    }
+    let scale = STORAGE_SCALE;
+    const maxDim = Math.max(baseWidth, baseHeight) * scale;
+    if (maxDim > MAX_STORAGE_DIM) {
+      scale *= MAX_STORAGE_DIM / Math.max(1, maxDim);
+    }
+    const width = Math.max(1, Math.round(baseWidth * scale));
+    const height = Math.max(1, Math.round(baseHeight * scale));
+    return { width, height, scale };
+  }
+
+  function ensureStorageCanvas(entry) {
+    const size = computeStorageSize(entry);
+    if (!size) return false;
+    const needsNew = !entry.storageCanvas || entry.storageWidth !== size.width || entry.storageHeight !== size.height;
+    if (!needsNew) return false;
+
+    const canvas = document.createElement("canvas");
+    canvas.width = size.width;
+    canvas.height = size.height;
+    entry.storageCanvas = canvas;
+    entry.storageCtx = canvas.getContext("2d");
+    entry.storageWidth = size.width;
+    entry.storageHeight = size.height;
+    entry.storageScale = size.scale;
+    return true;
+  }
+
+  function clearCanvas(ctx, canvas) {
+    if (!ctx || !canvas) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+  }
+
+  function loadImage(dataUrl) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.decoding = "async";
+      img.onload = () => resolve(img);
+      img.onerror = (err) => reject(err);
+      img.src = dataUrl;
+    });
+  }
+
+  function getLastClearIndex(entry) {
+    if (!entry || !entry.actions || !entry.actions.length) return -1;
+    for (let idx = entry.actions.length - 1; idx >= 0; idx -= 1) {
+      if (entry.actions[idx]?.type === "clear") return idx;
+    }
+    return -1;
+  }
+
+  function syncCommitFromStorage(entry) {
+    if (!entry.commitCtx || !entry.commitCanvas || !entry.storageCanvas) return;
+    entry.commitCtx.save();
+    entry.commitCtx.globalCompositeOperation = "copy";
+    entry.commitCtx.drawImage(entry.storageCanvas, 0, 0, entry.commitCanvas.width, entry.commitCanvas.height);
+    entry.commitCtx.restore();
+  }
+
+  function renderAllFromActions(entry) {
+    if (!entry) return;
+    if (!entry.storageCanvas || !entry.storageCtx) {
+      const resized = ensureStorageCanvas(entry);
+      if (resized && entry.storageCanvas && entry.storageCtx) {
+        // continue with new canvas
+      } else if (!entry.storageCanvas) {
+        return;
+      }
+    }
+
+    const ctx = entry.storageCtx;
+    clearCanvas(ctx, entry.storageCanvas);
+
+    const lastClearIdx = getLastClearIndex(entry);
+    const startIdx = lastClearIdx >= 0 ? lastClearIdx + 1 : 0;
+
+    if (lastClearIdx < 0 && entry.committedImageEl) {
+      ctx.drawImage(entry.committedImageEl, 0, 0, entry.storageCanvas.width, entry.storageCanvas.height);
+    }
+
+    const hasBase = lastClearIdx < 0 && Boolean(entry.committedImageEl || entry.committedImage);
+    for (let idx = startIdx; idx < entry.actions.length; idx += 1) {
+      const action = entry.actions[idx];
+      if (action?.type === "stroke" && action.stroke) {
+        drawStrokeToContext(ctx, entry, action.stroke, { target: "storage" });
+      }
+    }
+
+    entry.hasCommittedContent = hasBase ||
+      entry.actions.slice(startIdx).some((action) => action?.type === "stroke");
+
+    syncCommitFromStorage(entry);
+  }
+
+  function scheduleBaseImageRender(entry, dataUrl) {
+    entry.committedImage = dataUrl || null;
+    entry.committedImageEl = null;
+    entry.committedImageToken += 1;
+    const token = entry.committedImageToken;
+
+    if (!dataUrl) {
+      renderAllFromActions(entry);
+      return;
+    }
+
+    loadImage(dataUrl)
+      .then((img) => {
+        if (entry.committedImageToken !== token) return;
+        entry.committedImageEl = img;
+        renderAllFromActions(entry);
+      })
+      .catch((err) => {
+        console.warn("Annotation image load failed", err);
+      });
   }
 
   function primeCommittedImage(pageNumber, payload) {
@@ -288,18 +432,15 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
     const dataUrl = payload?.dataUrl || null;
     if (Number.isFinite(payload?.pageWidth)) entry.pageWidth = payload.pageWidth;
     if (Number.isFinite(payload?.pageHeight)) entry.pageHeight = payload.pageHeight;
-    entry.committedImage = dataUrl;
-    entry.hasCommittedContent = Boolean(dataUrl);
+    entry.actions = [];
+    entry.redo = [];
     entry.needsUpload = false;
     entry.overlayDirty = false;
-    entry.commitDirty = false;
-    if (entry.commitCanvas && entry.commitCtx) {
-      if (dataUrl) {
-        renderCommittedImage(entry, dataUrl);
-      } else {
-        entry.commitCtx.clearRect(0, 0, entry.commitCanvas.width, entry.commitCanvas.height);
-      }
-    }
+    entry.overlayNeedsFullRedraw = true;
+    entry.activePointers.clear();
+    entry.hasCommittedContent = Boolean(dataUrl);
+    ensureStorageCanvas(entry);
+    scheduleBaseImageRender(entry, dataUrl);
   }
 
   function ensureOverlay(entry, frame) {
@@ -311,11 +452,12 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
     const overlay = document.createElement("canvas");
     overlay.className = "annotation-layer";
     overlay.dataset.pageNumber = String(entry.pageNumber);
-    overlay.addEventListener("pointerdown", (event) => handlePointerDown(event, entry));
-    overlay.addEventListener("pointermove", (event) => handlePointerMove(event, entry));
-    overlay.addEventListener("pointerup", (event) => handlePointerEnd(event, entry, true));
-    overlay.addEventListener("pointercancel", (event) => handlePointerEnd(event, entry, false));
-    overlay.addEventListener("pointerleave", (event) => handlePointerEnd(event, entry, false));
+    overlay.addEventListener("pointerdown", (event) => handlePointerDown(event, entry), { passive: false });
+    overlay.addEventListener("pointermove", (event) => handlePointerMove(event, entry), { passive: false });
+    overlay.addEventListener("pointerup", (event) => handlePointerEnd(event, entry, true), { passive: false });
+    overlay.addEventListener("pointercancel", (event) => handlePointerEnd(event, entry, true), { passive: false });
+    overlay.addEventListener("pointerleave", (event) => handlePointerEnd(event, entry, true), { passive: false });
+    overlay.addEventListener("contextmenu", (event) => event.preventDefault());
     frame.appendChild(overlay);
     entry.overlay = overlay;
     entry.overlayCtx = overlay.getContext("2d");
@@ -386,33 +528,50 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
     if (event.pointerType === "mouse" && event.button !== 0) return;
     if (!entry.overlay) return;
 
-    entry.overlay.setPointerCapture(event.pointerId);
+    ensureStorageCanvas(entry);
+    try { entry.overlay.setPointerCapture(event.pointerId); } catch {}
     const point = getNormalizedPoint(event, entry);
-    const stroke = createStroke(point);
-    entry.strokes.push(stroke);
+    const stroke = createStroke(point, entry, event);
+    entry.actions.push({ type: "stroke", stroke, ts: Date.now() });
+    entry.redo = [];
     entry.activePointers.set(event.pointerId, stroke);
     lastActivePage = entry.pageNumber;
-    paintStroke(entry, stroke);
+    scheduleOverlayRender(entry);
     entry.overlayDirty = true;
     entry.dirty = true;
     entry.needsUpload = true;
+    lastInputTs = Date.now();
+    event.stopPropagation();
     event.preventDefault();
   }
 
   function handlePointerMove(event, entry) {
     const stroke = entry.activePointers.get(event.pointerId);
     if (!stroke) return;
-    const point = getNormalizedPoint(event, entry);
-    const lastPoint = stroke.points[stroke.points.length - 1];
-    if (Math.abs(point.x - lastPoint.x) + Math.abs(point.y - lastPoint.y) < 0.0005) {
+    const points = collectCoalescedPoints(event, entry);
+    if (!points.length) {
       event.preventDefault();
       return;
     }
-    stroke.points.push(point);
-    paintStrokeSegment(entry, stroke);
+    let lastPoint = stroke.points[stroke.points.length - 1];
+    points.forEach((point) => {
+      if (!lastPoint) {
+        stroke.points.push(point);
+        lastPoint = point;
+        return;
+      }
+      if (Math.abs(point.x - lastPoint.x) + Math.abs(point.y - lastPoint.y) < 0.0004) {
+        return;
+      }
+      stroke.points.push(point);
+      lastPoint = point;
+    });
+    scheduleOverlayRender(entry);
     entry.overlayDirty = true;
     entry.dirty = true;
     entry.needsUpload = true;
+    lastInputTs = Date.now();
+    event.stopPropagation();
     event.preventDefault();
   }
 
@@ -422,187 +581,319 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
     entry.activePointers.delete(event.pointerId);
     try { entry.overlay?.releasePointerCapture(event.pointerId); } catch {}
 
-    entry.dirty = entry.strokes.length > 0;
     if (shouldQueue) {
+      commitStroke(entry, stroke);
       queueSave(entry.pageNumber);
-      if (!entry.overlayDirty) {
-        entry.strokes = [];
-      }
+    } else {
+      // Cancelled stroke
+      entry.actions = entry.actions.filter((action) => action?.stroke !== stroke);
     }
+    lastInputTs = Date.now();
+    entry.overlayNeedsFullRedraw = true;
+    scheduleOverlayRender(entry);
+    entry.dirty = entry.actions.length > 0;
+    event.stopPropagation();
     event.preventDefault();
   }
 
-  function createStroke(startPoint) {
+  function createStroke(startPoint, entry, event) {
     const cfg = TOOL_CONFIG[options.tool] || TOOL_CONFIG.pen;
+    const displayWidth = Number(entry.displayWidth || 0) || 1;
+    const storageWidth = Number(entry.storageWidth || 0) || displayWidth;
+    const widthScale = storageWidth / Math.max(displayWidth, 1);
     return {
       tool: options.tool,
       color: options.color,
       size: Math.max(1, options.size),
       alpha: options.tool === "highlighter" ? options.highlightAlpha : 1,
       widthMultiplier: cfg.widthMultiplier || 1,
-      points: [startPoint]
+      points: [startPoint],
+      widthScale,
+      hasPressure: event?.pointerType === "pen",
+      overlayDrawnIndex: 0,
+      dotDrawn: false
     };
   }
 
-  function paintStroke(entry, stroke) {
-    if (!entry.overlayCtx) return;
-    const ctx = entry.overlayCtx;
-    ctx.save();
-    applyStrokeStyle(ctx, stroke, entry.pixelRatio || 1);
-    renderStroke(ctx, entry, stroke.points, false);
-    ctx.restore();
+  function getNormalizedPoint(event, entry) {
+    const target = entry.frame || event.currentTarget;
+    const rect = target.getBoundingClientRect();
+    const nx = (event.clientX - rect.left) / Math.max(rect.width, 1);
+    const ny = (event.clientY - rect.top) / Math.max(rect.height, 1);
+    const pressure = event.pointerType === "pen"
+      ? Math.max(0.05, Math.min(1, Number(event.pressure) || 0.5))
+      : 0.8;
+    return {
+      x: Math.min(1, Math.max(0, nx)),
+      y: Math.min(1, Math.max(0, ny)),
+      p: pressure
+    };
   }
 
-  function paintStrokeSegment(entry, stroke) {
-    if (!entry.overlayCtx) return;
-    const ctx = entry.overlayCtx;
-    ctx.save();
-    applyStrokeStyle(ctx, stroke, entry.pixelRatio || 1);
-    renderStroke(ctx, entry, stroke.points, true);
-    ctx.restore();
+  function collectCoalescedPoints(event, entry) {
+    const events = typeof event.getCoalescedEvents === "function"
+      ? event.getCoalescedEvents()
+      : [event];
+    const list = events && events.length ? events : [event];
+    return list.map((evt) => getNormalizedPoint(evt, entry));
   }
 
-  function mergeOverlayIntoCommitted(entry) {
-    if (!entry.overlay || !entry.commitCanvas || !entry.commitCtx || !entry.overlayCtx) return;
-    if (isCanvasEmpty(entry.overlay)) {
-      entry.overlayCtx.clearRect(0, 0, entry.overlay.width, entry.overlay.height);
-      return;
-    }
-    entry.commitCtx.save();
-    entry.commitCtx.globalCompositeOperation = "source-over";
-    entry.commitCtx.drawImage(entry.overlay, 0, 0, entry.commitCanvas.width, entry.commitCanvas.height);
-    entry.commitCtx.restore();
-    entry.overlayCtx.clearRect(0, 0, entry.overlay.width, entry.overlay.height);
+  function toCanvasPoint(point, width, height) {
+    return {
+      x: point.x * width,
+      y: point.y * height
+    };
   }
 
-  function isCanvasEmpty(canvas) {
-    if (!canvas) return true;
-    const { width, height } = canvas;
-    if (!width || !height) return true;
-    const ctx = canvas.getContext("2d", { willReadFrequently: true });
-    try {
-      const data = ctx.getImageData(0, 0, width, height).data;
-      for (let i = 3; i < data.length; i += 4) {
-        if (data[i] !== 0) return false;
-      }
-    } catch (err) {
-      console.warn("Canvas empty check failed", err);
-      return false;
-    }
-    return true;
+  function computePressureScale(stroke, pressure) {
+    if (!stroke?.hasPressure) return 1;
+    const p = Math.max(0.05, Math.min(1, Number(pressure) || 0.5));
+    return 0.45 + p * 0.85;
   }
 
-  function applyStrokeStyle(ctx, stroke, ratio) {
+  function applyStrokeBaseStyle(ctx, stroke) {
     ctx.globalCompositeOperation = "source-over";
     ctx.strokeStyle = stroke.color;
-    ctx.globalAlpha = stroke.alpha ?? 1;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
-    const multiplier = stroke.widthMultiplier || 1;
-    ctx.lineWidth = Math.max(0.5, stroke.size * multiplier * ratio);
   }
 
-  function renderStroke(ctx, entry, points, onlyTail = false) {
-    if (!entry.overlay) return;
-    if (!points.length) return;
+  function drawStrokeToContext(ctx, entry, stroke, { target = "overlay", startIndex = 1 } = {}) {
+    if (!ctx || !stroke || !stroke.points?.length) return;
+    const canvas = target === "overlay" ? entry.overlay : entry.storageCanvas;
+    if (!canvas) return;
+    const width = canvas.width || 1;
+    const height = canvas.height || 1;
+    const ratio = target === "overlay" ? (entry.pixelRatio || 1) : (stroke.widthScale || 1);
+    const baseWidth = Math.max(0.5, stroke.size * (stroke.widthMultiplier || 1) * ratio);
+
+    ctx.save();
+    applyStrokeBaseStyle(ctx, stroke);
+
+    const points = stroke.points;
     if (points.length === 1) {
-      const p = toCanvasPoint(entry, points[0]);
-      ctx.beginPath();
-      ctx.moveTo(p.x, p.y);
-      ctx.lineTo(p.x + 0.02, p.y + 0.02);
-      ctx.stroke();
+      if (!stroke.dotDrawn || target !== "overlay") {
+        const p = toCanvasPoint(points[0], width, height);
+        ctx.globalAlpha = stroke.alpha ?? 1;
+        ctx.lineWidth = baseWidth * computePressureScale(stroke, points[0].p);
+        ctx.beginPath();
+        ctx.moveTo(p.x, p.y);
+        ctx.lineTo(p.x + 0.02, p.y + 0.02);
+        ctx.stroke();
+        stroke.dotDrawn = true;
+      }
+      ctx.restore();
       return;
     }
 
-    const startIndex = onlyTail ? Math.max(1, points.length - 1) : 1;
-    for (let idx = startIndex; idx < points.length; idx++) {
-      const prev = toCanvasPoint(entry, points[idx - 1]);
-      const curr = toCanvasPoint(entry, points[idx]);
+    const start = Math.max(1, startIndex);
+    for (let idx = start; idx < points.length; idx += 1) {
+      const prev = toCanvasPoint(points[idx - 1], width, height);
+      const curr = toCanvasPoint(points[idx], width, height);
+      const pressure = points[idx]?.p ?? points[idx - 1]?.p;
+      ctx.globalAlpha = stroke.alpha ?? 1;
+      ctx.lineWidth = baseWidth * computePressureScale(stroke, pressure);
       ctx.beginPath();
       ctx.moveTo(prev.x, prev.y);
       ctx.lineTo(curr.x, curr.y);
       ctx.stroke();
     }
+    ctx.restore();
   }
 
-  function redraw(entry) {
+  function scheduleOverlayRender(entry) {
+    if (!entry) return;
+    entry.overlayDirty = true;
+    if (scheduleOverlayRender.raf) return;
+    scheduleOverlayRender.raf = window.requestAnimationFrame(() => {
+      scheduleOverlayRender.raf = null;
+      pages.forEach((pageEntry) => {
+        if (pageEntry.overlayDirty) {
+          renderOverlayFrame(pageEntry);
+        }
+      });
+    });
+  }
+  scheduleOverlayRender.raf = null;
+
+  function renderOverlayFrame(entry) {
     if (!entry.overlayCtx || !entry.overlay) return;
-    entry.overlayCtx.clearRect(0, 0, entry.overlay.width, entry.overlay.height);
-    entry.strokes.forEach((stroke) => paintStroke(entry, stroke));
+
+    if (entry.overlayNeedsFullRedraw) {
+      entry.overlayCtx.clearRect(0, 0, entry.overlay.width, entry.overlay.height);
+      entry.activePointers.forEach((stroke) => {
+        stroke.overlayDrawnIndex = 0;
+        drawStrokeToContext(entry.overlayCtx, entry, stroke, { target: "overlay", startIndex: 1 });
+        stroke.overlayDrawnIndex = stroke.points.length - 1;
+      });
+      entry.overlayNeedsFullRedraw = false;
+      entry.overlayDirty = false;
+      return;
+    }
+
+    entry.activePointers.forEach((stroke) => {
+      const lastDrawn = Number.isInteger(stroke.overlayDrawnIndex) ? stroke.overlayDrawnIndex : 0;
+      const startIndex = Math.max(1, lastDrawn + 1);
+      if (stroke.points.length <= startIndex) return;
+      drawStrokeToContext(entry.overlayCtx, entry, stroke, { target: "overlay", startIndex });
+      stroke.overlayDrawnIndex = stroke.points.length - 1;
+    });
+
+    entry.overlayDirty = false;
   }
 
-  function queueSave(pageNumber) {
+  function redrawOverlay(entry) {
+    if (!entry || !entry.overlayCtx || !entry.overlay) return;
+    entry.overlayCtx.clearRect(0, 0, entry.overlay.width, entry.overlay.height);
+    entry.activePointers.forEach((stroke) => {
+      stroke.overlayDrawnIndex = 0;
+      stroke.dotDrawn = false;
+      drawStrokeToContext(entry.overlayCtx, entry, stroke, { target: "overlay", startIndex: 1 });
+      stroke.overlayDrawnIndex = stroke.points.length - 1;
+    });
+    entry.overlayDirty = false;
+  }
+
+  function commitStroke(entry, stroke) {
+    if (!entry || !stroke) return;
+    ensureStorageCanvas(entry);
+    if (entry.storageCtx && entry.storageCanvas) {
+      drawStrokeToContext(entry.storageCtx, entry, stroke, { target: "storage", startIndex: 1 });
+      entry.hasCommittedContent = true;
+      syncCommitFromStorage(entry);
+    }
+  }
+
+  function finalizeActiveStrokes() {
+    pages.forEach((entry) => {
+      if (!entry.activePointers || entry.activePointers.size === 0) return;
+      entry.activePointers.forEach((stroke) => {
+        commitStroke(entry, stroke);
+      });
+      entry.activePointers.clear();
+      entry.overlayNeedsFullRedraw = true;
+      entry.overlayDirty = false;
+      entry.dirty = entry.actions.length > 0;
+      entry.needsUpload = true;
+      pendingPages.add(entry.pageNumber);
+      if (!pendingSince) pendingSince = Date.now();
+      redrawOverlay(entry);
+    });
+  }
+
+  function hasActivePointers() {
+    for (const entry of pages.values()) {
+      if (entry.activePointers && entry.activePointers.size) return true;
+    }
+    return false;
+  }
+
+  function queueSave(pageNumber, opts = {}) {
     if (!fileName) return;
     const entry = pages.get(pageNumber);
     if (entry) entry.needsUpload = true;
     pendingPages.add(pageNumber);
-    if (saveTimer) clearTimeout(saveTimer);
-    saveTimer = window.setTimeout(() => {
-      saveTimer = null;
-      flushSaves();
-    }, 800);
+    if (!pendingSince) pendingSince = Date.now();
+    if (opts.immediate) {
+      void flushSaves({ force: true });
+      return;
+    }
+    scheduleIdleFlush();
   }
 
-  async function flushSaves() {
+  function scheduleIdleFlush() {
+    if (saveTimer) return;
+    saveTimer = window.setTimeout(checkIdleFlush, IDLE_SAVE_DELAY);
+  }
+
+  function checkIdleFlush() {
+    saveTimer = null;
     if (saving || !fileName) return;
     if (!pendingPages.size) return;
+    const now = Date.now();
+    const idle = now - lastInputTs >= IDLE_SAVE_DELAY;
+    const noActive = !hasActivePointers();
+    const age = pendingSince ? now - pendingSince : 0;
+    if (noActive && (idle || age >= MAX_PENDING_AGE)) {
+      void flushSaves();
+    } else {
+      scheduleIdleFlush();
+    }
+  }
+
+  function serializeCanvasIdle(canvas) {
+    if (!canvas) return Promise.resolve(null);
+    return new Promise((resolve) => {
+      const run = () => {
+        try {
+          resolve(serializeCanvasPngLimited(canvas));
+        } catch (err) {
+          console.warn("Annotation serialization failed", err);
+          resolve(null);
+        }
+      };
+      if (typeof window.requestIdleCallback === "function") {
+        idleCallback = window.requestIdleCallback(() => {
+          idleCallback = null;
+          run();
+        }, { timeout: 800 });
+      } else {
+        window.setTimeout(run, 0);
+      }
+    });
+  }
+
+  async function flushSaves(opts = {}) {
+    if (saving || !fileName) return;
+    if (!pendingPages.size) return;
+    if (!opts.force && hasActivePointers()) return;
 
     const items = [];
-    pendingPages.forEach((pageNumber) => {
+    const retryPages = new Set();
+    for (const pageNumber of Array.from(pendingPages)) {
       const entry = pages.get(pageNumber);
-      if (!entry) return;
+      if (!entry) continue;
+      if (!entry.needsUpload) continue;
 
-      if (entry.overlayDirty) {
-        mergeOverlayIntoCommitted(entry);
-      }
-
+      ensureStorageCanvas(entry);
       let dataUrl = null;
-      if (entry.commitCanvas && entry.needsUpload) {
-        if (!isCanvasEmpty(entry.commitCanvas)) {
-          try {
-            dataUrl = serializeCanvasPngLimited(entry.commitCanvas);
-          } catch (err) {
-            console.warn("Annotation serialization failed", err);
-          }
-        }
+      if (entry.hasCommittedContent && entry.storageCanvas) {
+        dataUrl = await serializeCanvasIdle(entry.storageCanvas);
       }
 
-      entry.strokes = [];
-      entry.overlayDirty = false;
-      entry.commitDirty = false;
-
-      if (!entry.needsUpload && !dataUrl) {
-        // Nothing to send
-        entry.needsUpload = false;
-        return;
+      if (entry.hasCommittedContent && !dataUrl) {
+        entry.needsUpload = true;
+        retryPages.add(entry.pageNumber);
+        continue;
       }
 
       entry.needsUpload = false;
-      if (!dataUrl) {
-        entry.committedImage = null;
-        entry.hasCommittedContent = false;
-        if (entry.commitCtx && entry.commitCanvas) {
-          entry.commitCtx.clearRect(0, 0, entry.commitCanvas.width, entry.commitCanvas.height);
-        }
-      } else {
-        entry.committedImage = dataUrl;
-        entry.hasCommittedContent = true;
-      }
-
       items.push({ entry, payload: {
         pageNumber,
         dataUrl,
         pageWidth: entry.pageWidth,
         pageHeight: entry.pageHeight
       }});
-    });
+    }
 
     pendingPages.clear();
-    if (!items.length) return;
+    retryPages.forEach((page) => pendingPages.add(page));
+    pendingSince = pendingPages.size ? Date.now() : null;
+    if (!items.length) {
+      if (pendingPages.size) scheduleIdleFlush();
+      return;
+    }
 
     saving = true;
+    let didShowSaving = false;
     items.forEach(({ entry }) => markSaving(entry, true));
-    showStatus("Notizen speichern…");
+    if (saveStatusTimer) {
+      clearTimeout(saveStatusTimer);
+    }
+    saveStatusTimer = window.setTimeout(() => {
+      didShowSaving = true;
+      showStatus("Notizen speichern…");
+    }, SAVE_STATUS_DELAY);
 
     try {
       const response = await (fetcher || window.fetch)("/api/annotations/save", {
@@ -631,7 +922,9 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
         result = await response.json();
       } catch {}
 
-      showStatus("Notizen gespeichert", 1600);
+      if (didShowSaving) {
+        showStatus("Notizen gespeichert", 1600);
+      }
       if (typeof onSaved === "function") {
         const changedPages = Array.from(new Set(items.map(({ payload }) => payload.pageNumber).filter((page) => Number.isInteger(page) && page > 0)));
         const mtimeValue = Number(result?.mtime);
@@ -652,29 +945,19 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
         pendingPages.add(entry.pageNumber);
       });
     } finally {
+      if (saveStatusTimer) {
+        clearTimeout(saveStatusTimer);
+        saveStatusTimer = null;
+      }
       items.forEach(({ entry }) => markSaving(entry, false));
       saving = false;
-      if (pendingPages.size) flushSaves();
+      if (pendingPages.size) scheduleIdleFlush();
     }
   }
 
   function markSaving(entry, flag) {
     if (!entry.overlay) return;
     entry.overlay.classList.toggle("is-saving", flag);
-  }
-
-  function renderCommittedImage(entry, dataUrl) {
-    if (!entry.commitCanvas || !entry.commitCtx) return;
-    entry.commitCtx.clearRect(0, 0, entry.commitCanvas.width, entry.commitCanvas.height);
-    const img = new Image();
-    img.decoding = "async";
-    img.onload = () => {
-      if (!entry.commitCtx) return;
-      entry.commitCtx.clearRect(0, 0, entry.commitCanvas.width, entry.commitCanvas.height);
-      entry.commitCtx.drawImage(img, 0, 0, entry.commitCanvas.width, entry.commitCanvas.height);
-      entry.hasCommittedContent = Boolean(dataUrl);
-    };
-    img.src = dataUrl;
   }
 
   async function undoLastStroke() {
@@ -686,19 +969,18 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
     const pageOrder = lastActivePage ? [lastActivePage, ...Array.from(pages.keys()).filter((n) => n !== lastActivePage).reverse()] : Array.from(pages.keys()).reverse();
     for (const pageNumber of pageOrder) {
       const entry = pages.get(pageNumber);
-      if (!entry || !entry.strokes.length) continue;
-      entry.strokes.pop();
-      redraw(entry);
-      if (entry.strokes.length) {
-        queueSave(pageNumber);
-      } else {
-        pendingPages.delete(pageNumber);
-        entry.dirty = false;
-        if (entry.overlayCtx && entry.overlay) {
-          entry.overlayCtx.clearRect(0, 0, entry.overlay.width, entry.overlay.height);
-        }
-        showStatus("Notiz entfernt", 1200);
-      }
+      if (!entry || !entry.actions.length) continue;
+      const action = entry.actions.pop();
+      if (action) entry.redo.push(action);
+      entry.dirty = entry.actions.length > 0;
+      entry.needsUpload = true;
+      entry.overlayNeedsFullRedraw = true;
+      entry.activePointers.clear();
+      renderAllFromActions(entry);
+      redrawOverlay(entry);
+      queueSave(pageNumber);
+      const message = action?.type === "clear" ? "Leeren rückgängig" : "Notiz entfernt";
+      showStatus(message, 1200);
       return true;
     }
     return false;
@@ -746,17 +1028,23 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
       const changedSet = new Set([...beforePages, ...snapshotMap.keys()]);
 
       pendingPages.clear();
+      pendingSince = null;
       if (saveTimer) {
         clearTimeout(saveTimer);
         saveTimer = null;
       }
+      if (idleCallback && typeof window.cancelIdleCallback === "function") {
+        window.cancelIdleCallback(idleCallback);
+        idleCallback = null;
+      }
 
       pages.forEach((entry, pageNumber) => {
-        entry.strokes = [];
+        entry.actions = [];
+        entry.redo = [];
         entry.activePointers.clear();
         entry.dirty = false;
         entry.overlayDirty = false;
-        entry.commitDirty = false;
+        entry.overlayNeedsFullRedraw = true;
         entry.needsUpload = false;
         if (entry.overlayCtx && entry.overlay) {
           entry.overlayCtx.clearRect(0, 0, entry.overlay.width, entry.overlay.height);
@@ -834,56 +1122,26 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
       showStatus("Seite nicht geladen", 1400);
       return;
     }
+    const hasOverlayContent = entry.activePointers && entry.activePointers.size > 0;
+    const hasVisibleContent = entry.hasCommittedContent || hasOverlayContent;
 
-    let hadContent = false;
-
-    if (entry.overlayCtx && entry.overlay) {
-      entry.overlayCtx.clearRect(0, 0, entry.overlay.width, entry.overlay.height);
-      if (entry.strokes.length) hadContent = true;
-    }
-
-    if (entry.commitCtx && entry.commitCanvas && !isCanvasEmpty(entry.commitCanvas)) {
-      entry.commitCtx.clearRect(0, 0, entry.commitCanvas.width, entry.commitCanvas.height);
-      hadContent = true;
-    }
-
-    entry.strokes = [];
-    entry.activePointers.clear();
-    entry.dirty = false;
-    entry.overlayDirty = false;
-    entry.commitDirty = false;
-    entry.needsUpload = hadContent;
-    entry.hasCommittedContent = false;
-    entry.committedImage = null;
-
-    if (hadContent) {
-      pendingPages.add(entry.pageNumber);
-      queueSave(entry.pageNumber);
-      showStatus("Seite geleert", 1600);
-    } else {
+    if (!hasVisibleContent) {
       showStatus("Keine Notizen vorhanden", 1200);
+      return;
     }
-  }
 
-  function getNormalizedPoint(event, entry) {
-    const target = entry.frame || event.currentTarget;
-    const rect = target.getBoundingClientRect();
-    const nx = (event.clientX - rect.left) / Math.max(rect.width, 1);
-    const ny = (event.clientY - rect.top) / Math.max(rect.height, 1);
-    return {
-      x: Math.min(1, Math.max(0, nx)),
-      y: Math.min(1, Math.max(0, ny))
-    };
-  }
+    entry.actions.push({ type: "clear", ts: Date.now() });
+    entry.redo = [];
+    entry.activePointers.clear();
+    entry.overlayNeedsFullRedraw = true;
+    entry.dirty = true;
+    entry.needsUpload = true;
 
-  function toCanvasPoint(entry, point) {
-    const overlay = entry.overlay;
-    const width = overlay ? overlay.width : 1;
-    const height = overlay ? overlay.height : 1;
-    return {
-      x: point.x * width,
-      y: point.y * height
-    };
+    renderAllFromActions(entry);
+    redrawOverlay(entry);
+
+    queueSave(entry.pageNumber);
+    showStatus("Seite geleert", 1600);
   }
 
   function setActiveState(next, opts = {}) {
@@ -891,6 +1149,7 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
     // console.log('[Annotation] setActiveState called - next:', next, 'current active:', active, 'changed:', changed, 'opts:', opts);
     if (!changed) return;
     active = next;
+    document.body.classList.toggle("annotations-active", active);
     // console.log('[Annotation] Active state changed to:', active);
     updateToggleUI();
     refreshOverlayActivation();
@@ -1000,7 +1259,12 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
     attachPageLayer,
     refreshOverlayActivation,
     onPageLayerRemoved,
-    isActive: () => active
+    isActive: () => active,
+    isDrawing: () => hasActivePointers(),
+    flushSaves: (opts = {}) => flushSaves(opts),
+    clearRedo: () => {
+      pages.forEach((entry) => { entry.redo = []; });
+    }
   };
 
   Object.defineProperty(api, "primeCommittedImage", {
