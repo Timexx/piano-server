@@ -782,7 +782,10 @@ async function loadAnnotationIndex(rel) {
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object") return { rel, pages: {} };
     if (!parsed.pages || typeof parsed.pages !== "object") parsed.pages = {};
-    return { rel, pages: parsed.pages };
+    const result = { rel, pages: parsed.pages };
+    // Preserve clearedAt flag so auto-heal knows an empty state was intentional
+    if (typeof parsed.clearedAt === "number") result.clearedAt = parsed.clearedAt;
+    return result;
   } catch {
     return { rel, pages: {} };
   }
@@ -790,7 +793,10 @@ async function loadAnnotationIndex(rel) {
 
 async function saveAnnotationIndex(rel, index) {
   const indexPath = getAnnotationIndexPath(rel);
-  const payload = JSON.stringify({ rel, pages: index.pages || {} }, null, 2);
+  const indexObj = { rel, pages: index.pages || {} };
+  // Persist clearedAt so a page reload can distinguish intentional empty from data loss
+  if (typeof index.clearedAt === "number") indexObj.clearedAt = index.clearedAt;
+  const payload = JSON.stringify(indexObj, null, 2);
   await ensureAnnotationWritable(rel);
   try {
     await fs.promises.writeFile(indexPath, payload, "utf8");
@@ -4505,9 +4511,10 @@ app.get("/api/annotations", async (req, res) => {
       historyEntries = await listAnnotationSnapshots(info.rel);
     } catch {}
 
-    // Auto-heal: if active annotations are empty but snapshots exist, restore latest snapshot
+    // Auto-heal: if active annotations are empty but snapshots exist, restore latest snapshot.
+    // Skip when index.clearedAt is set – the user intentionally deleted all annotations.
     // Only attempt restore if we have write permissions
-    if (!pages.length) {
+    if (!pages.length && !index.clearedAt) {
       const latestSnapshot = historyEntries.length ? historyEntries[historyEntries.length - 1] : null;
       if (latestSnapshot && latestSnapshot.dir) {
         const isWritable = await checkAnnotationWritable(info.rel);
@@ -4690,10 +4697,32 @@ app.post("/api/annotations/save", async (req, res) => {
           }
         }
 
+        // If all requested overlays were deletes (null dataUrl) and the result is
+        // an empty index, mark clearedAt and save — even if didUpdate is false
+        // (the PNGs may have been already missing).  Without this, auto-heal on
+        // the next page load would resurrect annotations from an old snapshot.
+        const remainingPages = Object.keys(index.pages || {}).length;
+        const allDeletes = overlays.every((o) => {
+          const d = typeof o.dataUrl === "string" ? o.dataUrl.trim() : "";
+          return !d;
+        });
         if (!didUpdate) {
+          if (allDeletes && remainingPages === 0) {
+            // Intentional clear with no actual change — still set clearedAt
+            index.clearedAt = Date.now();
+            await saveAnnotationIndex(info.rel, index);
+          }
           console.log('[ANNOTATION] No changes detected, discarding snapshot');
           await discardAnnotationSnapshot(snapshot);
           return;
+        }
+
+        // Mark index as intentionally empty when user deleted all annotations,
+        // so auto-heal on next load does not restore from an old snapshot.
+        if (remainingPages === 0) {
+          index.clearedAt = Date.now();
+        } else {
+          delete index.clearedAt;
         }
 
         // Persist changes
@@ -4727,11 +4756,19 @@ app.post("/api/annotations/save", async (req, res) => {
       console.warn("Annotation thumbnail refresh failed:", thumbErr?.message || thumbErr);
     }
 
+    // Count available snapshots for undo history info
+    let historyCount = 0;
+    try {
+      const availableSnapshots = await listAnnotationSnapshots(info.rel);
+      historyCount = availableSnapshots.length;
+    } catch {}
+
     res.json({ 
       ok: true, 
       mtime: st ? st.mtimeMs : null, 
       size: st ? st.size : null,
-      modified: didUpdate
+      modified: didUpdate,
+      historyRemaining: historyCount
     });
   } catch (err) {
     logError("Annotation save failed", err, { 
@@ -4913,7 +4950,7 @@ app.post("/api/annotations/reset", async (req, res) => {
 
       try {
         await resetAnnotationStore(info);
-        await saveAnnotationIndex(info.rel, { rel: info.rel, pages: {} });
+        await saveAnnotationIndex(info.rel, { rel: info.rel, pages: {}, clearedAt: Date.now() });
         if (snapshot) {
           await finalizeAnnotationSnapshot(snapshot);
         }

@@ -11,7 +11,8 @@ const COLOR_PRESETS = [
 
 const TOOL_CONFIG = {
   pen: { widthMultiplier: 1, alpha: 1 },
-  highlighter: { widthMultiplier: 2.4, alpha: 0.35 }
+  highlighter: { widthMultiplier: 2.4, alpha: 0.35 },
+  eraser: { widthMultiplier: 0, alpha: 0 }
 };
 
 const INPUT_MODES = {
@@ -29,14 +30,15 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
     highlightAlpha: 0.35
   };
 
-  // Keep payloads well below server limit to avoid 500s on large zoom levels
-  const MAX_UPLOAD_BYTES = 9 * 1024 * 1024; // server rejects at 10MB
+  const MAX_UPLOAD_BYTES = 9 * 1024 * 1024;
   const MAX_COMPRESSION_ATTEMPTS = 3;
   const STORAGE_SCALE = 2;
   const MAX_STORAGE_DIM = 4096;
   const IDLE_SAVE_DELAY = 1200;
   const MAX_PENDING_AGE = 5000;
   const SAVE_STATUS_DELAY = 2000;
+  const MAX_HISTORY = 20;
+  const ERASER_RADIUS_NORM = 0.035;
 
   const controls = {
     initialized: false,
@@ -79,24 +81,86 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
   const penPointerIds = new Set();
 
   function initControls() {
-    // console.log('[Annotation] initControls called, already initialized?', controls.initialized);
     if (controls.initialized) return;
-    
+
     controls.root = document.getElementById("annotationControls");
-    // console.log('[Annotation] controls.root:', controls.root);
     if (!controls.root) return;
 
     controls.toggle = document.getElementById("btnAnnotationToggle");
-    // console.log('[Annotation] controls.toggle:', controls.toggle);
-    
     controls.panel = document.getElementById("annotationPanel");
-    // console.log('[Annotation] controls.panel:', controls.panel);
-    
     controls.toolbar = document.getElementById("annotationToolbar");
-    // console.log('[Annotation] controls.toolbar:', controls.toolbar);
     if (controls.toolbar && !controls.toolbar.dataset.detachedToBody) {
       document.body.appendChild(controls.toolbar);
       controls.toolbar.dataset.detachedToBody = "1";
+    }
+
+    if (controls.toolbar) {
+      const dragHandle = controls.toolbar.querySelector('.annotation-toolbar-drag-handle');
+      if (dragHandle) {
+        let isDragging = false;
+        let dragStartX = 0;
+        let dragStartY = 0;
+        let toolbarStartX = 0;
+        let toolbarStartY = 0;
+
+        const getToolbarPos = () => {
+          const rect = controls.toolbar.getBoundingClientRect();
+          return { x: rect.left, y: rect.top };
+        };
+
+        const applyPosition = (x, y) => {
+          const tw = controls.toolbar.offsetWidth;
+          const th = controls.toolbar.offsetHeight;
+          const maxX = window.innerWidth - tw;
+          const maxY = window.innerHeight - th;
+          const clampedX = Math.max(0, Math.min(x, maxX));
+          const clampedY = Math.max(0, Math.min(y, maxY));
+          controls.toolbar.style.left = `${clampedX}px`;
+          controls.toolbar.style.top = `${clampedY}px`;
+          controls.toolbar.style.bottom = 'auto';
+          controls.toolbar.style.transform = 'none';
+          try { localStorage.setItem('annotation-toolbar-pos', JSON.stringify({ x: clampedX, y: clampedY })); } catch {}
+        };
+
+        try {
+          const saved = JSON.parse(localStorage.getItem('annotation-toolbar-pos'));
+          if (saved && typeof saved.x === 'number' && typeof saved.y === 'number') {
+            applyPosition(saved.x, saved.y);
+          }
+        } catch {}
+
+        dragHandle.addEventListener('pointerdown', (e) => {
+          isDragging = true;
+          dragStartX = e.clientX;
+          dragStartY = e.clientY;
+          const pos = getToolbarPos();
+          toolbarStartX = pos.x;
+          toolbarStartY = pos.y;
+          dragHandle.setPointerCapture(e.pointerId);
+          e.preventDefault();
+          e.stopPropagation();
+        });
+
+        dragHandle.addEventListener('pointermove', (e) => {
+          if (!isDragging) return;
+          const dx = e.clientX - dragStartX;
+          const dy = e.clientY - dragStartY;
+          applyPosition(toolbarStartX + dx, toolbarStartY + dy);
+        });
+
+        dragHandle.addEventListener('pointerup', () => { isDragging = false; });
+        dragHandle.addEventListener('pointercancel', () => { isDragging = false; });
+      }
+
+      const moreBtn = document.getElementById('btnAnnotationMore');
+      const secondaryRow = document.getElementById('annotationSecondaryRow');
+      if (moreBtn && secondaryRow) {
+        moreBtn.addEventListener('click', () => {
+          const visible = secondaryRow.style.display !== 'none';
+          secondaryRow.style.display = visible ? 'none' : 'flex';
+          moreBtn.setAttribute('aria-expanded', String(!visible));
+        });
+      }
     }
 
     controls.sizeInput = document.getElementById("annotationSize");
@@ -114,7 +178,6 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
       controls.toolbar.setAttribute("aria-hidden", controls.toolbar.classList.contains("hidden") ? "true" : "false");
     }
 
-    // Close annotations automatically when the control bar is minimized
     const controlsRoot = document.getElementById("controls");
     if (controlsRoot && typeof MutationObserver === "function") {
       const mo = new MutationObserver(() => {
@@ -154,13 +217,9 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
     });
 
     if (controls.toggle) {
-      // console.log('[Annotation] Adding click listener to toggle button');
       controls.toggle.addEventListener("click", () => {
-        // console.log('[Annotation] Toggle button clicked! Current active:', active);
         setActiveState(!active);
       });
-    } else {
-      console.warn('[Annotation] Toggle button not found!');
     }
 
     if (controls.sizeInput) {
@@ -268,10 +327,30 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
     if (committed && overlay && committed.nextSibling !== overlay) {
       frame.insertBefore(committed, overlay);
     }
-    ensureStorageCanvas(entry);
-    renderAllFromActions(entry);
+
+    const resized = ensureStorageCanvas(entry);
+
+    if (resized && entry.pendingBaseImageUrl !== undefined && entry.pendingBaseImageUrl !== null) {
+      const url = entry.pendingBaseImageUrl;
+      entry.pendingBaseImageUrl = null;
+      applyBaseImage(entry, url);
+    } else if (resized && entry.hasContent) {
+      // Canvas was recreated but no pending image — content is lost
+      entry.hasContent = false;
+    }
+
+    syncCommitFromStorage(entry);
     redrawOverlay(entry);
     refreshOverlayActivationForEntry(entry);
+
+    if (committed && committed.dataset.zoomPreviewHidden) {
+      delete committed.dataset.zoomPreviewHidden;
+      committed.style.opacity = '';
+    }
+    if (overlay && overlay.dataset.zoomPreviewHidden) {
+      delete overlay.dataset.zoomPreviewHidden;
+      overlay.style.opacity = '';
+    }
   }
 
   function refreshOverlayActivation() {
@@ -285,9 +364,12 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
     entry.overlay.classList.toggle("is-disabled", !isActive);
     entry.overlay.style.pointerEvents = isActive ? "auto" : "none";
     if (isActive) {
-      entry.overlay.style.touchAction = (inputMode === INPUT_MODES.BOTH || penInputActive) ? "none" : "pan-x pan-y";
+      const eraserSelected = options.tool === 'eraser';
+      entry.overlay.style.touchAction = (eraserSelected || inputMode === INPUT_MODES.BOTH || penInputActive) ? "none" : "pan-x pan-y";
+      entry.overlay.dataset.tool = options.tool || "pen";
     } else {
       entry.overlay.style.touchAction = "auto";
+      delete entry.overlay.dataset.tool;
     }
   }
 
@@ -329,17 +411,16 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
         storageWidth: 0,
         storageHeight: 0,
         storageScale: 1,
-        committedImage: null,
-        committedImageEl: null,
-        committedImageToken: 0,
         activePointers: new Map(),
-        actions: [],
-        redo: [],
+        // ImageData snapshot-based undo
+        history: [],            // ImageData[] — state before each operation, max MAX_HISTORY
+        redoStack: [],          // ImageData[] — for redo
+        hasContent: false,      // true when storageCanvas has visible pixels
+        pendingBaseImageUrl: null, // deferred base image, applied once canvas is ready
         dirty: false,
         overlayDirty: false,
         overlayNeedsFullRedraw: false,
-        needsUpload: false,
-        hasCommittedContent: false
+        needsUpload: false
       };
       pages.set(pageNumber, entry);
     }
@@ -396,14 +477,6 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
     });
   }
 
-  function getLastClearIndex(entry) {
-    if (!entry || !entry.actions || !entry.actions.length) return -1;
-    for (let idx = entry.actions.length - 1; idx >= 0; idx -= 1) {
-      if (entry.actions[idx]?.type === "clear") return idx;
-    }
-    return -1;
-  }
-
   function syncCommitFromStorage(entry) {
     if (!entry.commitCtx || !entry.commitCanvas || !entry.storageCanvas) return;
     entry.commitCtx.save();
@@ -412,61 +485,57 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
     entry.commitCtx.restore();
   }
 
-  function renderAllFromActions(entry) {
-    if (!entry) return;
-    if (!entry.storageCanvas || !entry.storageCtx) {
-      const resized = ensureStorageCanvas(entry);
-      if (resized && entry.storageCanvas && entry.storageCtx) {
-        // continue with new canvas
-      } else if (!entry.storageCanvas) {
-        return;
-      }
+  // ===== Snapshot-based undo =====
+
+  function imageDataHasContent(imageData) {
+    if (!imageData) return false;
+    const data = imageData.data;
+    for (let i = 3; i < data.length; i += 4) {
+      if (data[i] > 0) return true;
     }
-
-    const ctx = entry.storageCtx;
-    clearCanvas(ctx, entry.storageCanvas);
-
-    const lastClearIdx = getLastClearIndex(entry);
-    const startIdx = lastClearIdx >= 0 ? lastClearIdx + 1 : 0;
-
-    if (lastClearIdx < 0 && entry.committedImageEl) {
-      ctx.drawImage(entry.committedImageEl, 0, 0, entry.storageCanvas.width, entry.storageCanvas.height);
-    }
-
-    const hasBase = lastClearIdx < 0 && Boolean(entry.committedImageEl || entry.committedImage);
-    for (let idx = startIdx; idx < entry.actions.length; idx += 1) {
-      const action = entry.actions[idx];
-      if (action?.type === "stroke" && action.stroke) {
-        drawStrokeToContext(ctx, entry, action.stroke, { target: "storage" });
-      }
-    }
-
-    entry.hasCommittedContent = hasBase ||
-      entry.actions.slice(startIdx).some((action) => action?.type === "stroke");
-
-    syncCommitFromStorage(entry);
+    return false;
   }
 
-  function scheduleBaseImageRender(entry, dataUrl) {
-    entry.committedImage = dataUrl || null;
-    entry.committedImageEl = null;
-    entry.committedImageToken += 1;
-    const token = entry.committedImageToken;
+  // Snapshot current storageCanvas state onto history stack before a new operation.
+  // Also clears redoStack since a new operation invalidates any pending redo.
+  function pushHistory(entry) {
+    if (!entry.storageCanvas || !entry.storageCtx) return;
+    try {
+      const snapshot = entry.storageCtx.getImageData(
+        0, 0, entry.storageCanvas.width, entry.storageCanvas.height
+      );
+      entry.history.push(snapshot);
+      if (entry.history.length > MAX_HISTORY) entry.history.shift();
+      entry.redoStack = [];
+    } catch {
+      // Tainted canvas — skip
+    }
+  }
 
+  // Draw a server-supplied base image onto the storageCanvas.
+  // Clears existing content, resets history (loaded state is the new baseline).
+  function applyBaseImage(entry, dataUrl) {
     if (!dataUrl) {
-      renderAllFromActions(entry);
+      clearCanvas(entry.storageCtx, entry.storageCanvas);
+      entry.hasContent = false;
+      entry.history = [];
+      entry.redoStack = [];
+      syncCommitFromStorage(entry);
+      redrawOverlay(entry);
       return;
     }
-
     loadImage(dataUrl)
       .then((img) => {
-        if (entry.committedImageToken !== token) return;
-        entry.committedImageEl = img;
-        renderAllFromActions(entry);
+        if (!entry.storageCanvas || !entry.storageCtx) return;
+        clearCanvas(entry.storageCtx, entry.storageCanvas);
+        entry.storageCtx.drawImage(img, 0, 0, entry.storageCanvas.width, entry.storageCanvas.height);
+        entry.hasContent = true;
+        entry.history = [];
+        entry.redoStack = [];
+        syncCommitFromStorage(entry);
+        redrawOverlay(entry);
       })
-      .catch((err) => {
-        console.warn("Annotation image load failed", err);
-      });
+      .catch((err) => console.warn("Annotation image load failed", err));
   }
 
   function primeCommittedImage(pageNumber, payload) {
@@ -474,15 +543,24 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
     const dataUrl = payload?.dataUrl || null;
     if (Number.isFinite(payload?.pageWidth)) entry.pageWidth = payload.pageWidth;
     if (Number.isFinite(payload?.pageHeight)) entry.pageHeight = payload.pageHeight;
-    entry.actions = [];
-    entry.redo = [];
+
     entry.needsUpload = false;
     entry.overlayDirty = false;
     entry.overlayNeedsFullRedraw = true;
     entry.activePointers.clear();
-    entry.hasCommittedContent = Boolean(dataUrl);
+    entry.history = [];
+    entry.redoStack = [];
+    entry.hasContent = Boolean(dataUrl);
+
     ensureStorageCanvas(entry);
-    scheduleBaseImageRender(entry, dataUrl);
+
+    if (entry.storageCanvas) {
+      applyBaseImage(entry, dataUrl);
+    } else {
+      // Defer until attachPageLayer creates the canvas
+      entry.pendingBaseImageUrl = dataUrl;
+    }
+
     updateUndoState();
     updateStatusLine();
   }
@@ -558,7 +636,6 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
 
     for (let attempt = 0; attempt < MAX_COMPRESSION_ATTEMPTS && sizeBytes > MAX_UPLOAD_BYTES; attempt += 1) {
       const shrinkRatio = Math.sqrt(MAX_UPLOAD_BYTES / Math.max(1, sizeBytes));
-      // Prevent endless loops when the size is only slightly over the limit
       const safeRatio = Math.min(0.95, shrinkRatio);
       const scaled = scaleCanvas(current, safeRatio);
       current = scaled;
@@ -638,21 +715,28 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
     return isStylusEvent(event);
   }
 
+  // ===== Pointer handlers =====
+
   function handlePointerDown(event, entry) {
+    if (!active || !fileName) return;
+    // Eraser responds to all pointer types (finger touch included)
+    if (options.tool === 'eraser') {
+      handleEraserPointerDown(event, entry);
+      return;
+    }
     if (!shouldHandlePointer(event)) return;
     if (event.pointerType === "mouse" && event.button !== 0) return;
     if (!entry.overlay) return;
     if (isStylusEvent(event)) markPencilActive();
-    registerPenPointer(event);
 
+    registerPenPointer(event);
     ensureStorageCanvas(entry);
+    // Snapshot before drawing so this stroke can be undone
+    pushHistory(entry);
+
     try { entry.overlay.setPointerCapture(event.pointerId); } catch {}
     const point = getNormalizedPoint(event, entry);
     const stroke = createStroke(point, entry, event);
-    entry.actions.push({ type: "stroke", stroke, ts: Date.now() });
-    entry.redo = [];
-    updateUndoState();
-    updateStatusLine();
     entry.activePointers.set(event.pointerId, stroke);
     lastActivePage = entry.pageNumber;
     scheduleOverlayRender(entry);
@@ -665,8 +749,14 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
   }
 
   function handlePointerMove(event, entry) {
+    if (!active || !fileName) return;
+    if (options.tool === 'eraser') {
+      handleEraserPointerMove(event, entry);
+      return;
+    }
     if (!shouldHandlePointer(event)) return;
     if (isStylusEvent(event)) markPencilActive();
+
     const stroke = entry.activePointers.get(event.pointerId);
     if (!stroke) return;
     const points = collectCoalescedPoints(event, entry);
@@ -696,31 +786,44 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
     event.preventDefault();
   }
 
-  function handlePointerEnd(event, entry, shouldQueue) {
+  function handlePointerEnd(event, entry, shouldCommit) {
+    if (!active || !fileName) {
+      releasePenPointer(event);
+      return;
+    }
+    if (options.tool === 'eraser') {
+      handleEraserPointerEnd(event, entry);
+      return;
+    }
     if (!shouldHandlePointer(event)) {
       releasePenPointer(event);
       return;
     }
     if (isStylusEvent(event)) markPencilActive();
+
     releasePenPointer(event);
     const stroke = entry.activePointers.get(event.pointerId);
     if (!stroke) return;
     entry.activePointers.delete(event.pointerId);
     try { entry.overlay?.releasePointerCapture(event.pointerId); } catch {}
 
-    if (shouldQueue) {
+    if (shouldCommit) {
       commitStroke(entry, stroke);
       queueSave(entry.pageNumber);
       setLastAction("Strich");
     } else {
-      // Cancelled stroke
-      entry.actions = entry.actions.filter((action) => action?.stroke !== stroke);
+      // Cancelled — restore pre-stroke snapshot
+      const snapshot = entry.history.pop();
+      if (snapshot && entry.storageCanvas && entry.storageCtx) {
+        try { entry.storageCtx.putImageData(snapshot, 0, 0); } catch {}
+        syncCommitFromStorage(entry);
+      }
     }
     updateUndoState();
     lastInputTs = Date.now();
     entry.overlayNeedsFullRedraw = true;
     scheduleOverlayRender(entry);
-    entry.dirty = entry.actions.length > 0;
+    entry.dirty = entry.hasContent;
     event.stopPropagation();
     event.preventDefault();
   }
@@ -767,11 +870,154 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
     return list.map((evt) => getNormalizedPoint(evt, entry));
   }
 
+  // ===== Pixel-based eraser =====
+
+  function handleEraserPointerDown(event, entry) {
+    if (!active || !fileName) return;
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    if (!entry.overlay) return;
+
+    registerPenPointer(event);
+    ensureStorageCanvas(entry);
+    // Snapshot before the erase gesture so the whole gesture is one undo step
+    pushHistory(entry);
+
+    try { entry.overlay.setPointerCapture(event.pointerId); } catch {}
+    const point = getNormalizedPoint(event, entry);
+    entry.activePointers.set(event.pointerId, { eraser: true, lastPoint: point });
+    lastActivePage = entry.pageNumber;
+
+    // Hide commitCanvas so only the overlay shows content during the gesture.
+    // The overlay is the proven live-rendering surface (same as pen strokes).
+    if (entry.commitCanvas) entry.commitCanvas.style.visibility = 'hidden';
+
+    // Erase from ground-truth storageCanvas
+    eraseCircleNormalized(entry, point.x, point.y);
+
+    // Schedule rendering through the SAME rAF pipeline that makes pen strokes live
+    entry.overlayNeedsFullRedraw = true;
+    entry.overlayDirty = true;
+    scheduleOverlayRender(entry);
+
+    lastInputTs = Date.now();
+    entry.dirty = true;
+    entry.needsUpload = true;
+    event.stopPropagation();
+    event.preventDefault();
+  }
+
+  function handleEraserPointerMove(event, entry) {
+    if (!active || !fileName) return;
+    const data = entry.activePointers.get(event.pointerId);
+    if (!data || !data.eraser) return;
+
+    const points = collectCoalescedPoints(event, entry);
+    points.forEach((point) => eraseCircleNormalized(entry, point.x, point.y));
+
+    const last = points[points.length - 1];
+    if (last) data.lastPoint = last;
+
+    // Schedule rendering through the SAME rAF pipeline that makes pen strokes live
+    entry.overlayNeedsFullRedraw = true;
+    entry.overlayDirty = true;
+    scheduleOverlayRender(entry);
+
+    lastInputTs = Date.now();
+    entry.dirty = true;
+    entry.needsUpload = true;
+    event.stopPropagation();
+    event.preventDefault();
+  }
+
+  function handleEraserPointerEnd(event, entry) {
+    releasePenPointer(event);
+    const data = entry.activePointers.get(event.pointerId);
+    if (!data || !data.eraser) return;
+    entry.activePointers.delete(event.pointerId);
+    try { entry.overlay?.releasePointerCapture(event.pointerId); } catch {}
+
+    // Once all eraser pointers lifted, finish the gesture
+    const remainingErasers = Array.from(entry.activePointers.values()).some((d) => d.eraser);
+    if (remainingErasers) {
+      event.stopPropagation();
+      event.preventDefault();
+      return;
+    }
+
+    // Show commitCanvas again and sync the erased storageCanvas into it
+    syncCommitFromStorage(entry);
+    if (entry.commitCanvas) entry.commitCanvas.style.visibility = '';
+
+    // Clear overlay (commitCanvas is now showing the correct state)
+    if (entry.overlay && entry.overlayCtx) {
+      entry.overlayCtx.clearRect(0, 0, entry.overlay.width, entry.overlay.height);
+    }
+    entry.overlayDirty = false;
+
+    // Check remaining content
+    if (entry.storageCanvas && entry.storageCtx) {
+      try {
+        const imgData = entry.storageCtx.getImageData(
+          0, 0, entry.storageCanvas.width, entry.storageCanvas.height
+        );
+        entry.hasContent = imageDataHasContent(imgData);
+      } catch {
+        entry.hasContent = true;
+      }
+    }
+
+    queueSave(entry.pageNumber);
+    setLastAction("Radiert");
+    updateUndoState();
+    showStatus("Notiz radiert", 600);
+    event.stopPropagation();
+    event.preventDefault();
+  }
+
+  // Erase a circle from storageCanvas at normalised coords (nx, ny)
+  function eraseCircleNormalized(entry, nx, ny) {
+    if (!entry.storageCanvas || !entry.storageCtx) return;
+    const ctx = entry.storageCtx;
+    const w = entry.storageCanvas.width;
+    const h = entry.storageCanvas.height;
+    const sizeScale = Math.max(0.3, options.size / 3);
+    const r = ERASER_RADIUS_NORM * w * sizeScale;
+    ctx.save();
+    ctx.globalCompositeOperation = "destination-out";
+    ctx.beginPath();
+    ctx.arc(nx * w, ny * h, r, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(0,0,0,1)";
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // Paint the eraser cursor circle onto a context at normalised coords
+  function drawEraserCursorAt(ctx, w, h, nx, ny) {
+    const sizeScale = Math.max(0.3, options.size / 3);
+    const r = Math.max(8, ERASER_RADIUS_NORM * w * sizeScale);
+    const x = nx * w;
+    const y = ny * h;
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(255, 80, 80, 0.9)';
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x - r * 0.55, y - r * 0.55);
+    ctx.lineTo(x + r * 0.55, y + r * 0.55);
+    ctx.moveTo(x + r * 0.55, y - r * 0.55);
+    ctx.lineTo(x - r * 0.55, y + r * 0.55);
+    ctx.strokeStyle = 'rgba(255, 80, 80, 0.9)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // ===== End Eraser =====
+
   function toCanvasPoint(point, width, height) {
-    return {
-      x: point.x * width,
-      y: point.y * height
-    };
+    return { x: point.x * width, y: point.y * height };
   }
 
   function computePressureScale(stroke, pressure) {
@@ -837,9 +1083,7 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
     scheduleOverlayRender.raf = window.requestAnimationFrame(() => {
       scheduleOverlayRender.raf = null;
       pages.forEach((pageEntry) => {
-        if (pageEntry.overlayDirty) {
-          renderOverlayFrame(pageEntry);
-        }
+        if (pageEntry.overlayDirty) renderOverlayFrame(pageEntry);
       });
     });
   }
@@ -847,12 +1091,39 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
 
   function renderOverlayFrame(entry) {
     if (!entry.overlayCtx || !entry.overlay) return;
+    const ctx = entry.overlayCtx;
+    const canvas = entry.overlay;
 
+    // Check if there is an active eraser gesture
+    const hasActiveEraser = Array.from(entry.activePointers.values()).some((d) => d && d.eraser);
+
+    if (hasActiveEraser) {
+      // Eraser live rendering: paint the entire current storageCanvas onto the
+      // overlay, then draw the cursor. Because commitCanvas is hidden during
+      // the gesture, this overlay IS the user's live view — same rAF pipeline
+      // that makes pen strokes work.
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      if (entry.storageCanvas) {
+        ctx.drawImage(entry.storageCanvas, 0, 0, canvas.width, canvas.height);
+      }
+      // Draw eraser cursor for each active eraser pointer
+      entry.activePointers.forEach((data) => {
+        if (data && data.eraser && data.lastPoint) {
+          drawEraserCursorAt(ctx, canvas.width, canvas.height, data.lastPoint.x, data.lastPoint.y);
+        }
+      });
+      entry.overlayNeedsFullRedraw = false;
+      entry.overlayDirty = false;
+      return;
+    }
+
+    // Normal pen-stroke overlay rendering
     if (entry.overlayNeedsFullRedraw) {
-      entry.overlayCtx.clearRect(0, 0, entry.overlay.width, entry.overlay.height);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
       entry.activePointers.forEach((stroke) => {
+        if (!stroke?.points?.length) return;
         stroke.overlayDrawnIndex = 0;
-        drawStrokeToContext(entry.overlayCtx, entry, stroke, { target: "overlay", startIndex: 1 });
+        drawStrokeToContext(ctx, entry, stroke, { target: "overlay", startIndex: 1 });
         stroke.overlayDrawnIndex = stroke.points.length - 1;
       });
       entry.overlayNeedsFullRedraw = false;
@@ -861,10 +1132,11 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
     }
 
     entry.activePointers.forEach((stroke) => {
+      if (!stroke?.points?.length) return;
       const lastDrawn = Number.isInteger(stroke.overlayDrawnIndex) ? stroke.overlayDrawnIndex : 0;
       const startIndex = Math.max(1, lastDrawn + 1);
       if (stroke.points.length <= startIndex) return;
-      drawStrokeToContext(entry.overlayCtx, entry, stroke, { target: "overlay", startIndex });
+      drawStrokeToContext(ctx, entry, stroke, { target: "overlay", startIndex });
       stroke.overlayDrawnIndex = stroke.points.length - 1;
     });
 
@@ -875,6 +1147,7 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
     if (!entry || !entry.overlayCtx || !entry.overlay) return;
     entry.overlayCtx.clearRect(0, 0, entry.overlay.width, entry.overlay.height);
     entry.activePointers.forEach((stroke) => {
+      if (!stroke?.points?.length) return;
       stroke.overlayDrawnIndex = 0;
       stroke.dotDrawn = false;
       drawStrokeToContext(entry.overlayCtx, entry, stroke, { target: "overlay", startIndex: 1 });
@@ -888,7 +1161,7 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
     ensureStorageCanvas(entry);
     if (entry.storageCtx && entry.storageCanvas) {
       drawStrokeToContext(entry.storageCtx, entry, stroke, { target: "storage", startIndex: 1 });
-      entry.hasCommittedContent = true;
+      entry.hasContent = true;
       syncCommitFromStorage(entry);
     }
   }
@@ -896,13 +1169,14 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
   function finalizeActiveStrokes() {
     pages.forEach((entry) => {
       if (!entry.activePointers || entry.activePointers.size === 0) return;
-      entry.activePointers.forEach((stroke) => {
-        commitStroke(entry, stroke);
+      entry.activePointers.forEach((data) => {
+        if (!data?.points?.length) return;
+        commitStroke(entry, data);
       });
       entry.activePointers.clear();
       entry.overlayNeedsFullRedraw = true;
       entry.overlayDirty = false;
-      entry.dirty = entry.actions.length > 0;
+      entry.dirty = entry.hasContent;
       entry.needsUpload = true;
       pendingPages.add(entry.pageNumber);
       if (!pendingSince) pendingSince = Date.now();
@@ -986,11 +1260,11 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
 
       ensureStorageCanvas(entry);
       let dataUrl = null;
-      if (entry.hasCommittedContent && entry.storageCanvas) {
+      if (entry.hasContent && entry.storageCanvas) {
         dataUrl = await serializeCanvasIdle(entry.storageCanvas);
       }
 
-      if (entry.hasCommittedContent && !dataUrl) {
+      if (entry.hasContent && !dataUrl) {
         entry.needsUpload = true;
         retryPages.add(entry.pageNumber);
         continue;
@@ -1016,46 +1290,52 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
     saving = true;
     let didShowSaving = false;
     items.forEach(({ entry }) => markSaving(entry, true));
-    if (saveStatusTimer) {
-      clearTimeout(saveStatusTimer);
-    }
+    if (saveStatusTimer) clearTimeout(saveStatusTimer);
     saveStatusTimer = window.setTimeout(() => {
       didShowSaving = true;
-      showStatus("Speichern…");
+      showStatus("Speichern\u2026");
     }, SAVE_STATUS_DELAY);
 
     try {
+      const overlaysPayload = items.map((item) => item.payload);
+      const bodyStr = JSON.stringify({ name: fileName, overlays: overlaysPayload });
+      const isDeleteOnly = overlaysPayload.every((p) => !p.dataUrl);
+      const useKeepalive = isDeleteOnly && bodyStr.length < 60 * 1024;
       const response = await (fetcher || window.fetch)("/api/annotations/save", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: fileName, overlays: items.map((item) => item.payload) }),
-        cache: "no-store"
+        body: bodyStr,
+        cache: "no-store",
+        ...(useKeepalive ? { keepalive: true } : {})
       });
 
       if (!response.ok) {
         let serverMessage = null;
         try {
           const payload = await response.json();
-          if (payload && typeof payload.error === "string") {
-            serverMessage = payload.error;
-          }
+          if (payload && typeof payload.error === "string") serverMessage = payload.error;
         } catch {}
-        const err = new Error(serverMessage ? serverMessage : `HTTP ${response.status}`);
+        const err = new Error(serverMessage || `HTTP ${response.status}`);
         err.status = response.status;
         err.userMessage = serverMessage;
         throw err;
       }
 
       let result = null;
-      try {
-        result = await response.json();
-      } catch {}
+      try { result = await response.json(); } catch {}
 
-      if (didShowSaving) {
-        showStatus();
+      if (didShowSaving) showStatus();
+
+      if (result && typeof result.historyRemaining === 'number') {
+        serverUndoAvailable = result.historyRemaining > 0;
+        updateUndoState();
       }
+
       if (typeof onSaved === "function") {
-        const changedPages = Array.from(new Set(items.map(({ payload }) => payload.pageNumber).filter((page) => Number.isInteger(page) && page > 0)));
+        const changedPages = Array.from(new Set(
+          items.map(({ payload }) => payload.pageNumber)
+            .filter((page) => Number.isInteger(page) && page > 0)
+        ));
         const mtimeValue = Number(result?.mtime);
         const sizeValue = Number(result?.size);
         onSaved({
@@ -1070,14 +1350,9 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
         ? err.userMessage
         : "Speichern fehlgeschlagen";
       showStatus(message, 2000, { toast: true });
-      items.forEach(({ entry }) => {
-        pendingPages.add(entry.pageNumber);
-      });
+      items.forEach(({ entry }) => { pendingPages.add(entry.pageNumber); });
     } finally {
-      if (saveStatusTimer) {
-        clearTimeout(saveStatusTimer);
-        saveStatusTimer = null;
-      }
+      if (saveStatusTimer) { clearTimeout(saveStatusTimer); saveStatusTimer = null; }
       items.forEach(({ entry }) => markSaving(entry, false));
       saving = false;
       if (pendingPages.size) scheduleIdleFlush();
@@ -1089,33 +1364,65 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
     entry.overlay.classList.toggle("is-saving", flag);
   }
 
+  let undoInProgress = false;
+
   async function undoLastStroke() {
+    if (undoInProgress) return;
     if (!canUndo()) {
-      showStatus("Nichts zum Rückgängig machen", 1200);
+      showStatus("Nichts zum R\u00FCckg\u00E4ngig machen", 1200);
       return;
     }
-    if (undoPendingStroke()) return;
-    await undoPreviousVersion();
+    if (undoLocalSnapshot()) return;
+    undoInProgress = true;
+    try {
+      await undoPreviousVersion();
+    } finally {
+      undoInProgress = false;
+    }
   }
 
-  function undoPendingStroke() {
-    const pageOrder = lastActivePage ? [lastActivePage, ...Array.from(pages.keys()).filter((n) => n !== lastActivePage).reverse()] : Array.from(pages.keys()).reverse();
+  // Restore the most recent history snapshot on the most recently active page.
+  // Returns true if a local undo was performed, false if no local history remains.
+  function undoLocalSnapshot() {
+    const currentPage = window.state?.viewer?.currentPage;
+    const candidates = [];
+    if (currentPage && pages.has(currentPage)) candidates.push(currentPage);
+    if (lastActivePage && lastActivePage !== currentPage && pages.has(lastActivePage)) candidates.push(lastActivePage);
+    const remaining = Array.from(pages.keys()).filter((n) => !candidates.includes(n)).reverse();
+    const pageOrder = [...candidates, ...remaining];
+
     for (const pageNumber of pageOrder) {
       const entry = pages.get(pageNumber);
-      if (!entry || !entry.actions.length) continue;
-      const action = entry.actions.pop();
-      if (action) entry.redo.push(action);
-      entry.dirty = entry.actions.length > 0;
+      if (!entry || !entry.history.length) continue;
+      if (!entry.storageCanvas || !entry.storageCtx) continue;
+
+      // Capture current state for redo
+      let currentSnap = null;
+      try {
+        currentSnap = entry.storageCtx.getImageData(
+          0, 0, entry.storageCanvas.width, entry.storageCanvas.height
+        );
+      } catch {}
+
+      const snapshot = entry.history.pop();
+      try {
+        entry.storageCtx.putImageData(snapshot, 0, 0);
+      } catch {
+        return false;
+      }
+
+      if (currentSnap) entry.redoStack.push(currentSnap);
+
+      entry.hasContent = imageDataHasContent(snapshot);
+      entry.dirty = entry.hasContent;
       entry.needsUpload = true;
-      entry.overlayNeedsFullRedraw = true;
       entry.activePointers.clear();
-      renderAllFromActions(entry);
+      syncCommitFromStorage(entry);
       redrawOverlay(entry);
       queueSave(pageNumber);
-      const message = action?.type === "clear" ? "Leeren rückgängig" : "Notiz entfernt";
-      setLastAction("Rückgängig");
+      setLastAction("R\u00FCckg\u00E4ngig");
       updateUndoState();
-      showStatus(message, 1200);
+      showStatus("Aktion r\u00FCckg\u00E4ngig", 1200);
       return true;
     }
     return false;
@@ -1123,7 +1430,7 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
 
   async function undoPreviousVersion() {
     if (!fileName) {
-      showStatus("Keine Datei ausgewählt", 1400);
+      showStatus("Keine Datei ausgew\u00E4hlt", 1400);
       return;
     }
     if (saving) {
@@ -1131,7 +1438,7 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
       return;
     }
 
-    showStatus("Vorherige Version laden…");
+    showStatus("Vorherige Version laden\u2026");
     try {
       const response = await (fetcher || window.fetch)("/api/annotations/undo", {
         method: "POST",
@@ -1144,13 +1451,11 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
         serverUndoAvailable = false;
         updateUndoState();
         updateStatusLine();
-        showStatus("Keine ältere Version vorhanden", 1600);
+        showStatus("Originalversion \u2014 kein weiteres R\u00FCckg\u00E4ngig m\u00F6glich", 2200);
         return;
       }
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
       const payload = await response.json();
       const snapshots = Array.isArray(payload?.pages) ? payload.pages : [];
@@ -1167,18 +1472,15 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
 
       pendingPages.clear();
       pendingSince = null;
-      if (saveTimer) {
-        clearTimeout(saveTimer);
-        saveTimer = null;
-      }
+      if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
       if (idleCallback && typeof window.cancelIdleCallback === "function") {
         window.cancelIdleCallback(idleCallback);
         idleCallback = null;
       }
 
       pages.forEach((entry, pageNumber) => {
-        entry.actions = [];
-        entry.redo = [];
+        entry.history = [];
+        entry.redoStack = [];
         entry.activePointers.clear();
         entry.dirty = false;
         entry.overlayDirty = false;
@@ -1188,17 +1490,11 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
           entry.overlayCtx.clearRect(0, 0, entry.overlay.width, entry.overlay.height);
         }
         const snapshot = snapshotMap.get(pageNumber);
-        if (snapshot) {
-          primeCommittedImage(pageNumber, snapshot);
-        } else {
-          primeCommittedImage(pageNumber, { pageNumber, dataUrl: null });
-        }
+        primeCommittedImage(pageNumber, snapshot || { pageNumber, dataUrl: null });
       });
 
       snapshotMap.forEach((snapshot, pageNumber) => {
-        if (!pages.has(pageNumber)) {
-          primeCommittedImage(pageNumber, snapshot);
-        }
+        if (!pages.has(pageNumber)) primeCommittedImage(pageNumber, snapshot);
       });
 
       lastActivePage = null;
@@ -1250,40 +1546,33 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
     let targetPage = lastActivePage;
     if (!targetPage) {
       targetPage = getMostVisiblePageNumber();
-      if (targetPage) {
-        lastActivePage = targetPage;
-      }
+      if (targetPage) lastActivePage = targetPage;
     }
 
-    if (!targetPage) {
-      showStatus("Keine Seite im Fokus", 1400);
-      return;
-    }
+    if (!targetPage) { showStatus("Keine Seite im Fokus", 1400); return; }
 
     const entry = pages.get(targetPage);
-    if (!entry) {
-      showStatus("Seite nicht geladen", 1400);
-      return;
-    }
-    const hasOverlayContent = entry.activePointers && entry.activePointers.size > 0;
-    const hasVisibleContent = entry.hasCommittedContent || hasOverlayContent;
+    if (!entry) { showStatus("Seite nicht geladen", 1400); return; }
 
-    if (!hasVisibleContent) {
-      showStatus("Keine Notizen vorhanden", 1200);
-      return;
-    }
+    const hasVisibleContent = entry.hasContent || (entry.activePointers && entry.activePointers.size > 0);
+    if (!hasVisibleContent) { showStatus("Keine Notizen vorhanden", 1200); return; }
 
-    entry.actions.push({ type: "clear", ts: Date.now() });
-    entry.redo = [];
+    ensureStorageCanvas(entry);
+    pushHistory(entry);
+
     entry.activePointers.clear();
-    entry.overlayNeedsFullRedraw = true;
+    if (entry.storageCtx && entry.storageCanvas) {
+      clearCanvas(entry.storageCtx, entry.storageCanvas);
+    }
+    entry.hasContent = false;
     entry.dirty = true;
     entry.needsUpload = true;
+    entry.overlayNeedsFullRedraw = true;
 
-    renderAllFromActions(entry);
+    syncCommitFromStorage(entry);
     redrawOverlay(entry);
 
-    queueSave(entry.pageNumber);
+    queueSave(entry.pageNumber, { immediate: true });
     setLastAction("Seite geleert");
     updateUndoState();
     showStatus("Seite geleert", 1600);
@@ -1291,26 +1580,19 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
 
   function setActiveState(next, opts = {}) {
     const changed = opts.force ? true : next !== active;
-    // console.log('[Annotation] setActiveState called - next:', next, 'current active:', active, 'changed:', changed, 'opts:', opts);
     if (!changed) return;
     active = next;
     document.body.classList.toggle("annotations-active", active);
-    if (!active) {
-      clearPenPointers();
-    }
-    // console.log('[Annotation] Active state changed to:', active);
+    if (!active) clearPenPointers();
     updateToggleUI();
     refreshOverlayActivation();
     if (!opts.silent) {
       if (active) showStatus("Notizen aktiv", 1400);
       else updateStatus();
     }
-
-    // Auto-close when controls are minimized (class toggled elsewhere)
     const controlsRoot = document.getElementById("controls");
     if (controlsRoot && controlsRoot.classList.contains("controls-minimized") && active) {
       setActiveState(false, { silent: true, force: true });
-      return;
     }
   }
 
@@ -1319,6 +1601,7 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
     if (options.tool === tool) return;
     options.tool = tool;
     updateToolButtons();
+    refreshOverlayActivation();
   }
 
   function selectColor(color) {
@@ -1335,23 +1618,16 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
 
   function updateToggleUI() {
     if (!controls.toggle) return;
-
-    // console.log('[Annotation] updateToggleUI - active:', active);
-
     if (active) {
       controls.toggle.classList.add("annotation-toggle-active");
     } else {
       controls.toggle.classList.remove("annotation-toggle-active");
     }
     controls.toggle.setAttribute("aria-pressed", active ? "true" : "false");
-    
-    // Toolbar visibility - SIMPLE: just toggle is-open class
     if (controls.toolbar) {
-      // console.log('[Annotation] Toolbar element:', controls.toolbar);
       if (active) {
         controls.toolbar.classList.add("is-open");
         controls.toolbar.style.display = "flex";
-        // console.log('[Annotation] Added is-open class. Toolbar classes:', controls.toolbar.className);
       } else {
         controls.toolbar.classList.remove("is-open");
         controls.toolbar.style.display = "none";
@@ -1448,7 +1724,7 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
 
   function hasLocalUndo() {
     for (const entry of pages.values()) {
-      if (entry.actions && entry.actions.length) return true;
+      if (entry.history && entry.history.length) return true;
     }
     return false;
   }
@@ -1470,7 +1746,7 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
     if (statusOverride) {
       text = statusOverride;
     } else if (!canUndo()) {
-      text = "Nichts zum Rückgängig machen";
+      text = "Nichts zum R\u00FCckg\u00E4ngig machen";
     } else if (lastActionLabel) {
       text = `Letzte Aktion: ${lastActionLabel}`;
     }
@@ -1492,9 +1768,7 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
     }
     statusOverride = message;
     updateStatusLine();
-    if (opts.toast) {
-      updateStatus(message);
-    }
+    if (opts.toast) updateStatus(message);
     if (delay && delay > 0) {
       statusResetTimer = window.setTimeout(() => {
         statusResetTimer = null;
@@ -1533,7 +1807,7 @@ export function createAnnotationManager({ state, updateStatus, fetcher, onSaved 
       canUndo: canUndo()
     }),
     clearRedo: () => {
-      pages.forEach((entry) => { entry.redo = []; });
+      pages.forEach((entry) => { entry.redoStack = []; });
     }
   };
 

@@ -397,20 +397,21 @@
               </svg>
             </button>
           </div>
-          <!-- Expandierte Buttons (Zurück + X nebeneinander) -->
+          <!-- Expandierte Buttons (Zurück + Minimieren nebeneinander) -->
           <div class="expanded-buttons">
             <!-- Zurück Button -->
-            <button id="btnBack" class="expanded-btn" type="button" title="Zurück zur Bibliothek" aria-label="Zurück zur Bibliothek">
+            <button id="btnBack" class="expanded-btn expanded-btn-labeled" type="button" title="Zurück zur Bibliothek" aria-label="Zurück zur Bibliothek">
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="20" height="20">
                 <path d="M19 12H5M12 19l-7-7 7-7"/>
               </svg>
+              <span class="expanded-btn-label">Zurück</span>
             </button>
-            <!-- Close Button (X) -->
-            <button id="btnCloseExpanded" class="expanded-btn" type="button" title="Schließen" aria-label="Schließen">
+            <!-- Minimize Button (Chevron Down — collapses menu) -->
+            <button id="btnCloseExpanded" class="expanded-btn expanded-btn-labeled" type="button" title="Menü minimieren" aria-label="Menü minimieren">
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="20" height="20">
-                <line x1="18" y1="6" x2="6" y2="18"/>
-                <line x1="6" y1="6" x2="18" y2="18"/>
+                <polyline points="6 9 12 15 18 9"/>
               </svg>
+              <span class="expanded-btn-label">Menü ▾</span>
             </button>
           </div>
         </div>
@@ -419,40 +420,19 @@
         <div class="controls-content">
         <div id="annotationControls">
           <div id="annotationToolbar" class="annotation-toolbar" aria-hidden="true">
+            <div class="annotation-toolbar-drag-handle" title="Verschieben">⠿</div>
+            <div class="annotation-toolbar-inner">
             <div id="annotationPanel" class="annotation-panel" aria-label="PDF-Notizen">
-              <div class="annotation-section">
-                <span class="section-label">Tool</span>
+              <!-- Primary row: core tools always visible -->
+              <div class="annotation-primary-row">
                 <div class="annotation-tools-row">
                   <button type="button" class="annotation-tool-btn" data-tool="pen" aria-pressed="true" title="Stift">✏️</button>
                   <button type="button" class="annotation-tool-btn" data-tool="highlighter" aria-pressed="false" title="Marker">🖍️</button>
+                  <button type="button" class="annotation-tool-btn" data-tool="eraser" aria-pressed="false" title="Radierer">🧹</button>
                 </div>
-              </div>
-              <div class="annotation-section">
-                <span class="section-label">Farbe</span>
-                <div id="annotationColors" class="annotation-colors" role="radiogroup" aria-label="Farben"></div>
-              </div>
-              <div class="annotation-section annotation-size">
-                <label class="section-label" for="annotationSize">Stärke</label>
-                <div class="range-wrapper">
-                  <input id="annotationSize" type="range" min="1" max="8" step="1" value="3" />
-                  <span id="annotationSizeValue">3</span>
-                </div>
-              </div>
-              <div class="annotation-section">
-                <span class="section-label">Preset</span>
-                <div class="annotation-preset-row">
-                  <button id="btnAnnotationPresetApply" type="button" class="btn btn-secondary" title="Preset anwenden">Preset anwenden</button>
-                  <button id="btnAnnotationPresetSave" type="button" class="btn btn-ghost" title="Preset speichern">Preset speichern</button>
-                </div>
-              </div>
-              <div class="annotation-section">
-                <span class="section-label">Eingabe</span>
-                <div class="annotation-input-row" role="group" aria-label="Eingabemodus">
-                  <button id="btnAnnotationInputPenOnly" type="button" class="annotation-input-btn" aria-pressed="true" title="Nur Stift">Stift</button>
-                  <button id="btnAnnotationInputBoth" type="button" class="annotation-input-btn" aria-pressed="false" title="Finger + Stift">Finger+Stift</button>
-                </div>
-              </div>
-              <div class="annotation-section">
+                <div class="annotation-toolbar-separator"></div>
+                <div id="annotationColors" class="annotation-colors annotation-colors-compact" role="radiogroup" aria-label="Farben"></div>
+                <div class="annotation-toolbar-separator"></div>
                 <div class="annotation-actions-row">
                   <button id="btnAnnotationUndo" type="button" class="btn btn-secondary btn-icon" title="Rückgängig">
                     <span>↺</span>
@@ -461,14 +441,41 @@
                     <span>🗑️</span>
                   </button>
                 </div>
+                <div class="annotation-toolbar-separator"></div>
+                <button id="btnAnnotationMore" type="button" class="btn btn-ghost btn-icon annotation-more-btn" title="Mehr Optionen" aria-expanded="false">⋯</button>
               </div>
-              <div class="annotation-section annotation-status">
-                <div class="annotation-status-row">
-                  <span id="annotationStatusLine" class="annotation-status-line"></span>
-                  <span id="annotationPencilBadge" class="annotation-pencil-badge hidden">Pencil aktiv</span>
+              <!-- Secondary row: expanded options (hidden by default) -->
+              <div class="annotation-secondary-row" id="annotationSecondaryRow" style="display:none;">
+                <div class="annotation-section annotation-size">
+                  <label class="section-label" for="annotationSize">Stärke</label>
+                  <div class="range-wrapper">
+                    <input id="annotationSize" type="range" min="1" max="8" step="1" value="3" />
+                    <span id="annotationSizeValue">3</span>
+                  </div>
+                </div>
+                <div class="annotation-section">
+                  <span class="section-label">Preset</span>
+                  <div class="annotation-preset-row">
+                    <button id="btnAnnotationPresetApply" type="button" class="btn btn-secondary" title="Preset anwenden">Preset</button>
+                    <button id="btnAnnotationPresetSave" type="button" class="btn btn-ghost" title="Preset speichern">Speichern</button>
+                  </div>
+                </div>
+                <div class="annotation-section">
+                  <span class="section-label">Eingabe</span>
+                  <div class="annotation-input-row" role="group" aria-label="Eingabemodus">
+                    <button id="btnAnnotationInputPenOnly" type="button" class="annotation-input-btn" aria-pressed="true" title="Nur Stift">Stift</button>
+                    <button id="btnAnnotationInputBoth" type="button" class="annotation-input-btn" aria-pressed="false" title="Finger + Stift">Finger+Stift</button>
+                  </div>
+                </div>
+                <div class="annotation-section annotation-status">
+                  <div class="annotation-status-row">
+                    <span id="annotationStatusLine" class="annotation-status-line"></span>
+                    <span id="annotationPencilBadge" class="annotation-pencil-badge hidden">Pencil aktiv</span>
+                  </div>
                 </div>
               </div>
             </div>
+            </div><!-- /.annotation-toolbar-inner -->
           </div>
         </div>
         <div class="control-panel">
@@ -1558,6 +1565,15 @@
     });
     annotations.initControls();
     window.annotations = annotations;
+
+    // Flush any pending annotation saves (e.g. a clear that was queued) when the
+    // browser unloads the page.  pagehide fires for both reload and navigation and
+    // works with the bfcache; the keepalive fetch in flushSaves ensures the delete
+    // request completes even after the page tears down.
+    window.addEventListener("pagehide", () => {
+      try { annotations.flushSaves({ force: true }); } catch {}
+    });
+
     setupAnnotationPrefsUI();
 
     state.viewer.zoom = loadStoredZoom(false); // Startet immer im Single Mode
@@ -1648,10 +1664,21 @@
         if (zoomControls.display) {
           zoomControls.display.textContent = `${percent}%`;
         }
+        // Disable zoom buttons at limits
+        const clamped = clampZoom(activeZoom);
+        if (zoomControls.btnIn) {
+          zoomControls.btnIn.disabled = (clamped >= MAX_ZOOM);
+        }
+        if (zoomControls.btnOut) {
+          zoomControls.btnOut.disabled = (clamped <= MIN_ZOOM);
+        }
       }
 
       function adjustViewerZoom(delta, { immediate = false } = {}) {
-        setViewerZoom(state.viewer.zoom + delta, { immediate });
+        const current = state.viewer.zoom;
+        if (delta > 0 && current >= MAX_ZOOM) return;
+        if (delta < 0 && current <= MIN_ZOOM) return;
+        setViewerZoom(current + delta, { immediate });
       }
 
       function adjustScrollForZoom(prevZoom, newZoom, focal) {
@@ -1721,6 +1748,9 @@
               overlayLayers.forEach((layer) => {
                 layer.style.width = `${scaledWidth}px`;
                 layer.style.height = `${scaledHeight}px`;
+                // Hide during preview to prevent double-render flash
+                layer.style.opacity = '0';
+                layer.dataset.zoomPreviewHidden = '1';
               });
               continue;
             }
@@ -1737,6 +1767,9 @@
             overlayLayers.forEach((layer) => {
               layer.style.width = `${scaledWidth}px`;
               layer.style.height = `${scaledHeight}px`;
+              // Hide during preview to prevent double-render flash
+              layer.style.opacity = '0';
+              layer.dataset.zoomPreviewHidden = '1';
             });
 
             if (isDual) continue; // Dual mode doesn't use block heights/labels
@@ -1793,6 +1826,18 @@
       function setViewerZoom(value, { immediate = false, preview = false, focal = null, force = false } = {}) {
         const clamped = clampZoom(value);
         const focalPoint = focal || getViewerCenterFocal();
+
+        // Hide ONLY minimized controls box when zoomed beyond 1.0
+        // Expanded toolbar must never be hidden by zoom
+        const ctrl = document.getElementById('controls');
+        if (ctrl) {
+          if (ctrl.classList.contains('controls-minimized') && clamped > 1.01) {
+            ctrl.classList.add('controls-zoom-hidden');
+          } else if (clamped <= 1.01) {
+            // Always remove when zoomed back out, regardless of current state
+            ctrl.classList.remove('controls-zoom-hidden');
+          }
+        }
 
         if (preview) {
           const prevPreview = state.viewer.zoomPreview ?? state.viewer.zoom;
@@ -2886,78 +2931,12 @@
       }
 
       function renderLibraryQuickAccess() {
+        // "Zuletzt gespielt" section removed — not needed by pianists
         const host = document.querySelector('#libraryQuickAccess');
         if (!host) return;
-        const recentList = loadRecentList().slice(0, 8).map(getQuickAccessItemMeta);
-        const recentCollapsed = state.library.quickAccess?.recentCollapsed === true;
-        host.innerHTML = `
-          <div class="quick-access-row" data-quick-section="recent" data-collapsed="${recentCollapsed ? 'true' : 'false'}">
-            <div class="quick-access-header">
-              <h3>Zuletzt gespielt</h3>
-              <div class="quick-access-actions">
-                <button type="button" class="quick-access-toggle" data-action="toggle-recent">${recentCollapsed ? 'Einblenden' : 'Ausblenden'}</button>
-                ${recentCollapsed ? '' : '<button type="button" class="quick-access-link" data-quick-target="recent">Ansehen</button>'}
-              </div>
-            </div>
-            <div class="quick-access-body">
-              <div class="quick-access-scroller">
-                ${buildQuickAccessCards(recentList, { emptyText: 'Noch keine zuletzt gespielten Titel.' })}
-              </div>
-            </div>
-          </div>
-        `;
+        host.innerHTML = '';
+        host.style.display = 'none';
 
-        const toggleBtn = host.querySelector('[data-action="toggle-recent"]');
-        if (toggleBtn) {
-          toggleBtn.addEventListener('click', async () => {
-            const next = !(state.library.quickAccess?.recentCollapsed === true);
-            if (!state.library.quickAccess) state.library.quickAccess = { recentCollapsed: false };
-            state.library.quickAccess.recentCollapsed = next;
-            renderLibraryQuickAccess();
-            const res = await setLibraryPrefs({ quickAccess: { recentCollapsed: next } });
-            if (!res) {
-              showToast('Einstellung konnte nicht gespeichert werden', 2200);
-            }
-          });
-        }
-
-        host.querySelectorAll('[data-open-file]').forEach((btn) => {
-          const fileName = btn.getAttribute('data-open-file');
-          let moved = false;
-          let startX = 0;
-          let startY = 0;
-          btn.addEventListener('pointerdown', (ev) => {
-            if (ev.pointerType !== 'touch') return;
-            moved = false;
-            startX = ev.clientX;
-            startY = ev.clientY;
-          });
-          btn.addEventListener('pointermove', (ev) => {
-            if (ev.pointerType !== 'touch') return;
-            const dx = Math.abs(ev.clientX - startX);
-            const dy = Math.abs(ev.clientY - startY);
-            if (dx + dy > 10) moved = true;
-          });
-          btn.addEventListener('click', (ev) => {
-            if (moved) {
-              moved = false;
-              return;
-            }
-            ev.preventDefault();
-            if (!fileName) return;
-            acquireWakeLockSync();
-            history.replaceState(null, '', `/?file=${encodeURIComponent(fileName)}`);
-            renderViewer(fileName);
-          });
-        });
-
-        host.querySelectorAll('[data-quick-target]').forEach((btn) => {
-          const target = btn.getAttribute('data-quick-target');
-          btn.addEventListener('click', () => {
-            const section = host.querySelector(`[data-quick-section="${target}"]`);
-            section?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-          });
-        });
       }
 
       function renderLibrarySidebar({ activeMode }) {
@@ -3938,11 +3917,11 @@
           // 1. FAVORITEN CHIP (als erstes!)
           const favActive = L.onlyFavorites;
           const favCls = favActive
-            ? "bg-amber-500/25 border-amber-400/60 text-amber-300 shadow-sm"
-            : "bg-amber-500/8 border-amber-500/25 text-amber-400/70 hover:border-amber-500/40 hover:text-amber-400";
+            ? "bg-amber-500/30 border-2 border-amber-400/70 text-amber-200 shadow-md ring-2 ring-amber-400/25"
+            : "bg-amber-500/8 border border-amber-500/25 text-amber-400/60 hover:border-amber-500/40 hover:text-amber-400";
           const favCount = state.library.favorites?.size || 0;
-          chips.push(`<button id="filterFavChip" class="category-pill px-3 py-1.5 rounded-full border flex items-center gap-2 text-sm ${favActive ? 'font-semibold' : 'font-medium'} ${favCls}" data-cat="__favorites" title="Nur Favoriten anzeigen${activeId ? ' (mit Kategorie kombinierbar)' : ''}">
-              <span class="text-base leading-none">★</span>
+          chips.push(`<button id="filterFavChip" class="category-pill px-3 py-1.5 rounded-full flex items-center gap-2 text-sm ${favActive ? 'font-bold' : 'font-medium'} ${favCls}" data-cat="__favorites" title="Nur Favoriten anzeigen${activeId ? ' (mit Kategorie kombinierbar)' : ''}">
+              <span class="text-base leading-none">${favActive ? '✓' : '★'}</span>
               <span>Favoriten</span>
               ${favCount > 0 ? `<span class="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full text-xs font-bold ${favActive ? 'bg-amber-400/90 text-neutral-900' : 'bg-amber-500/20 text-amber-300'}">${favCount}</span>` : ''}
             </button>`);
@@ -3952,21 +3931,21 @@
           
           // 2. "Alle" Chip (cleaner design) - only active when no favorites AND no category
           const allActive = !activeId && !L.onlyFavorites;
-          chips.push(`<button class="category-pill px-3 py-1.5 rounded-full border flex items-center gap-2 text-sm ${allActive ? 'font-semibold shadow-sm' : 'font-medium'}" data-cat="__all" style="background:${allActive ? 'rgba(148,163,184,0.22)' : 'rgba(148,163,184,0.08)'};border-color:${allActive ? 'rgba(148,163,184,0.5)' : 'rgba(148,163,184,0.2)'};color:${allActive ? '#f1f5f9' : '#94a3b8'};">
-              <span class="text-base leading-none">◎</span>
+          chips.push(`<button class="category-pill px-3 py-1.5 rounded-full flex items-center gap-2 text-sm ${allActive ? 'font-bold shadow-md' : 'font-medium'}" data-cat="__all" style="background:${allActive ? 'rgba(148,163,184,0.28)' : 'rgba(148,163,184,0.06)'};border:${allActive ? '2px solid rgba(148,163,184,0.6)' : '1px solid rgba(148,163,184,0.18)'};color:${allActive ? '#f1f5f9' : 'rgba(148,163,184,0.6)'};${allActive ? 'box-shadow:0 0 0 2px rgba(148,163,184,0.2);' : ''}">
+              <span class="text-base leading-none">${allActive ? '✓' : '◎'}</span>
               <span>Alle</span>
             </button>`);
 
           // 3. Kategorie Chips (optimized colors) - can be active WITH favorites
           for (const cat of categories) {
             const isActive = cat.id === activeId;
-            const bg = isActive ? `${cat.color}28` : `${cat.color}12`;
-            const border = isActive ? `${cat.color}60` : `${cat.color}30`;
-            const text = isActive ? '#f8fafc' : cat.color;
-            const fontWeight = isActive ? 'font-semibold' : 'font-medium';
-            const extraClass = isActive ? 'shadow-sm' : '';
-            chips.push(`<button class="category-pill px-3 py-1.5 rounded-full border flex items-center gap-2 text-sm ${fontWeight} ${extraClass}" data-cat="${cat.id}" style="background:${bg};border-color:${border};color:${text};" title="${cat.name}${L.onlyFavorites ? ' (kombiniert mit Favoriten)' : ''}">
-                <span class="text-base leading-none">${cat.icon || '♪'}</span>
+            const bg = isActive ? `${cat.color}48` : `${cat.color}0a`;
+            const borderStyle = isActive ? `2px solid ${cat.color}90` : `1px solid ${cat.color}25`;
+            const text = isActive ? '#f8fafc' : `${cat.color}99`;
+            const fontWeight = isActive ? 'font-bold' : 'font-medium';
+            const extraShadow = isActive ? `box-shadow:0 0 0 2px ${cat.color}30, 0 2px 8px -2px rgba(0,0,0,0.4);` : '';
+            chips.push(`<button class="category-pill px-3 py-1.5 rounded-full flex items-center gap-2 text-sm ${fontWeight}" data-cat="${cat.id}" style="background:${bg};border:${borderStyle};color:${text};${extraShadow}" title="${cat.name}${L.onlyFavorites ? ' (kombiniert mit Favoriten)' : ''}">
+                <span class="text-base leading-none">${isActive ? '✓' : (cat.icon || '♪')}</span>
                 <span>${cat.name}</span>
               </button>`);
           }
@@ -3978,8 +3957,8 @@
           
           // 4. "Ohne" Chip - can be active WITH favorites
           const noneActive = activeId === 'none';
-          chips.push(`<button class="category-pill px-3 py-1.5 rounded-full border flex items-center gap-2 text-sm ${noneActive ? 'font-semibold shadow-sm' : 'font-medium'}" data-cat="none" style="background:${noneActive ? 'rgba(148,163,184,0.22)' : 'rgba(148,163,184,0.08)'};border-color:${noneActive ? 'rgba(148,163,184,0.5)' : 'rgba(148,163,184,0.2)'};color:${noneActive ? '#f1f5f9' : '#94a3b8'};" title="Ohne Kategorie${L.onlyFavorites ? ' (kombiniert mit Favoriten)' : ''}">
-                <span class="text-base leading-none">◌</span>
+          chips.push(`<button class="category-pill px-3 py-1.5 rounded-full flex items-center gap-2 text-sm ${noneActive ? 'font-bold shadow-md' : 'font-medium'}" data-cat="none" style="background:${noneActive ? 'rgba(148,163,184,0.28)' : 'rgba(148,163,184,0.06)'};border:${noneActive ? '2px solid rgba(148,163,184,0.6)' : '1px solid rgba(148,163,184,0.18)'};color:${noneActive ? '#f1f5f9' : 'rgba(148,163,184,0.5)'};${noneActive ? 'box-shadow:0 0 0 2px rgba(148,163,184,0.2);' : ''}" title="Ohne Kategorie${L.onlyFavorites ? ' (kombiniert mit Favoriten)' : ''}">
+                <span class="text-base leading-none">${noneActive ? '✓' : '◌'}</span>
                 <span>Ohne</span>
               </button>`);
 
@@ -7805,6 +7784,18 @@
               pinchState.focal = computeFocal(e.touches);
 
               state.viewer.autoScroll.userAdjusting = true;
+
+              // Auto-hide minimized controls during pinch zoom
+              const ctrl = document.getElementById('controls');
+              if (ctrl && ctrl.classList.contains('controls-minimized')) {
+                ctrl.classList.add('controls-zoom-hidden');
+                // Clear any pending show timer
+                if (state.viewer._controlsShowTimer) {
+                  clearTimeout(state.viewer._controlsShowTimer);
+                  state.viewer._controlsShowTimer = null;
+                }
+              }
+              state.viewer.pinchActive = true;
             }
           };
 
@@ -7844,6 +7835,9 @@
             state.viewer.autoScroll.userAdjusting = false;
             // Set cooldown to prevent tap-to-page from firing after pinch
             state.viewer.pinchCooldownUntil = Date.now() + 400;
+            state.viewer.pinchActive = false;
+
+            // controls-zoom-hidden is now managed solely by setViewerZoom based on zoom level
           };
 
           const handleTouchEnd = (e) => {
@@ -7865,6 +7859,9 @@
             state.viewer.autoScroll.userAdjusting = false;
             // Set cooldown to prevent tap-to-page from firing after pinch
             state.viewer.pinchCooldownUntil = Date.now() + 400;
+            state.viewer.pinchActive = false;
+
+            // controls-zoom-hidden is now managed solely by setViewerZoom based on zoom level
           };
 
           targetContainer.addEventListener('touchstart', handleTouchStart, { passive: false, capture: true });
@@ -8059,11 +8056,85 @@
           controls.classList.add('controls-minimized');
         }
       }, { passive: true });
+
+      // Tap/touch anywhere: reliably restore minimized controls if hidden
+      // Uses touchstart on document (not pointerup on viewerEl) — fires reliably on iOS
+      // even during/after pinch, even when annotation canvas has pointer capture
+      let _zoomedHideTimer = null;
+      const _showControlsAfterZoom = () => {
+        // Don't interfere while a pinch is in progress
+        if (state.viewer.pinchActive) return;
+        const ctrl = document.getElementById('controls');
+        if (!ctrl) return;
+        ctrl.classList.remove('controls-zoom-hidden');
+        // If still zoomed, re-hide after 3s of inactivity
+        if (_zoomedHideTimer) clearTimeout(_zoomedHideTimer);
+        if ((state.viewer.zoomPreview ?? state.viewer.zoom) > 1.01) {
+          _zoomedHideTimer = setTimeout(() => {
+            _zoomedHideTimer = null;
+            const c = document.getElementById('controls');
+            if (c && c.classList.contains('controls-minimized')) {
+              if ((state.viewer.zoomPreview ?? state.viewer.zoom) > 1.01) {
+                c.classList.add('controls-zoom-hidden');
+              }
+            }
+          }, 3000);
+        }
+      };
+      document.addEventListener('touchstart', _showControlsAfterZoom, { passive: true });
+      document.addEventListener('mousemove', _showControlsAfterZoom, { passive: true });
+      // Also clear zoom-hide immediately whenever zoom resets to 1.0
+      // (already handled in setViewerZoom, this is a safety net)
+
+      // Desktop: auto-hide expanded controls bar on mouse idle, show on mouse move
+      let _mouseIdleTimer = null;
+      const _resetMouseIdle = () => {
+        const ctrl = document.getElementById('controls');
+        if (!ctrl || ctrl.classList.contains('controls-minimized')) return;
+        // Don't hide while annotation mode is active
+        if (window.annotations && typeof window.annotations.isActive === 'function' && window.annotations.isActive()) {
+          if (_mouseIdleTimer) { clearTimeout(_mouseIdleTimer); _mouseIdleTimer = null; }
+          ctrl.classList.remove('controls-idle-hidden');
+          return;
+        }
+        ctrl.classList.remove('controls-idle-hidden');
+        if (_mouseIdleTimer) clearTimeout(_mouseIdleTimer);
+        _mouseIdleTimer = setTimeout(() => {
+          _mouseIdleTimer = null;
+          const c = document.getElementById('controls');
+          if (c && !c.classList.contains('controls-minimized')) {
+            if (window.annotations && typeof window.annotations.isActive === 'function' && window.annotations.isActive()) return;
+            c.classList.add('controls-idle-hidden');
+          }
+        }, 3000);
+      };
+      document.addEventListener('pointermove', (e) => {
+        if (e.pointerType !== 'mouse') return;
+        _resetMouseIdle();
+      }, { passive: true });
+      // Also reset when mouse moves over the controls bar itself
+      document.getElementById('controls')?.addEventListener('pointermove', _resetMouseIdle, { passive: true });
+      // Start idle timer when viewer opens
+      _resetMouseIdle();
     }
     
     annotations.refreshOverlayActivation();
         await new Promise((resolve) => requestAnimationFrame(resolve));
         computeSpeed();
+
+        // Auto-fullscreen when entering PDF viewer mode
+        try {
+          const alreadyFs = document.fullscreenElement || document.webkitFullscreenElement;
+          if (!alreadyFs) {
+            const docEl = document.documentElement;
+            if (docEl.requestFullscreen) await docEl.requestFullscreen();
+            else if (docEl.webkitRequestFullscreen) await docEl.webkitRequestFullscreen();
+            setTimeout(() => window.dispatchEvent(new Event('resize')), 120);
+          }
+        } catch (fsErr) {
+          // Fullscreen may be blocked by browser policy (requires user gesture) — ignore
+          console.info('Auto-fullscreen not available:', fsErr.message);
+        }
         
         // Initialize jump markers after PDF is loaded
         if (typeof window.JumpMarkers !== 'undefined') {
@@ -8636,11 +8707,14 @@
 
       function clearAnnotationLayers(container) {
         if (!container) return;
-        const pages = container.querySelectorAll('[data-page]');
-        pages.forEach((node) => {
-          const pageNum = Number(node.dataset.page);
+        const nodes = [
+          ...Array.from(container.querySelectorAll('[data-page]')),
+          ...Array.from(container.querySelectorAll('.dual-page'))
+        ];
+        nodes.forEach((node) => {
+          const pageNum = Number(node.dataset.page || node.dataset.renderedPage);
           node.querySelectorAll('.annotation-layer, .annotation-committed').forEach((el) => el.remove());
-          if (Number.isInteger(pageNum) && annotations?.onPageLayerRemoved) {
+          if (Number.isInteger(pageNum) && pageNum > 0 && annotations?.onPageLayerRemoved) {
             annotations.onPageLayerRemoved(pageNum);
           }
         });
@@ -8739,7 +8813,7 @@
         annotations.onPageLayerRemoved(pageNumber);
         annotations.attachPageLayer({
           pageNumber,
-          frame: stage,
+          frame: canvasWrapper,
           canvas,
           pageWidth: unscaled.width,
           pageHeight: unscaled.height,
